@@ -10,3 +10,4 @@ node_modules/
 .next/
 evals/reports/
 .claude/settings.local.json
+dist/

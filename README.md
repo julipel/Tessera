@@ -13,21 +13,27 @@ docs/adr/                     принятые решения + шаблон
 .claude/commands/             /task, /adr, /eval, /review
 .claude/agents/               reviewer, test-writer, frontend, prompt-engineer
 .mcp.json                     Context7 (документация библиотек), Playwright (проверка UI)
-Makefile                      каркас команд (оживает в P1)
+Makefile                      команды проекта (см. CLAUDE.md)
+docker-compose.yml            Postgres, Redis, Qdrant для локальной разработки
+apps/api/                     backend: uv-проект, Python 3.12, FastAPI
+apps/web/                     frontend: Next.js (App Router), pnpm-workspace в корне
 evals/                        формат эталонных диалогов + пример
 packages/contracts/schemas/   место для JSON Schema контрактов
 ```
 
 ## Как начать
 
-1. Требования (WSL/Ubuntu): `git`, `python3`, `make`, Docker, Node.js + pnpm, uv.
+1. Требования (WSL/Ubuntu): `git`, `make`, Docker, uv, Node.js 24 LTS (`.node-version`),
+   pnpm через `corepack enable`. Python 3.12 uv установит сам.
 2. Распакуйте архив в пустую папку проекта (в файловой системе Linux, например `~/projects/`),
    затем `git init && git add . && git commit -m "Стартовый набор"`.
 3. Запустите `claude` в корне. При первом запуске подтвердите MCP-серверы из `.mcp.json`
    и доверие к хукам проекта.
 4. Пройдите P0 (выбор пилота, эталонные диалоги, JSON Schema). Здесь решения за вами,
    Claude Code — помощник.
-5. Дальше по одной задаче: `/task P1-01`, проверить план, подтвердить, `/review`, коммит, `/clear`.
+5. Окружение: `make install` (зависимости по lock-файлам; Python 3.12 uv скачает сам),
+   `make up` (инфраструктура в Docker), `make check` (все проверки).
+6. Дальше по одной задаче: `/task P1-01`, проверить план, подтвердить, `/review`, коммит, `/clear`.
 
 ## Ритм работы
 

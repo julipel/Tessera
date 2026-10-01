@@ -5,14 +5,22 @@ WEB := apps/web
 HAS_API := $(wildcard $(API)/pyproject.toml)
 HAS_WEB := $(wildcard $(WEB)/package.json)
 
-.PHONY: up down check check-fast test lint-py typecheck-py arch lint-web typecheck-web test-web \
+.PHONY: up down ps install check check-fast test lint-py typecheck-py arch lint-web typecheck-web test-web \
         contracts contracts-check migrate migration eval eval-diff seed dev-api dev-web worker
 
+# --wait: команда завершается, когда все сервисы прошли healthcheck
 up:
-	docker compose up -d
+	docker compose up -d --wait
 
 down:
 	docker compose down
+
+ps:
+	docker compose ps
+
+install:
+	cd $(API) && uv sync --locked
+	pnpm install --frozen-lockfile
 
 check-fast: lint-py typecheck-py arch
 
@@ -25,7 +33,7 @@ endif
 
 typecheck-py:
 ifneq ($(HAS_API),)
-	cd $(API) && uv run mypy src
+	cd $(API) && uv run mypy
 endif
 
 arch:
@@ -45,7 +53,7 @@ endif
 
 typecheck-web:
 ifneq ($(HAS_WEB),)
-	cd $(WEB) && pnpm exec tsc --noEmit
+	cd $(WEB) && pnpm run typecheck
 endif
 
 test-web:

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user_input.schema.json",
+  "title": "UserInput",
+  "description": "Ввод пользователя в POST .../messages: текст, нажатие action-кнопки или отправка формы.",
+  "oneOf": [
+    { "$ref": "#/$defs/TextInput" },
+    { "$ref": "#/$defs/ActionInput" },
+    { "$ref": "#/$defs/FormSubmitInput" }
+  ],
+  "$defs": {
+    "TextInput": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string", "minLength": 1 }
+      },
+      "required": ["type", "text"],
+      "additionalProperties": false
+    },
+    "ActionInput": {
+      "type": "object",
+      "description": "Нажатие Action-кнопки компонента (см. components.schema.json).",
+      "properties": {
+        "type": { "const": "action" },
+        "action_id": { "type": "string", "minLength": 1 },
+        "payload": { "type": "object", "default": {} }
+      },
+      "required": ["type", "action_id"],
+      "additionalProperties": false
+    },
+    "FormSubmitInput": {
+      "type": "object",
+      "description": "Отправка формы (component.type=form). Ключи values соответствуют FormField.name.",
+      "properties": {
+        "type": { "const": "form_submit" },
+        "form_id": { "type": "string", "minLength": 1 },
+        "values": { "type": "object" }
+      },
+      "required": ["type", "form_id", "values"],
+      "additionalProperties": false
+    }
+  }
+}

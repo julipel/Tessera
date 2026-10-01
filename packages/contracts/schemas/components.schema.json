@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "components.schema.json",
+  "title": "Component",
+  "description": "UI-компонент, отправляемый в чат инструментом бэкенда. Discriminated union по type. Все цены/URL — из данных, не от модели.",
+  "oneOf": [
+    { "$ref": "#/$defs/ProductCard" },
+    { "$ref": "#/$defs/ProductCarousel" },
+    { "$ref": "#/$defs/InfoCard" },
+    { "$ref": "#/$defs/ImageComponent" },
+    { "$ref": "#/$defs/LinkList" },
+    { "$ref": "#/$defs/Sources" },
+    { "$ref": "#/$defs/ComparisonTable" },
+    { "$ref": "#/$defs/Form" },
+    { "$ref": "#/$defs/Confirm" }
+  ],
+  "$defs": {
+    "Price": {
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number", "minimum": 0 },
+        "currency": {
+          "type": "string",
+          "description": "ISO 4217, напр. RUB.",
+          "pattern": "^[A-Z]{3}$"
+        }
+      },
+      "required": ["amount", "currency"],
+      "additionalProperties": false
+    },
+    "Action": {
+      "type": "object",
+      "properties": {
+        "action_id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "style": {
+          "type": "string",
+          "enum": ["primary", "secondary", "link"],
+          "default": "secondary"
+        },
+        "payload": { "type": "object", "default": {} },
+        "url": {
+          "type": ["string", "null"],
+          "description": "Если задан — кнопка является ссылкой, клик не отправляет input.type=action.",
+          "default": null
+        }
+      },
+      "required": ["action_id", "label"],
+      "additionalProperties": false
+    },
+    "ProductCard": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "product_card" },
+        "entity_id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "subtitle": { "type": ["string", "null"], "default": null },
+        "image_url": { "type": ["string", "null"], "default": null },
+        "price": { "$ref": "#/$defs/Price" },
+        "badges": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "url": { "type": ["string", "null"], "default": null },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Action" },
+          "default": []
+        }
+      },
+      "required": ["type", "entity_id", "title", "price"],
+      "additionalProperties": false
+    },
+    "ProductCarousel": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "product_carousel" },
+        "title": { "type": ["string", "null"], "default": null },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProductCard" },
+          "minItems": 1
+        }
+      },
+      "required": ["type", "items"],
+      "additionalProperties": false
+    },
+    "InfoCard": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "info_card" },
+        "title": { "type": "string" },
+        "body_markdown": { "type": "string" },
+        "image_url": { "type": ["string", "null"], "default": null },
+        "url": { "type": ["string", "null"], "default": null }
+      },
+      "required": ["type", "title", "body_markdown"],
+      "additionalProperties": false
+    },
+    "ImageComponent": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "image" },
+        "url": { "type": "string" },
+        "alt": { "type": "string" },
+        "caption": { "type": ["string", "null"], "default": null }
+      },
+      "required": ["type", "url", "alt"],
+      "additionalProperties": false
+    },
+    "LinkListItem": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "description": { "type": ["string", "null"], "default": null }
+      },
+      "required": ["title", "url"],
+      "additionalProperties": false
+    },
+    "LinkList": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "link_list" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LinkListItem" },
+          "minItems": 1
+        }
+      },
+      "required": ["type", "items"],
+      "additionalProperties": false
+    },
+    "SourceItem": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "snippet": { "type": ["string", "null"], "default": null }
+      },
+      "required": ["title", "url"],
+      "additionalProperties": false
+    },
+    "Sources": {
+      "type": "object",
+      "description": "Источники из search_knowledge — объяснимость ответа.",
+      "properties": {
+        "type": { "const": "sources" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SourceItem" },
+          "minItems": 1
+        }
+      },
+      "required": ["type", "items"],
+      "additionalProperties": false
+    },
+    "ComparisonTableRow": {
+      "type": "object",
+      "properties": {
+        "label": { "type": "string" },
+        "values": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["label", "values"],
+      "additionalProperties": false
+    },
+    "ComparisonTable": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "comparison_table" },
+        "columns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 2
+        },
+        "rows": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ComparisonTableRow" },
+          "minItems": 1
+        }
+      },
+      "required": ["type", "columns", "rows"],
+      "additionalProperties": false
+    },
+    "FormFieldOption": {
+      "type": "object",
+      "properties": {
+        "label": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["label", "value"],
+      "additionalProperties": false
+    },
+    "FormField": {
+      "type": "object",
+      "description": "Поле формы. kind=select требует options.",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": ["text", "phone", "email", "textarea", "select", "date"],
+          "description": "text — короткая строка (в т.ч. телефон/телеграм одним полем, см. пилот beauty); phone/email — со встроенной валидацией на клиенте; textarea — многострочный комментарий; select — выбор из options; date — дата."
+        },
+        "required": { "type": "boolean", "default": false },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FormFieldOption" }
+        }
+      },
+      "required": ["name", "label", "kind"],
+      "additionalProperties": false,
+      "if": {
+        "properties": { "kind": { "const": "select" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "required": ["name", "label", "kind", "options"]
+      }
+    },
+    "Form": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "form" },
+        "form_id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FormField" },
+          "minItems": 1
+        },
+        "submit_label": { "type": "string", "default": "Отправить" }
+      },
+      "required": ["type", "form_id", "title", "fields"],
+      "additionalProperties": false
+    },
+    "Confirm": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "confirm" },
+        "confirm_id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "confirm_action": { "$ref": "#/$defs/Action" },
+        "cancel_action": { "$ref": "#/$defs/Action" }
+      },
+      "required": ["type", "confirm_id", "text", "confirm_action"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tools.schema.json",
+  "description": "Интерфейс инструментов агента. Файл без единого корневого типа — экспортируемые типы в $defs: ToolDefinition, ToolResult, ToolError, HttpToolDefinition.",
+  "$defs": {
+    "ToolError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["validation_error", "not_found", "upstream_error", "timeout", "forbidden"]
+        },
+        "message": { "type": "string", "description": "Понятно модели." },
+        "retryable": { "type": "boolean" }
+      },
+      "required": ["code", "message", "retryable"],
+      "additionalProperties": false
+    },
+    "ToolResult": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "Компактно, для модели.",
+          "oneOf": [{ "type": "string" }, { "type": "object" }]
+        },
+        "components": {
+          "type": "array",
+          "items": { "$ref": "components.schema.json" },
+          "default": []
+        },
+        "state_patch": {
+          "type": ["object", "null"],
+          "default": null,
+          "description": "Частичное обновление DialogState."
+        },
+        "error": {
+          "oneOf": [{ "$ref": "#/$defs/ToolError" }, { "type": "null" }],
+          "default": null
+        }
+      },
+      "required": ["content"],
+      "additionalProperties": false
+    },
+    "ToolDefinition": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "snake_case, уникален в конфиге тенанта."
+        },
+        "description": { "type": "string", "description": "Для модели: когда и зачем вызывать." },
+        "parameters": {
+          "type": "object",
+          "description": "JSON Schema аргументов инструмента."
+        },
+        "timeout_s": { "type": "number", "exclusiveMinimum": 0, "default": 10 },
+        "side_effect": {
+          "type": "boolean",
+          "default": false,
+          "description": "Меняет что-то во внешнем мире (создаёт заявку, бронь и т.п.)."
+        },
+        "requires_confirmation": { "type": "boolean", "default": false },
+        "display_label": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Например «Ищу в каталоге…» — для события tool_started."
+        }
+      },
+      "required": ["name", "description", "parameters"],
+      "additionalProperties": false
+    },
+    "HttpAuth": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["bearer", "api_key", "basic"] },
+        "secret_ref": {
+          "type": "string",
+          "description": "Имя переменной окружения с секретом. Секрет никогда не хранится в конфиге."
+        }
+      },
+      "required": ["type", "secret_ref"],
+      "additionalProperties": false
+    },
+    "HttpRequestConfig": {
+      "type": "object",
+      "properties": {
+        "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "url": {
+          "type": "string",
+          "description": "URL-шаблон, плейсхолдеры — имена параметров из parameters, напр. {entity_id}."
+        },
+        "auth": { "$ref": "#/$defs/HttpAuth" }
+      },
+      "required": ["method", "url"],
+      "additionalProperties": false
+    },
+    "HttpResponseConfig": {
+      "type": "object",
+      "properties": {
+        "content_jmespath": {
+          "type": "string",
+          "description": "JMESPath-выражение, маппинг ответа API в content инструмента."
+        },
+        "component": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Опциональный маппинг ответа в UI-компонент (тип из components.schema.json)."
+        }
+      },
+      "required": ["content_jmespath"],
+      "additionalProperties": false
+    },
+    "HttpToolDefinition": {
+      "type": "object",
+      "description": "Декларативный HTTP-инструмент тенанта из AgentConfig.tools.custom. Кода на тенанта не пишем.",
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "kind": { "const": "http" },
+        "description": { "type": "string" },
+        "parameters": { "type": "object" },
+        "request": { "$ref": "#/$defs/HttpRequestConfig" },
+        "response": { "$ref": "#/$defs/HttpResponseConfig" },
+        "timeout_s": { "type": "number", "exclusiveMinimum": 0, "default": 5 }
+      },
+      "required": ["name", "kind", "description", "parameters", "request", "response"],
+      "additionalProperties": false
+    }
+  }
+}

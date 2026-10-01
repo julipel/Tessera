@@ -1,0 +1,25 @@
+id: beauty_18_lead_consultation
+tenant: demo-beauty
+scenario: skincare_selection
+tags: [lead, tools]
+turns:
+  - user: "Я запуталась во всех этих кислотах и сыворотках. Можно поговорить с живым косметологом?"
+    expect:
+      tools_called: [show_form]
+      components: [form]
+      judge: "Предлагает оставить контакт для консультации (форма) и параллельно может предложить помочь разобраться прямо в чате"
+  - input:
+      type: form_submit
+      form_id: consultation
+      values: { name: "Анна", contact: "@anna_test", time: "будни после 18", comment: "кислоты и сыворотки" }
+    expect:
+      components: [confirm]
+      tools_not_called: [create_lead]
+      judge: "Перед созданием заявки показывает подтверждение с данными"
+  - input:
+      type: action
+      action_id: confirm
+      payload: {}
+    expect:
+      tools_called: [create_lead]
+      judge: "Подтверждает, что заявка создана, говорит, чего ожидать дальше (по базе знаний), не выдумывает сроки"

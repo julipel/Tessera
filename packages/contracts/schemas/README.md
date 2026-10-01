@@ -1,0 +1,35 @@
+# JSON Schema контрактов
+
+Источник истины для связи бэкенда и фронтенда (см. docs/contracts.md). Заполнено в P0-03,
+с поправками под пилот `demo-beauty` (docs/pilot.md): явный enum `kind` для полей формы
+(нужны `text`/`textarea`, не только `phone` — форма `consultation` собирает имя, контакт
+телефоном-или-Telegram одним текстовым полем, время, комментарий) и декларативный
+HTTP-инструмент `HttpToolDefinition` для `check_stock`.
+
+- `envelope.schema.json` — SSE-конверт (без типизации `data`, см. events.schema.json)
+- `events.schema.json` — все события по type: `turn_started`, `text_delta`, `text_done`,
+  `status`, `tool_started`, `tool_finished`, `component`, `suggestions`, `error`, `done`
+- `components.schema.json` — UI-компоненты (`product_card`, `product_carousel`, `info_card`,
+  `image`, `link_list`, `sources`, `comparison_table`, `form`, `confirm`), `Action`, `Price`,
+  `FormField` (kind: text/phone/email/textarea/select/date; `select` требует `options`)
+- `user_input.schema.json` — `text` / `action` / `form_submit`
+- `tools.schema.json` — `ToolDefinition`, `ToolResult`, `ToolError`, `HttpToolDefinition`
+  (декларативный HTTP-инструмент тенанта)
+- `agent_config.schema.json` — конфигурация тенанта целиком (assistant/model/limits/prompt/
+  tools/forms/knowledge/branding)
+
+Файлы ссылаются друг на друга относительными `$ref` (напр. `events.schema.json` →
+`components.schema.json`, `agent_config.schema.json` → `tools.schema.json#/$defs/HttpToolDefinition`
+и `components.schema.json#/$defs/FormField`) — при генерации держать все файлы в этой папке рядом.
+
+Проверено (Draft 2020-12, пакет `jsonschema`): все файлы валидны как схемы, кросс-файловые
+`$ref` разрешаются, примеры из docs/contracts.md и `evals/dialogs/beauty_18_lead_consultation.yaml`
+проходят валидацию, негативные кейсы (неизвестный `type`, `select` без `options`, лишнее поле
+в AgentConfig) корректно отклоняются.
+
+Намеренно не фиксировано в схеме (специфика пилота, а не контракт ядра): атрибуты Entity
+(`skin_types`, `concerns`, `families` и т.п. из docs/pilot.md §3) — они живут в данных каталога
+и в `filterable_attributes`/`slots` конкретного `AgentConfig`, а не в JSON Schema контрактов.
+
+Генерация: `make contracts` (P1-05) → Pydantic v2 (`apps/api`) и TypeScript (`apps/web`).
+Сгенерированный код не редактировать.

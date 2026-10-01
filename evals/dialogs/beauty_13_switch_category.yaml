@@ -1,0 +1,19 @@
+id: beauty_13_switch_category
+tenant: demo-beauty
+scenario: skincare_selection
+tags: [context, gift, skincare]
+turns:
+  - user: "Ищу крем для кожи вокруг глаз, кожа сухая, беспокоят мелкие морщинки"
+    expect:
+      tools_called: [search_catalog]
+      state_contains: { skin_type: dry }
+  - user: "Кстати, ещё нужен подарок сестре, она обожает цветочные ароматы. До 6000"
+    expect:
+      tools_called: [search_catalog]
+      components: [product_carousel]
+      state_contains: { budget: 6000 }
+      judge: "Переключается на подбор аромата для сестры (цветочные, женские/унисекс, до 6000 ₽); не смешивает с параметрами крема"
+  - user: "Хорошо. А по крему для глаз — что посоветуете из первых вариантов?"
+    expect:
+      clarifies: false
+      judge: "Возвращается к кремам для глаз из первой подборки и даёт рекомендацию с учётом сухой кожи и морщинок; бюджет 6000 к крему не применяет"

@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_config.schema.json",
+  "title": "AgentConfig",
+  "description": "Конфигурация тенанта (поле config JSONB таблицы AgentConfig). Вся бизнес-специфика — здесь, не в коде ядра.",
+  "type": "object",
+  "properties": {
+    "assistant": { "$ref": "#/$defs/AssistantConfig" },
+    "model": { "$ref": "#/$defs/ModelsConfig" },
+    "limits": { "$ref": "#/$defs/LimitsConfig" },
+    "prompt": { "$ref": "#/$defs/PromptConfig" },
+    "tools": { "$ref": "#/$defs/ToolsConfig" },
+    "forms": {
+      "type": "object",
+      "description": "Ключ — form_key (используется в show_form и в component.form_id).",
+      "additionalProperties": { "$ref": "#/$defs/FormConfig" },
+      "default": {}
+    },
+    "knowledge": { "$ref": "#/$defs/KnowledgeConfig" },
+    "branding": { "$ref": "#/$defs/BrandingConfig" }
+  },
+  "required": ["assistant", "model", "limits", "prompt", "tools"],
+  "additionalProperties": false,
+  "$defs": {
+    "AssistantConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "language": {
+          "type": "string",
+          "enum": ["auto", "ru", "en", "sv"],
+          "default": "auto"
+        },
+        "greeting": { "type": "string" },
+        "starter_suggestions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "fallback_message": { "type": "string" }
+      },
+      "required": ["name", "greeting", "fallback_message"],
+      "additionalProperties": false
+    },
+    "ModelConfig": {
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string", "enum": ["openai", "anthropic"] },
+        "name": { "type": "string" },
+        "temperature": { "type": "number", "minimum": 0, "maximum": 2, "default": 0.3 }
+      },
+      "required": ["provider", "name"],
+      "additionalProperties": false
+    },
+    "ModelsConfig": {
+      "type": "object",
+      "properties": {
+        "primary": { "$ref": "#/$defs/ModelConfig" },
+        "fallback": {
+          "oneOf": [{ "$ref": "#/$defs/ModelConfig" }, { "type": "null" }],
+          "default": null
+        }
+      },
+      "required": ["primary"],
+      "additionalProperties": false
+    },
+    "LimitsConfig": {
+      "type": "object",
+      "properties": {
+        "max_steps": { "type": "integer", "minimum": 1, "default": 6 },
+        "max_tool_calls_per_step": { "type": "integer", "minimum": 1, "default": 4 },
+        "turn_timeout_s": { "type": "number", "exclusiveMinimum": 0, "default": 60 },
+        "max_tool_retries": { "type": "integer", "minimum": 0, "default": 2 }
+      },
+      "additionalProperties": false
+    },
+    "SlotDefinition": {
+      "type": "object",
+      "description": "Слот сценария (DialogState). Для type=array элементы описывает items.",
+      "properties": {
+        "type": { "type": "string", "enum": ["string", "number", "boolean", "array"] },
+        "description": { "type": "string" },
+        "enum": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Допустимые значения (для string)."
+        },
+        "items": {
+          "type": "object",
+          "description": "Используется при type=array, напр. concerns[] из пилота beauty.",
+          "properties": {
+            "type": { "type": "string", "enum": ["string", "number"] },
+            "enum": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["type"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+    "ScenarioConfig": {
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "description": { "type": "string" },
+        "instructions": { "type": "string" },
+        "slots": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/SlotDefinition" },
+          "default": {}
+        }
+      },
+      "required": ["key", "description", "instructions"],
+      "additionalProperties": false
+    },
+    "PromptConfig": {
+      "type": "object",
+      "properties": {
+        "tenant": {
+          "type": "string",
+          "description": "Tenant-слой промпта: роль, тон, о компании, границы (см. architecture.md §6)."
+        },
+        "scenarios": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ScenarioConfig" },
+          "default": []
+        }
+      },
+      "required": ["tenant"],
+      "additionalProperties": false
+    },
+    "ToolsConfig": {
+      "type": "object",
+      "properties": {
+        "builtin": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "search_knowledge",
+              "search_catalog",
+              "get_entity",
+              "show_entities",
+              "update_dialog_state",
+              "show_form",
+              "create_lead",
+              "handoff_to_human"
+            ]
+          },
+          "default": []
+        },
+        "custom": {
+          "type": "array",
+          "items": { "$ref": "tools.schema.json#/$defs/HttpToolDefinition" },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "FormConfig": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "components.schema.json#/$defs/FormField" },
+          "minItems": 1
+        }
+      },
+      "required": ["title", "fields"],
+      "additionalProperties": false
+    },
+    "KnowledgeSearchConfig": {
+      "type": "object",
+      "properties": {
+        "top_k": { "type": "integer", "minimum": 1, "default": 6 },
+        "rerank": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
+    },
+    "CatalogConfig": {
+      "type": "object",
+      "properties": {
+        "filterable_attributes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Имена полей Entity.attributes, по которым search_catalog принимает фильтры.",
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "KnowledgeConfig": {
+      "type": "object",
+      "properties": {
+        "search_knowledge": { "$ref": "#/$defs/KnowledgeSearchConfig" },
+        "catalog": { "$ref": "#/$defs/CatalogConfig" }
+      },
+      "additionalProperties": false
+    },
+    "BrandingTokens": {
+      "type": "object",
+      "properties": {
+        "primary": { "type": "string" },
+        "radius": { "type": "string" },
+        "font": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "BrandingConfig": {
+      "type": "object",
+      "properties": {
+        "tokens": { "$ref": "#/$defs/BrandingTokens" },
+        "logo_url": { "type": ["string", "null"], "default": null }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,14 @@
+id: beauty_07_fragrance_similar_lighter
+tenant: demo-beauty
+scenario: fragrance_selection
+tags: [fragrance, catalog]
+turns:
+  - user: "Зимой ношу аромат с ванилью, табаком и ромом. Хочу что-то похожее по настроению, но легче, на лето"
+    expect:
+      clarifies: false
+      tools_called: [search_catalog]
+      components: [product_carousel]
+      judge: "Предлагает более лёгкие ароматы (intensity light/moderate, сезон лето) с родственными нотами или семействами (гурманские, амбровые, тёплые древесные) и объясняет связь через ноты из каталога; не придумывает ноты"
+  - user: "А какой из них самый стойкий?"
+    expect:
+      judge: "Отвечает по полю стойкости из данных для показанных вариантов; если данных нет — честно говорит"

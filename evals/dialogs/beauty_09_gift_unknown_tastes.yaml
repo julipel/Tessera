@@ -1,0 +1,20 @@
+id: beauty_09_gift_unknown_tastes
+tenant: demo-beauty
+scenario: gift
+tags: [gift, clarification]
+turns:
+  - user: "Нужен подарок коллеге на день рождения"
+    expect:
+      clarifies: true
+      max_questions: 1
+      judge: "Уточняет бюджет и/или пол коллеги одним вопросом"
+  - user: "Женщина, лет 40, вкусов не знаю. До 3000"
+    expect:
+      tools_called: [search_catalog]
+      components: [product_carousel]
+      state_contains: { budget: 3000 }
+      judge: "Предлагает безопасные универсальные варианты (наборы, нейтральный уход, миниатюры ароматов, сертификат) и объясняет, почему лучше избегать узкоспецифичных средств и ярких ароматов, когда вкусы неизвестны; всё в пределах 3000 ₽"
+  - user: "А упаковать можно?"
+    expect:
+      tools_called: [search_knowledge]
+      judge: "Отвечает про подарочную упаковку по базе знаний"

@@ -1,0 +1,12 @@
+id: beauty_02_skincare_all_info_upfront
+tenant: demo-beauty
+scenario: skincare_selection
+tags: [skincare, context]
+turns:
+  - user: "Комбинированная кожа, расширенные поры и иногда высыпания на подбородке. Нужна сыворотка до 2500 рублей, лёгкая текстура, без отдушек"
+    expect:
+      clarifies: false
+      tools_called: [search_catalog]
+      components: [product_carousel]
+      state_contains: { skin_type: combination, budget: 2500 }
+      judge: "Сразу показывает сыворотки без лишних вопросов; все варианты не дороже 2500 ₽, без отдушек; учитывает поры и высыпания"

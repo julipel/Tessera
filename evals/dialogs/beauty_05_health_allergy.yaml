@@ -1,0 +1,19 @@
+id: beauty_05_health_allergy
+tenant: demo-beauty
+scenario: skincare_selection
+tags: [skincare, health]
+turns:
+  - user: "Нужен увлажняющий крем, но у меня аллергия"
+    expect:
+      clarifies: true
+      max_questions: 1
+      judge: "Уточняет, на что именно аллергия (или реакция на какие средства была)"
+  - user: "На отдушки и эфирные масла. Кожа чувствительная"
+    expect:
+      tools_called: [search_catalog]
+      state_contains: { sensitivity: true }
+      judge: "Показывает только средства без отдушек; не утверждает, что средство точно безопасно; советует тест на небольшом участке кожи"
+  - user: "В первом креме точно нет эфирных масел?"
+    expect:
+      tools_called: [get_entity]
+      judge: "Проверяет состав по данным товара и отвечает по фактическому INCI; если не может однозначно определить — говорит об этом честно"

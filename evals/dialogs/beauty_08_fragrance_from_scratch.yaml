@@ -1,0 +1,19 @@
+id: beauty_08_fragrance_from_scratch
+tenant: demo-beauty
+scenario: fragrance_selection
+tags: [fragrance, clarification]
+turns:
+  - user: "Хочу новый парфюм для себя"
+    expect:
+      clarifies: true
+      max_questions: 1
+      tools_not_called: [show_entities]
+  - user: "Не знаю, как описать. Люблю запах свежего белья и зелёного чая, не люблю сладкое"
+    expect:
+      tools_called: [search_catalog]
+      state_contains: { disliked: [gourmand] }
+      judge: "Переводит описание в семейства (свежие, зелёные, мускусные/чистые) и показывает варианты без гурманских нот; может одним вопросом уточнить повод или сезон, но уже показывает подборку"
+  - user: "Можно сначала попробовать?"
+    expect:
+      tools_called: [search_knowledge]
+      judge: "Рассказывает о пробниках/миниатюрах по базе знаний и отмечает, для каких из показанных ароматов они доступны (sample_available)"

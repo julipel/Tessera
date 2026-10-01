@@ -1,0 +1,275 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "events.schema.json",
+  "title": "Event",
+  "description": "Полный SSE-конверт (Envelope + типизированный data) для каждого значения type. Discriminated union по type.",
+  "oneOf": [
+    { "$ref": "#/$defs/TurnStartedEvent" },
+    { "$ref": "#/$defs/TextDeltaEvent" },
+    { "$ref": "#/$defs/TextDoneEvent" },
+    { "$ref": "#/$defs/StatusEvent" },
+    { "$ref": "#/$defs/ToolStartedEvent" },
+    { "$ref": "#/$defs/ToolFinishedEvent" },
+    { "$ref": "#/$defs/ComponentEvent" },
+    { "$ref": "#/$defs/SuggestionsEvent" },
+    { "$ref": "#/$defs/ErrorEvent" },
+    { "$ref": "#/$defs/DoneEvent" }
+  ],
+  "$defs": {
+    "EnvelopeFields": {
+      "type": "object",
+      "description": "Общие поля конверта, переиспользуются в каждом варианте события (см. envelope.schema.json).",
+      "properties": {
+        "protocol_version": { "const": "1" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "conversation_id": { "type": "string" },
+        "turn_id": { "type": "string" },
+        "message_id": { "type": ["string", "null"], "default": null },
+        "ts": { "type": "string", "format": "date-time" }
+      },
+      "required": ["protocol_version", "seq", "conversation_id", "turn_id", "ts"]
+    },
+    "TurnStartedEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "turn_started" },
+            "data": { "type": "object", "additionalProperties": false }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    },
+    "TextDeltaEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "text_delta" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "block_id": { "type": "string" },
+                "delta": { "type": "string" }
+              },
+              "required": ["block_id", "delta"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    },
+    "TextDoneEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "text_done" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "block_id": { "type": "string" }
+              },
+              "required": ["block_id"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    },
+    "StatusEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "status" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["searching", "thinking", "calling_api"]
+                },
+                "label": { "type": "string" }
+              },
+              "required": ["kind", "label"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    },
+    "ToolStartedEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "tool_started" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "tool_call_id": { "type": "string" },
+                "name": { "type": "string" },
+                "display_label": { "type": ["string", "null"], "default": null }
+              },
+              "required": ["tool_call_id", "name"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    },
+    "ToolFinishedEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "description": "Сырые результаты инструмента в клиент не отправляются.",
+          "properties": {
+            "type": { "const": "tool_finished" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "tool_call_id": { "type": "string" },
+                "ok": { "type": "boolean" },
+                "duration_ms": { "type": "number", "minimum": 0 }
+              },
+              "required": ["tool_call_id", "ok", "duration_ms"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    },
+    "ComponentEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "component" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "block_id": { "type": "string" },
+                "component": { "$ref": "components.schema.json" }
+              },
+              "required": ["block_id", "component"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    },
+    "SuggestionsEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "description": "Быстрые ответы под сообщением (не путать с assistant.starter_suggestions в AgentConfig).",
+          "properties": {
+            "type": { "const": "suggestions" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": { "type": "string" },
+                      "input": { "$ref": "user_input.schema.json" }
+                    },
+                    "required": ["label", "input"],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1
+                }
+              },
+              "required": ["items"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    },
+    "ErrorEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "error" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "llm_unavailable",
+                    "turn_timeout",
+                    "step_limit",
+                    "invalid_input",
+                    "conversation_not_found",
+                    "rate_limited",
+                    "internal"
+                  ]
+                },
+                "message": { "type": "string" },
+                "retryable": { "type": "boolean" }
+              },
+              "required": ["code", "message", "retryable"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    },
+    "DoneEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/EnvelopeFields" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "done" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": ["completed", "interrupted", "failed"]
+                },
+                "usage": {
+                  "type": "object",
+                  "properties": {
+                    "input_tokens": { "type": "integer", "minimum": 0 },
+                    "output_tokens": { "type": "integer", "minimum": 0 },
+                    "tool_calls": { "type": "integer", "minimum": 0 }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "required": ["status"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["type", "data"]
+        }
+      ]
+    }
+  }
+}

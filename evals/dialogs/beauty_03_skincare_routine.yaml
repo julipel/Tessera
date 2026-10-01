@@ -1,0 +1,18 @@
+id: beauty_03_skincare_routine
+tenant: demo-beauty
+scenario: skincare_selection
+tags: [skincare, routine]
+turns:
+  - user: "Я вообще ничем не пользуюсь, кроме умывания мылом. Хочу начать нормально ухаживать за кожей"
+    expect:
+      clarifies: true
+      max_questions: 1
+  - user: "Нормальная кожа, ничего особо не беспокоит, хочется просто увлажнение и защиту. Бюджет на всё около 5000"
+    expect:
+      tools_called: [search_catalog]
+      state_contains: { skin_type: normal, budget: 5000 }
+      judge: "Предлагает простую рутину из 3–4 шагов (очищение, увлажнение, SPF утром), указывает утро/вечер и порядок; суммарная стоимость в пределах около 5000 ₽; советует заменить мыло на мягкое очищающее средство"
+  - user: "А можно без SPF? Я редко на улице"
+    expect:
+      tools_not_called: [create_lead]
+      judge: "Уважительно объясняет, зачем SPF ежедневно (по базе знаний), но не давит; предлагает лёгкий вариант или крем с SPF как компромисс"

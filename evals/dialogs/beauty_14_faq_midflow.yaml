@@ -1,0 +1,17 @@
+id: beauty_14_faq_midflow
+tenant: demo-beauty
+scenario: fragrance_selection
+tags: [faq, context]
+turns:
+  - user: "Подберите женский аромат на весну, лёгкий, для офиса"
+    expect:
+      tools_called: [search_catalog]
+      components: [product_carousel]
+  - user: "Сколько идёт доставка и можно ли вернуть духи, если не подойдут?"
+    expect:
+      tools_called: [search_knowledge]
+      judge: "Отвечает о сроках доставки и условиях возврата парфюма строго по базе знаний (включая ограничения для вскрытого парфюма, если они есть); может упомянуть пробники как способ снизить риск"
+  - user: "Окей, тогда что из показанного самое универсальное?"
+    expect:
+      clarifies: false
+      judge: "Возвращается к показанным весенним офисным ароматам и выбирает один-два, обосновывая по атрибутам"

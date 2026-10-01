@@ -1,0 +1,18 @@
+id: beauty_12_refer_back
+tenant: demo-beauty
+scenario: skincare_selection
+tags: [context, skincare]
+turns:
+  - user: "Жирная кожа, нужен гель для умывания"
+    expect:
+      tools_called: [search_catalog]
+      components: [product_carousel]
+  - user: "А какие у вас есть кремы с SPF для такой кожи?"
+    expect:
+      tools_called: [search_catalog]
+      clarifies: false
+      judge: "Помнит, что кожа жирная, и показывает лёгкие SPF-средства для жирной кожи без повторного вопроса о типе кожи"
+  - user: "Вернёмся к гелям. Расскажите подробнее про второй"
+    expect:
+      tools_called: [get_entity]
+      judge: "Правильно определяет второй гель из первой подборки (а не второй SPF) и рассказывает о нём по данным каталога"

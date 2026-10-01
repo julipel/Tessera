@@ -1,0 +1,14 @@
+id: beauty_11_compare_two
+tenant: demo-beauty
+scenario: skincare_selection
+tags: [skincare, comparison]
+turns:
+  - user: "Подберите сыворотку от пигментации для нормальной кожи"
+    expect:
+      tools_called: [search_catalog]
+      components: [product_carousel]
+  - user: "Сравните первую и третью"
+    expect:
+      tools_called: [show_entities]
+      components: [comparison_table]
+      judge: "Строит сравнение по фактическим атрибутам (компоненты, текстура, объём, цена, время применения) и даёт короткий вывод, кому что лучше подойдёт"

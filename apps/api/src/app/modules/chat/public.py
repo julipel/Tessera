@@ -1,3 +1,6 @@
 """Публичный интерфейс модуля chat — единственная точка входа для других модулей."""
 
-__all__: list[str] = []
+from app.modules.chat.api.router import router
+from app.modules.chat.infrastructure.models import ConversationRecord, MessageRecord
+
+__all__ = ["ConversationRecord", "MessageRecord", "router"]

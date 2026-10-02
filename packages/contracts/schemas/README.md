@@ -17,6 +17,9 @@ HTTP-инструмент `HttpToolDefinition` для `check_stock`.
   (декларативный HTTP-инструмент тенанта)
 - `agent_config.schema.json` — конфигурация тенанта целиком (assistant/model/limits/prompt/
   tools/forms/knowledge/branding)
+- `conversations.schema.json` — HTTP API диалогов: `CreateConversationRequest/Response`,
+  `MessageHistory`, `HistoryMessage` (`input` у user, `blocks` у assistant), `MessageBlock`
+  (`TextBlock` / `ComponentBlock`)
 - `http_error.schema.json` — тело любого HTTP-ответа с ошибкой: `{"error": {code, message,
   retryable}}`; коды SSE-ошибок + `unauthorized`/`not_found` (docs/contracts.md §1, §6)
 - `public_config.schema.json` — ответ `GET /v1/public/config`: публичная часть активного

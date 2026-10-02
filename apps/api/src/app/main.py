@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.api import health
 from app.logs import TraceIdMiddleware, configure_logging
+from app.modules.chat.public import router as chat_router
 from app.modules.shared.public import (
     create_engine,
     create_session_factory,
@@ -36,6 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(TraceIdMiddleware)  # после: снаружи обработчика 500
     app.include_router(health.router)
     app.include_router(tenants_public_router)
+    app.include_router(chat_router)
     return app
 
 

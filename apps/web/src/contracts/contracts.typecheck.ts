@@ -4,6 +4,7 @@ import type {
   Component,
   Event,
   HttpError,
+  MessageHistory,
   PublicConfig,
   TextDeltaData,
   UserInput,
@@ -34,3 +35,9 @@ export const sampleDelta: TextDeltaData = { block_id: "b1", delta: "При" };
 export const greetingOf = (config: PublicConfig): string => config.assistant.greeting;
 
 export const isRetryable = (error: HttpError): boolean => error.error.retryable;
+
+export const textOf = (history: MessageHistory): string =>
+  history.messages
+    .flatMap((message) => message.blocks)
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("");

@@ -1,0 +1,116 @@
+"""Репозитории модуля chat (реализации портов из domain/ports.py)."""
+
+from collections.abc import Sequence
+from uuid import UUID
+
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.chat.domain.entities import (
+    Channel,
+    ChatMessage,
+    Conversation,
+    NewMessage,
+)
+from app.modules.chat.infrastructure.models import ConversationRecord, MessageRecord
+from app.modules.shared.public import TenantId, TenantRepository
+from app.modules.tenants.public import AgentConfigRepository
+
+
+def _conversation(record: ConversationRecord) -> Conversation:
+    return Conversation(
+        id=record.id,
+        tenant_id=TenantId(record.tenant_id),
+        agent_config_id=record.agent_config_id,
+        channel=record.channel,
+        visitor_id=record.visitor_id,
+        created_at=record.created_at,
+    )
+
+
+def _message(record: MessageRecord) -> ChatMessage:
+    return ChatMessage(
+        id=record.id,
+        tenant_id=TenantId(record.tenant_id),
+        conversation_id=record.conversation_id,
+        role=record.role,
+        status=record.status,
+        content=record.content,
+        input=record.input,
+        blocks=record.blocks,
+        client_message_id=record.client_message_id,
+        created_at=record.created_at,
+    )
+
+
+class ConversationRepository(TenantRepository[ConversationRecord]):
+    model = ConversationRecord
+
+    async def create(
+        self, tenant_id: TenantId, agent_config_id: UUID, channel: Channel, visitor_id: str
+    ) -> Conversation:
+        record = ConversationRecord(
+            tenant_id=tenant_id,
+            agent_config_id=agent_config_id,
+            channel=channel,
+            visitor_id=visitor_id,
+        )
+        await self.add(tenant_id, record)
+        await self.session.refresh(record)  # created_at задаёт БД
+        return _conversation(record)
+
+    async def find(self, tenant_id: TenantId, conversation_id: UUID) -> Conversation | None:
+        record = await self.get(tenant_id, conversation_id)
+        return _conversation(record) if record else None
+
+
+class MessageRepository(TenantRepository[MessageRecord]):
+    model = MessageRecord
+
+    async def list_for(self, tenant_id: TenantId, conversation_id: UUID) -> Sequence[ChatMessage]:
+        stmt = (
+            self._scoped(tenant_id)
+            .where(MessageRecord.conversation_id == conversation_id)
+            .order_by(MessageRecord.created_at, MessageRecord.id)
+        )
+        return [_message(r) for r in (await self.session.execute(stmt)).scalars()]
+
+    async def add_once(self, tenant_id: TenantId, message: NewMessage) -> tuple[ChatMessage, bool]:
+        # ON CONFLICT DO NOTHING вместо «проверить, затем вставить»: два одновременных
+        # ретрая не упадут на уникальном индексе, второй получит запись первого.
+        stmt = (
+            insert(MessageRecord)
+            .values(
+                tenant_id=tenant_id,
+                conversation_id=message.conversation_id,
+                role=message.role,
+                status=message.status,
+                content=message.content,
+                input=message.input,
+                blocks=list(message.blocks),
+                client_message_id=message.client_message_id,
+            )
+            .on_conflict_do_nothing(index_elements=["conversation_id", "client_message_id"])
+            .returning(MessageRecord)
+        )
+        created = (await self.session.execute(stmt)).scalar_one_or_none()
+        if created is not None:
+            return _message(created), True
+        existing = await self.session.execute(
+            self._scoped(tenant_id).where(
+                MessageRecord.conversation_id == message.conversation_id,
+                MessageRecord.client_message_id == message.client_message_id,
+            )
+        )
+        return _message(existing.scalar_one()), False
+
+
+class TenantsActiveConfig:
+    """ActiveConfigLookup поверх модуля tenants."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.configs = AgentConfigRepository(session)
+
+    async def active_config_id(self, tenant_id: TenantId) -> UUID | None:
+        active = await self.configs.get_active(tenant_id)
+        return active.id if active else None

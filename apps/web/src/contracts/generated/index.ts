@@ -18,6 +18,18 @@ export type Component =
   | Form
   | Confirm;
 /**
+ * Ввод пользователя в POST .../messages: текст, нажатие action-кнопки или отправка формы.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "UserInput".
+ */
+export type UserInput = TextInput | ActionInput | FormSubmitInput;
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "MessageBlock".
+ */
+export type MessageBlock = TextBlock | ComponentBlock;
+/**
  * Полный SSE-конверт (Envelope + типизированный data) для каждого значения type. Discriminated union по type.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -98,13 +110,6 @@ export type SuggestionsEvent = EnvelopeFields & {
   type: "suggestions";
   data: SuggestionsData;
 };
-/**
- * Ввод пользователя в POST .../messages: текст, нажатие action-кнопки или отправка формы.
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "UserInput".
- */
-export type UserInput = TextInput | ActionInput | FormSubmitInput;
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
  * via the `definition` "ErrorEvent".
@@ -583,6 +588,94 @@ export interface Confirm {
   cancel_action?: Action;
 }
 /**
+ * Тело POST /v1/conversations. visitor_id генерирует и хранит клиент.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "CreateConversationRequest".
+ */
+export interface CreateConversationRequest {
+  visitor_id: string;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "CreateConversationResponse".
+ */
+export interface CreateConversationResponse {
+  conversation_id: string;
+}
+/**
+ * Ответ GET /v1/conversations/{id}/messages: сообщения в порядке создания.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "MessageHistory".
+ */
+export interface MessageHistory {
+  conversation_id: string;
+  messages: HistoryMessage[];
+}
+/**
+ * Сообщение истории. У user — исходный ввод (input), у assistant — блоки в порядке первого появления block_id в стриме.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "HistoryMessage".
+ */
+export interface HistoryMessage {
+  message_id: string;
+  role: "user" | "assistant";
+  status: "completed" | "interrupted" | "failed";
+  created_at: string;
+  input?: UserInput;
+  blocks: MessageBlock[];
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "TextInput".
+ */
+export interface TextInput {
+  type: "text";
+  text: string;
+}
+/**
+ * Нажатие Action-кнопки компонента (см. components.schema.json).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ActionInput".
+ */
+export interface ActionInput {
+  type: "action";
+  action_id: string;
+  payload?: {};
+}
+/**
+ * Отправка формы (component.type=form). Ключи values соответствуют FormField.name.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FormSubmitInput".
+ */
+export interface FormSubmitInput {
+  type: "form_submit";
+  form_id: string;
+  values: {};
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "TextBlock".
+ */
+export interface TextBlock {
+  type: "text";
+  block_id: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ComponentBlock".
+ */
+export interface ComponentBlock {
+  type: "component";
+  block_id: string;
+  component: Component;
+}
+/**
  * SSE-конверт: event: <type> / data: <Envelope JSON>. Форма data для конкретного type описана в events.schema.json.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -653,36 +746,6 @@ export interface SuggestionsData {
 export interface SuggestionItem {
   label: string;
   input: UserInput;
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "TextInput".
- */
-export interface TextInput {
-  type: "text";
-  text: string;
-}
-/**
- * Нажатие Action-кнопки компонента (см. components.schema.json).
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "ActionInput".
- */
-export interface ActionInput {
-  type: "action";
-  action_id: string;
-  payload?: {};
-}
-/**
- * Отправка формы (component.type=form). Ключи values соответствуют FormField.name.
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "FormSubmitInput".
- */
-export interface FormSubmitInput {
-  type: "form_submit";
-  form_id: string;
-  values: {};
 }
 export interface ErrorData {
   code:

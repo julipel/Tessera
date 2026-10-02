@@ -44,7 +44,7 @@
   (`{"error": {code, message, retryable}}`, коды из contracts.md §6 + `unauthorized`/`not_found`)
   вместо дефолтного `{"detail"}`, обработчики в `shared`, 500 с trace_id в логе.
   Тест, что `tenant_id` из `WidgetTenant` попадает в строки логов. DoD: тесты API.
-- [ ] **P1-07b Chat: диалоги и сообщения.** Conversation, Message, эндпоинты создания и истории,
+- [x] **P1-07b Chat: диалоги и сообщения.** Conversation, Message, эндпоинты создания и истории,
   идемпотентность по client_message_id (use case + уникальный индекс; API-тест — в P1-08).
   Conversation хранит `agent_config_id` версии, с которой начат (architecture.md §10);
   блоки сообщения `blocks` (порядок как в стриме). DoD: тесты API и изоляции репозиториев.

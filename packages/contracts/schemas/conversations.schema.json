@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "conversations.schema.json",
+  "title": "ConversationsSchema",
+  "description": "HTTP API диалогов (docs/contracts.md §1). Файл без единого корневого типа — экспортируемые типы в $defs: CreateConversationRequest, CreateConversationResponse, MessageHistory, HistoryMessage, MessageBlock.",
+  "$defs": {
+    "CreateConversationRequest": {
+      "type": "object",
+      "description": "Тело POST /v1/conversations. visitor_id генерирует и хранит клиент.",
+      "properties": {
+        "visitor_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "required": ["visitor_id"],
+      "additionalProperties": false
+    },
+    "CreateConversationResponse": {
+      "type": "object",
+      "properties": {
+        "conversation_id": { "type": "string", "format": "uuid" }
+      },
+      "required": ["conversation_id"],
+      "additionalProperties": false
+    },
+    "MessageHistory": {
+      "type": "object",
+      "description": "Ответ GET /v1/conversations/{id}/messages: сообщения в порядке создания.",
+      "properties": {
+        "conversation_id": { "type": "string", "format": "uuid" },
+        "messages": { "type": "array", "items": { "$ref": "#/$defs/HistoryMessage" } }
+      },
+      "required": ["conversation_id", "messages"],
+      "additionalProperties": false
+    },
+    "HistoryMessage": {
+      "type": "object",
+      "description": "Сообщение истории. У user — исходный ввод (input), у assistant — блоки в порядке первого появления block_id в стриме.",
+      "properties": {
+        "message_id": { "type": "string", "format": "uuid" },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "status": { "type": "string", "enum": ["completed", "interrupted", "failed"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "input": { "$ref": "user_input.schema.json" },
+        "blocks": { "type": "array", "items": { "$ref": "#/$defs/MessageBlock" } }
+      },
+      "required": ["message_id", "role", "status", "created_at", "blocks"],
+      "additionalProperties": false
+    },
+    "MessageBlock": {
+      "oneOf": [{ "$ref": "#/$defs/TextBlock" }, { "$ref": "#/$defs/ComponentBlock" }]
+    },
+    "TextBlock": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "text" },
+        "block_id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" }
+      },
+      "required": ["type", "block_id", "text"],
+      "additionalProperties": false
+    },
+    "ComponentBlock": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "component" },
+        "block_id": { "type": "string", "minLength": 1 },
+        "component": { "$ref": "components.schema.json" }
+      },
+      "required": ["type", "block_id", "component"],
+      "additionalProperties": false
+    }
+  }
+}

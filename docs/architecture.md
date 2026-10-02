@@ -195,7 +195,9 @@ Chunk(id, document_id, tenant_id, ord, text, token_count)  # вектор — в
 Entity(id, tenant_id, source_id, external_id, type, title, price, currency, in_stock,
        category, url, image_url, attributes JSONB, updated_at)
 Conversation(id, tenant_id, agent_config_id, channel, visitor_id, state JSONB, summary, created_at)
-Message(id, conversation_id, tenant_id, role, content, components JSONB, status, created_at)
+Message(id, conversation_id, tenant_id, role, status, content, input JSONB, blocks JSONB,
+        client_message_id, created_at)  # input — UserInput (user); blocks — текст/компоненты
+                                        # в порядке стрима (assistant); content — плоский текст
 ToolCall(id, message_id, tenant_id, name, arguments JSONB, result JSONB, error, duration_ms)
 AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSONB, ts)
 ```

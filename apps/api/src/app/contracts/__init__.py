@@ -6,6 +6,15 @@
 
 from app.contracts.generated.agent_config_schema import AgentConfig
 from app.contracts.generated.components_schema import Action, Component, FormField, Price
+from app.contracts.generated.conversations_schema import (
+    ComponentBlock,
+    CreateConversationRequest,
+    CreateConversationResponse,
+    HistoryMessage,
+    MessageBlock,
+    MessageHistory,
+    TextBlock,
+)
 from app.contracts.generated.envelope_schema import Envelope
 from app.contracts.generated.events_schema import (
     ComponentData,
@@ -51,8 +60,11 @@ __all__ = [
     "ActionInput",
     "AgentConfig",
     "Component",
+    "ComponentBlock",
     "ComponentData",
     "ComponentEvent",
+    "CreateConversationRequest",
+    "CreateConversationResponse",
     "DoneData",
     "DoneEvent",
     "DoneUsage",
@@ -62,9 +74,12 @@ __all__ = [
     "Event",
     "FormField",
     "FormSubmitInput",
+    "HistoryMessage",
     "HttpError",
     "HttpErrorBody",
     "HttpToolDefinition",
+    "MessageBlock",
+    "MessageHistory",
     "Price",
     "PublicAssistant",
     "PublicConfig",
@@ -73,6 +88,7 @@ __all__ = [
     "SuggestionItem",
     "SuggestionsData",
     "SuggestionsEvent",
+    "TextBlock",
     "TextDeltaData",
     "TextDeltaEvent",
     "TextDoneData",

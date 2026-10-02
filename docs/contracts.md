@@ -20,10 +20,19 @@
 | POST | `/v1/conversations/{id}/messages` | отправить ввод, ответ — SSE-стрим |
 | POST | `/v1/conversations/{id}/turns/{turn_id}/cancel` | прервать генерацию |
 
+`POST /v1/conversations`: тело `{"visitor_id": "..."}` → 201 `{"conversation_id": "uuid"}`.
+Диалог запоминает активную версию AgentConfig; нет активной → 404 `not_found`.
+
+`GET .../messages` → `MessageHistory` (`conversations.schema.json`): сообщения в порядке создания,
+у `user` — исходный `input`, у `assistant` — `blocks` (`text` / `component` с `block_id`, порядок
+как в стриме), `status`: `completed` | `interrupted` | `failed`. Чужой/несуществующий диалог —
+404 `conversation_not_found`.
+
 Тело `POST .../messages`:
 ```json
 {
-  "client_message_id": "uuid",           // идемпотентность
+  "client_message_id": "uuid",           // идемпотентность: повтор в том же диалоге не создаёт
+                                         // второе сообщение (уникален в пределах диалога)
   "input": { "type": "text", "text": "Нужен подарок маме, до 5000" }
 }
 ```

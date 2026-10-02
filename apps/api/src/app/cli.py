@@ -20,7 +20,9 @@ from app.settings import Settings
 DEFAULT_TENANTS_DIR = Path(__file__).resolve().parents[4] / "config" / "tenants"
 
 
-async def seed(paths: list[Path], widget_key: str | None, settings: Settings) -> None:
+async def seed(
+    paths: list[Path], widget_key: str | None, reset_widget_key: bool, settings: Settings
+) -> None:
     engine = create_engine(settings.database_url)
     try:
         async with create_session_factory(engine)() as session, session.begin():
@@ -32,6 +34,7 @@ async def seed(paths: list[Path], widget_key: str | None, settings: Settings) ->
                     configs=AgentConfigRepository(session),
                     widget_keys=WidgetKeyRepository(session),
                     widget_key=widget_key,
+                    reset_widget_key=reset_widget_key,
                 )
                 state = "новая версия" if result.config_changed else "без изменений"
                 print(
@@ -53,6 +56,11 @@ def main(argv: list[str] | None = None) -> int:
         "--widget-key",
         help="ключ виджета для нового тенанта (иначе SEED_WIDGET_KEY из env/.env или случайный)",
     )
+    seed_cmd.add_argument(
+        "--reset-widget-key",
+        action="store_true",
+        help="удалить ключи тенанта и выпустить новый (--widget-key / SEED_WIDGET_KEY / случайный)",
+    )
     args = parser.parse_args(argv)
 
     paths: list[Path] = args.paths or sorted(DEFAULT_TENANTS_DIR.glob("*.yaml"))
@@ -63,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         settings = Settings()
         # Settings читает и env, и .env — os.environ один .env не видит.
         widget_key = args.widget_key or settings.seed_widget_key or None
-        asyncio.run(seed(paths, widget_key, settings))
+        asyncio.run(seed(paths, widget_key, args.reset_widget_key, settings))
     except InvalidTenantSpecError as e:
         print(f"невалидное описание тенанта: {e}", file=sys.stderr)
         return 1

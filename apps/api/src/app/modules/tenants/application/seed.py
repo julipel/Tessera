@@ -24,12 +24,13 @@ async def seed_tenant(
     configs: AgentConfigStore,
     widget_keys: WidgetKeyStore,
     widget_key: str | None = None,
+    reset_widget_key: bool = False,
 ) -> SeedResult:
     """Повторный запуск с тем же описанием ничего не меняет.
 
     Конфиг, отличающийся от активного, становится новой активной версией. Ключ виджета
     создаётся, только если у тенанта ещё нет ни одного (`widget_key` — заданный извне,
-    иначе генерируется).
+    иначе генерируется). `reset_widget_key` удаляет все ключи тенанта и выпускает новый.
     """
     tenant = await tenants.get_by_slug(spec.tenant.slug)
     if tenant is None:
@@ -46,6 +47,8 @@ async def seed_tenant(
     else:
         changed = False
 
+    if reset_widget_key:
+        await widget_keys.delete_all(tenant.id)
     new_key: str | None = None
     if not await widget_keys.has_any(tenant.id):
         new_key = widget_key or generate_widget_key()

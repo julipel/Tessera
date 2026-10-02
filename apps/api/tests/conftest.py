@@ -12,6 +12,7 @@ from sqlalchemy import exc, make_url, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_engine
 
 from app.main import create_app
+from app.modules.shared.public import get_session
 from app.settings import Settings
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
@@ -102,3 +103,16 @@ async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSessi
         bind=db_connection, join_transaction_mode="create_savepoint", expire_on_commit=False
     ) as session:
         yield session
+
+
+@pytest.fixture
+async def db_client(app: FastAPI, db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """HTTP-клиент, чьи запросы работают в транзакции теста (откатывается после теста)."""
+
+    async def session_override() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = session_override
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.clear()

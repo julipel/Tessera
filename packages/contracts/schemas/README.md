@@ -17,6 +17,8 @@ HTTP-инструмент `HttpToolDefinition` для `check_stock`.
   (декларативный HTTP-инструмент тенанта)
 - `agent_config.schema.json` — конфигурация тенанта целиком (assistant/model/limits/prompt/
   tools/forms/knowledge/branding)
+- `public_config.schema.json` — ответ `GET /v1/public/config`: публичная часть активного
+  AgentConfig (assistant без fallback_message, branding), без промпта/инструментов/моделей
 
 Файлы ссылаются друг на друга относительными `$ref` (напр. `events.schema.json` →
 `components.schema.json`, `agent_config.schema.json` → `tools.schema.json#/$defs/HttpToolDefinition`

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "public_config.schema.json",
+  "title": "PublicConfig",
+  "description": "Ответ GET /v1/public/config: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.",
+  "type": "object",
+  "properties": {
+    "assistant": { "$ref": "#/$defs/PublicAssistant" },
+    "branding": { "$ref": "agent_config.schema.json#/$defs/BrandingConfig" }
+  },
+  "required": ["assistant", "branding"],
+  "additionalProperties": false,
+  "$defs": {
+    "PublicAssistant": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "language": { "type": "string", "enum": ["auto", "ru", "en", "sv"] },
+        "greeting": { "type": "string" },
+        "starter_suggestions": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "language", "greeting", "starter_suggestions"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,5 +1,7 @@
 """Публичный интерфейс модуля tenants — единственная точка входа для других модулей."""
 
+from app.modules.tenants.api.deps import WidgetTenant
+from app.modules.tenants.api.public_router import router as public_router
 from app.modules.tenants.application.seed import SeedResult, seed_tenant
 from app.modules.tenants.application.spec import TenantSpec, load_tenant_spec
 from app.modules.tenants.domain.entities import (
@@ -36,8 +38,10 @@ __all__ = [
     "TenantStatus",
     "WidgetKeyRecord",
     "WidgetKeyRepository",
+    "WidgetTenant",
     "generate_widget_key",
     "hash_widget_key",
     "load_tenant_spec",
+    "public_router",
     "seed_tenant",
 ]

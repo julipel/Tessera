@@ -38,7 +38,7 @@
 - [x] **P1-06a Tenants: данные и seed.** Tenant, AgentConfig (версии, draft/active/archived),
   WidgetKey, репозитории, загрузка конфига из YAML (seed-команда), `config/tenants/demo-beauty.yaml`.
   DoD: seed демо-тенанта идемпотентен, тесты изоляции и версий.
-- [ ] **P1-06b Tenants: публичный конфиг.** Контракт `public_config.schema.json`, аутентификация
+- [x] **P1-06b Tenants: публичный конфиг.** Контракт `public_config.schema.json`, аутентификация
   по `X-Widget-Key`, `GET /v1/public/config`. DoD: тесты API (401 / 404 / 200).
 - [ ] **P1-07 Chat: диалоги и сообщения.** Conversation, Message, эндпоинты создания и истории,
   идемпотентность по client_message_id. DoD: тесты API.

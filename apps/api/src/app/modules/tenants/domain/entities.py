@@ -38,3 +38,11 @@ class AgentConfigVersion:
     version: int
     status: AgentConfigStatus
     config: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class WidgetAccess:
+    """Результат проверки ключа виджета: тенант и сайты, с которых ключ разрешён."""
+
+    tenant_id: TenantId
+    allowed_origins: tuple[str, ...]

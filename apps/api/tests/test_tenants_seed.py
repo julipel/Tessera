@@ -140,3 +140,19 @@ async def test_seed_renames_tenant(db_session: AsyncSession) -> None:
     tenant = await SqlTenantDirectory(db_session).get_by_slug("shop")
     assert tenant is not None
     assert tenant.name == "Shop 2"
+
+
+async def test_reset_widget_key_replaces_keys(db_session: AsyncSession) -> None:
+    first = await _seed(db_session, load_tenant_spec(SPEC_YAML))
+    reset = await seed_tenant(
+        load_tenant_spec(SPEC_YAML),
+        tenants=SqlTenantDirectory(db_session),
+        configs=AgentConfigRepository(db_session),
+        widget_keys=WidgetKeyRepository(db_session),
+        widget_key="wk_new",
+        reset_widget_key=True,
+    )
+
+    assert reset.new_widget_key == "wk_new"
+    [key] = await WidgetKeyRepository(db_session).list(first.tenant.id)
+    assert key.key_hash == hash_widget_key("wk_new")

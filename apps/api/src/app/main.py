@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.api import health
 from app.logs import TraceIdMiddleware, configure_logging
 from app.modules.shared.public import create_engine, create_session_factory
+from app.modules.tenants.public import public_router as tenants_public_router
 from app.settings import Settings
 
 
@@ -29,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = create_session_factory(app.state.engine)
     app.add_middleware(TraceIdMiddleware)
     app.include_router(health.router)
+    app.include_router(tenants_public_router)
     return app
 
 

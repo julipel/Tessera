@@ -5,7 +5,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from app.modules.shared.kernel import TenantId
-from app.modules.tenants.domain.entities import AgentConfigVersion, Tenant
+from app.modules.tenants.domain.entities import AgentConfigVersion, Tenant, WidgetAccess
 
 
 class TenantDirectory(Protocol):
@@ -33,6 +33,14 @@ class AgentConfigStore(Protocol):
 class WidgetKeyStore(Protocol):
     async def has_any(self, tenant_id: TenantId) -> bool: ...
 
+    async def delete_all(self, tenant_id: TenantId) -> int: ...
+
     async def add_key(
         self, tenant_id: TenantId, key_hash: str, allowed_origins: Sequence[str]
     ) -> None: ...
+
+
+class WidgetKeyResolver(Protocol):
+    """Поиск ключа по хэшу среди всех тенантов: до проверки ключа тенант неизвестен (ADR-0007)."""
+
+    async def resolve(self, key_hash: str) -> WidgetAccess | None: ...

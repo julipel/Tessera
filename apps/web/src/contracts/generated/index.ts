@@ -707,6 +707,29 @@ export interface DoneUsage {
   [k: string]: unknown;
 }
 /**
+ * Ответ GET /v1/public/config: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "PublicConfig".
+ */
+export interface PublicConfig {
+  assistant: PublicAssistant;
+  branding: BrandingConfig;
+}
+/**
+ * This interface was referenced by `PublicConfig`'s JSON-Schema
+ * via the `definition` "PublicAssistant".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "PublicAssistant".
+ */
+export interface PublicAssistant {
+  name: string;
+  language: "auto" | "ru" | "en" | "sv";
+  greeting: string;
+  starter_suggestions: string[];
+}
+/**
  * This interface was referenced by `Contracts`'s JSON-Schema
  * via the `definition` "ToolError".
  */

@@ -31,6 +31,7 @@ from app.contracts.generated.events_schema import (
     ToolStartedEvent,
     TurnStartedEvent,
 )
+from app.contracts.generated.public_config_schema import PublicAssistant, PublicConfig
 from app.contracts.generated.tools_schema import (
     HttpToolDefinition,
     ToolDefinition,
@@ -62,6 +63,8 @@ __all__ = [
     "FormSubmitInput",
     "HttpToolDefinition",
     "Price",
+    "PublicAssistant",
+    "PublicConfig",
     "StatusData",
     "StatusEvent",
     "SuggestionItem",

@@ -35,8 +35,11 @@
   `agent_config.schema.json` (сейчас класс `Items`); убрать пустой корневой `Model(RootModel[Any])`
   из `tools_schema` (корень без типа). Можно вместе с P1-06. DoD: в generated нет `Items`/`Model`,
   тест на безымянные классы покрывает все схемы, `make check` зелёный.
-- [ ] **P1-06 Tenants.** Tenant, AgentConfig (версии, draft/active), WidgetKey, загрузка конфига
-  из YAML (seed-команда), `GET /v1/public/config`. DoD: seed демо-тенанта, тесты.
+- [x] **P1-06a Tenants: данные и seed.** Tenant, AgentConfig (версии, draft/active/archived),
+  WidgetKey, репозитории, загрузка конфига из YAML (seed-команда), `config/tenants/demo-beauty.yaml`.
+  DoD: seed демо-тенанта идемпотентен, тесты изоляции и версий.
+- [ ] **P1-06b Tenants: публичный конфиг.** Контракт `public_config.schema.json`, аутентификация
+  по `X-Widget-Key`, `GET /v1/public/config`. DoD: тесты API (401 / 404 / 200).
 - [ ] **P1-07 Chat: диалоги и сообщения.** Conversation, Message, эндпоинты создания и истории,
   идемпотентность по client_message_id. DoD: тесты API.
 - [ ] **P1-08 SSE-стрим с эхо-агентом.** `POST .../messages` отдаёт события по протоколу от

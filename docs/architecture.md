@@ -226,7 +226,7 @@ AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSON
 - Рендер сообщения — список блоков: текст (markdown, стримится) + компоненты из
   discriminated union `type` (см. contracts). Неизвестный тип игнорируется.
 - Клиент SSE с переподключением, состояниями «печатает / ищет / ошибка / повторить».
-- Типы — только из `packages/contracts/generated/ts`.
+- Типы — только из `@/contracts` (`apps/web/src/contracts/generated`, см. contracts.md).
 
 ## 15. Путь масштабирования
 

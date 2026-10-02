@@ -8,6 +8,7 @@ dependencies = [
     "asyncpg>=0.31.0",
     "fastapi>=0.142.2",
     "pydantic-settings>=2.15.0",
+    "pyyaml>=6.0.3",
     "sqlalchemy[asyncio]>=2.1.2",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.54.0",
@@ -71,7 +72,7 @@ containers = [
     "app.modules.shared",
 ]
 exhaustive = true
-exhaustive_ignores = ["public"]
+exhaustive_ignores = ["public", "kernel"]
 
 [[tool.importlinter.contracts]]
 name = "Направление зависимостей между модулями"
@@ -86,9 +87,9 @@ layers = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "domain не зависит от фреймворков, БД и SDK"
+name = "domain и shared.kernel не зависят от фреймворков, БД и SDK"
 type = "forbidden"
-source_modules = ["app.modules.*.domain"]
+source_modules = ["app.modules.*.domain", "app.modules.shared.kernel"]
 forbidden_modules = [
     "fastapi",
     "starlette",
@@ -208,4 +209,5 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.10",
+    "types-pyyaml>=6.0.12.20260906",
 ]

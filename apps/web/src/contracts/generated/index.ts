@@ -707,6 +707,39 @@ export interface DoneUsage {
   [k: string]: unknown;
 }
 /**
+ * Тело любого HTTP-ответа с ошибкой (4xx/5xx) публичного API. Коды — docs/contracts.md §6.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "HttpError".
+ */
+export interface HttpError {
+  error: HttpErrorBody;
+}
+/**
+ * This interface was referenced by `HttpError`'s JSON-Schema
+ * via the `definition` "HttpErrorBody".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "HttpErrorBody".
+ */
+export interface HttpErrorBody {
+  /**
+   * Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), not_found (404).
+   */
+  code:
+    | "llm_unavailable"
+    | "turn_timeout"
+    | "step_limit"
+    | "invalid_input"
+    | "conversation_not_found"
+    | "rate_limited"
+    | "internal"
+    | "unauthorized"
+    | "not_found";
+  message: string;
+  retryable: boolean;
+}
+/**
  * Ответ GET /v1/public/config: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema

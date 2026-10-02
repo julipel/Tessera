@@ -7,7 +7,11 @@ from fastapi import FastAPI
 
 from app.api import health
 from app.logs import TraceIdMiddleware, configure_logging
-from app.modules.shared.public import create_engine, create_session_factory
+from app.modules.shared.public import (
+    create_engine,
+    create_session_factory,
+    install_error_handlers,
+)
 from app.modules.tenants.public import public_router as tenants_public_router
 from app.settings import Settings
 
@@ -28,7 +32,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # а не в lifespan: так он доступен и в тестах без запуска lifespan.
     app.state.engine = create_engine(settings.database_url, echo=settings.database_echo)
     app.state.session_factory = create_session_factory(app.state.engine)
-    app.add_middleware(TraceIdMiddleware)
+    install_error_handlers(app)
+    app.add_middleware(TraceIdMiddleware)  # после: снаружи обработчика 500
     app.include_router(health.router)
     app.include_router(tenants_public_router)
     return app

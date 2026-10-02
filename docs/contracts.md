@@ -41,6 +41,14 @@
 }
 ```
 
+Ошибки HTTP (4xx/5xx) — всегда в одном формате (`http_error.schema.json`), коды из §6:
+```json
+{ "error": { "code": "unauthorized", "message": "неизвестный ключ виджета", "retryable": false } }
+```
+Статусы: 401 `unauthorized` (нет/неверный `X-Widget-Key`), 404 `not_found` /
+`conversation_not_found`, 405/422 `invalid_input`, 429 `rate_limited`, 500 `internal`
+(подробности — только в логе с `trace_id`; `X-Trace-Id` есть в любом ответе).
+
 ## 2. SSE-протокол
 
 Каждое событие: `event: <type>` и `data: <Envelope JSON>`.
@@ -221,3 +229,5 @@ branding:
 
 `llm_unavailable` (retryable), `turn_timeout` (retryable), `step_limit`, `invalid_input`,
 `conversation_not_found`, `rate_limited` (retryable), `internal`.
+
+Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `not_found`.

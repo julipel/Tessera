@@ -3,11 +3,13 @@
 from typing import Any
 
 import pytest
+import structlog
 from httpx import AsyncClient
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contracts import PublicConfig
+from app.contracts import HttpError, PublicConfig
+from app.logs import TRACE_ID_HEADER
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import (
     AgentConfigRepository,
@@ -77,6 +79,7 @@ async def test_missing_or_unknown_key_is_401(
     response = await db_client.get(URL, headers=headers)
 
     assert response.status_code == 401
+    assert HttpError.model_validate(response.json()).error.code == "unauthorized"
 
 
 async def test_disabled_tenant_key_is_401(
@@ -99,6 +102,7 @@ async def test_tenant_without_active_config_is_404(
     response = await db_client.get(URL, headers={"X-Widget-Key": "wk_empty"})
 
     assert response.status_code == 404
+    assert HttpError.model_validate(response.json()).error.code == "not_found"
 
 
 async def test_key_selects_its_own_tenant(
@@ -111,3 +115,17 @@ async def test_key_selects_its_own_tenant(
 
     assert shop_response.json()["assistant"]["name"] == "Shop"
     assert other_response.json()["assistant"]["name"] == "Other"
+
+
+async def test_logs_carry_tenant_id_from_widget_key(db_client: AsyncClient, shop: TenantId) -> None:
+    with structlog.testing.capture_logs(
+        processors=[structlog.contextvars.merge_contextvars]
+    ) as logs:
+        response = await db_client.get(
+            URL, headers={"X-Widget-Key": "wk_shop", TRACE_ID_HEADER: "trace-1"}
+        )
+
+    assert response.status_code == 200
+    [entry] = [e for e in logs if e["event"] == "public_config_served"]
+    assert entry["tenant_id"] == str(shop)
+    assert entry["trace_id"] == "trace-1"

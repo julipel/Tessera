@@ -31,7 +31,9 @@ def configure_logging(settings: Settings) -> None:
             logging.getLevelNamesMapping()[settings.log_level]
         ),
         logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
+        # В тестах приложение (и конфиг structlog) создаётся заново на каждый тест: закэшированный
+        # логгер держал бы процессоры прежнего конфига, и перехват логов в тестах не сработал бы.
+        cache_logger_on_first_use=settings.app_env != "test",
     )
 
 

@@ -3,9 +3,9 @@
 from typing import Annotated
 
 import structlog
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, status
 
-from app.modules.shared.public import DbSession, TenantId
+from app.modules.shared.public import ApiError, DbSession, TenantId
 from app.modules.tenants.application.public_config import authenticate_widget
 from app.modules.tenants.domain.errors import InvalidWidgetKeyError
 from app.modules.tenants.infrastructure.repositories import SqlWidgetKeyResolver
@@ -19,7 +19,7 @@ async def require_widget_tenant(
     try:
         access = await authenticate_widget(x_widget_key, SqlWidgetKeyResolver(session))
     except InvalidWidgetKeyError as e:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
+        raise ApiError(status.HTTP_401_UNAUTHORIZED, "unauthorized", str(e)) from e
     structlog.contextvars.bind_contextvars(tenant_id=str(access.tenant_id))
     return access.tenant_id
 

@@ -31,6 +31,7 @@ from app.contracts.generated.events_schema import (
     ToolStartedEvent,
     TurnStartedEvent,
 )
+from app.contracts.generated.http_error_schema import HttpError, HttpErrorBody
 from app.contracts.generated.public_config_schema import PublicAssistant, PublicConfig
 from app.contracts.generated.tools_schema import (
     HttpToolDefinition,
@@ -61,6 +62,8 @@ __all__ = [
     "Event",
     "FormField",
     "FormSubmitInput",
+    "HttpError",
+    "HttpErrorBody",
     "HttpToolDefinition",
     "Price",
     "PublicAssistant",

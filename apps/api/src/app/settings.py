@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     # Ключ виджета, который `make seed` выдаёт новому тенанту; пусто — сгенерировать.
     seed_widget_key: str | None = None
+    # Origin веб-чата для CORS (env — JSON-список). Origin виджетов тенантов — P5-06.
+    cors_origins: list[str] = ["http://localhost:3000"]
 
     @property
     def is_local(self) -> bool:

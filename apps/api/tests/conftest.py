@@ -8,9 +8,10 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import exc, make_url, text
+from sqlalchemy import exc, make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_engine
 
+from app.cli import ensure_database
 from app.main import create_app
 from app.modules.shared.public import get_session
 from app.settings import Settings
@@ -52,21 +53,6 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 # --- БД: тестовая база с миграциями на сессию, транзакция с откатом на тест ---
 
 
-async def _ensure_database(url: str) -> None:
-    target = make_url(url)
-    admin = create_async_engine(target.set(database="postgres"), isolation_level="AUTOCOMMIT")
-    try:
-        async with admin.connect() as conn:
-            exists = await conn.scalar(
-                text("SELECT 1 FROM pg_database WHERE datname = :name"),
-                {"name": target.database},
-            )
-            if not exists:
-                await conn.execute(text(f'CREATE DATABASE "{target.database}"'))
-    finally:
-        await admin.dispose()
-
-
 @pytest.fixture
 def alembic_cfg(db_url: str) -> Config:
     return alembic_config(db_url)
@@ -76,7 +62,7 @@ def alembic_cfg(db_url: str) -> Config:
 def db_url() -> Iterator[str]:
     url = database_url_for_tests()
     try:
-        asyncio.run(_ensure_database(url))
+        asyncio.run(ensure_database(url))
     except (OSError, exc.SQLAlchemyError) as e:
         pytest.fail(f"Postgres недоступен ({e}). Запусти `make up`.", pytrace=False)
     command.upgrade(alembic_config(url), "head")

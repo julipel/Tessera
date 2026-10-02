@@ -1,9 +1,12 @@
-"""Служебные команды: `python -m app.cli seed [файлы...]`."""
+"""Служебные команды: `python -m app.cli seed [файлы...]`, `python -m app.cli ensure-db`."""
 
 import argparse
 import asyncio
 import sys
 from pathlib import Path
+
+from sqlalchemy import make_url, text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.modules.shared.public import create_engine, create_session_factory
 from app.modules.tenants.public import (
@@ -18,6 +21,23 @@ from app.settings import Settings
 
 # src/app/cli.py → корень репозитория на 4 уровня выше пакета (как в settings.py).
 DEFAULT_TENANTS_DIR = Path(__file__).resolve().parents[4] / "config" / "tenants"
+
+
+async def ensure_database(url: str) -> bool:
+    """Создать базу из `url`, если её нет (через служебную `postgres`). True — создана."""
+    target = make_url(url)
+    admin = create_async_engine(target.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    try:
+        async with admin.connect() as conn:
+            exists = await conn.scalar(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                {"name": target.database},
+            )
+            if not exists:
+                await conn.execute(text(f'CREATE DATABASE "{target.database}"'))
+            return not exists
+    finally:
+        await admin.dispose()
 
 
 async def seed(
@@ -61,7 +81,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="удалить ключи тенанта и выпустить новый (--widget-key / SEED_WIDGET_KEY / случайный)",
     )
+    sub.add_parser("ensure-db", help="создать базу из DATABASE_URL, если её нет")
     args = parser.parse_args(argv)
+
+    if args.command == "ensure-db":
+        url = Settings().database_url
+        created = asyncio.run(ensure_database(url))
+        print(f"{make_url(url).database}: {'создана' if created else 'уже есть'}")
+        return 0
 
     paths: list[Path] = args.paths or sorted(DEFAULT_TENANTS_DIR.glob("*.yaml"))
     if not paths:

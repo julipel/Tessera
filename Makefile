@@ -58,7 +58,7 @@ endif
 
 test-web:
 ifneq ($(HAS_WEB),)
-	cd $(WEB) && pnpm test --if-present
+	cd $(WEB) && pnpm run --if-present test
 endif
 
 # JSON Schema → Pydantic (apps/api) и TS (apps/web), ADR-0005

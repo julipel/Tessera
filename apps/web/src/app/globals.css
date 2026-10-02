@@ -1,1 +1,31 @@
 @import "tailwindcss";
+
+/* Нейтральная тема чата; токены брендинга тенанта переопределят её в P5-05. */
+:root {
+  --chat-bg: #f7f7f8;
+  --chat-surface: #ffffff;
+  --chat-text: #1f2328;
+  --chat-muted: #6b7280;
+  --chat-border: #e5e7eb;
+  --chat-primary: #2f6feb;
+  --chat-on-primary: #ffffff;
+  --chat-danger: #b42318;
+  --chat-radius: 0.75rem;
+}
+
+@theme inline {
+  --color-chat-bg: var(--chat-bg);
+  --color-chat-surface: var(--chat-surface);
+  --color-chat-text: var(--chat-text);
+  --color-chat-muted: var(--chat-muted);
+  --color-chat-border: var(--chat-border);
+  --color-chat-primary: var(--chat-primary);
+  --color-chat-on-primary: var(--chat-on-primary);
+  --color-chat-danger: var(--chat-danger);
+  --radius-chat: var(--chat-radius);
+}
+
+body {
+  background: var(--chat-bg);
+  color: var(--chat-text);
+}

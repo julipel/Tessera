@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import health
 from app.logs import TraceIdMiddleware, configure_logging
@@ -37,6 +38,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.turn_registry = TurnRegistry()  # текущие ходы процесса — для отмены
     install_error_handlers(app)
     app.add_middleware(TraceIdMiddleware)  # после: снаружи обработчика 500
+    # Последним — снаружи всех: preflight отвечается до остальной обработки.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "X-Widget-Key"],
+        expose_headers=["X-Trace-Id"],
+    )
     app.include_router(health.router)
     app.include_router(tenants_public_router)
     app.include_router(chat_router)

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     app_env: AppEnv = "local"
     log_level: LogLevel = "INFO"
     database_url: str = "postgresql+asyncpg://app:app@localhost:5432/app"
+    database_echo: bool = False
     redis_url: str = "redis://localhost:6379/0"
     qdrant_url: str = "http://localhost:6333"
 

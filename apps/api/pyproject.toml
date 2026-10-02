@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "API платформы AI-консультанта"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.31.0",
     "fastapi>=0.142.2",
     "pydantic-settings>=2.15.0",
+    "sqlalchemy[asyncio]>=2.1.2",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -31,7 +34,7 @@ allowed-confusables = ["а", "в", "е", "к", "м", "н", "о", "р", "с", "т
 python_version = "3.12"
 strict = true
 mypy_path = "src"
-files = ["src", "tests"]
+files = ["src", "tests", "migrations"]
 plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]

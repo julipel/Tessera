@@ -25,10 +25,10 @@ class EnvelopeFields(BaseModel):
 
 class TurnStartedEvent(EnvelopeFields):
     type: Literal["turn_started"]
-    data: Annotated[dict[str, Any], Field(max_length=0)]
+    data: Annotated[dict[str, Any], Field(max_length=0, title="TurnStartedData")]
 
 
-class Data(BaseModel):
+class TextDeltaData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -38,10 +38,10 @@ class Data(BaseModel):
 
 class TextDeltaEvent(EnvelopeFields):
     type: Literal["text_delta"]
-    data: Data
+    data: Annotated[TextDeltaData, Field(title="TextDeltaData")]
 
 
-class Data1(BaseModel):
+class TextDoneData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -50,10 +50,10 @@ class Data1(BaseModel):
 
 class TextDoneEvent(EnvelopeFields):
     type: Literal["text_done"]
-    data: Data1
+    data: Annotated[TextDoneData, Field(title="TextDoneData")]
 
 
-class Data2(BaseModel):
+class StatusData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -63,10 +63,10 @@ class Data2(BaseModel):
 
 class StatusEvent(EnvelopeFields):
     type: Literal["status"]
-    data: Data2
+    data: Annotated[StatusData, Field(title="StatusData")]
 
 
-class Data3(BaseModel):
+class ToolStartedData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -77,10 +77,10 @@ class Data3(BaseModel):
 
 class ToolStartedEvent(EnvelopeFields):
     type: Literal["tool_started"]
-    data: Data3
+    data: Annotated[ToolStartedData, Field(title="ToolStartedData")]
 
 
-class Data4(BaseModel):
+class ToolFinishedData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -91,10 +91,10 @@ class Data4(BaseModel):
 
 class ToolFinishedEvent(EnvelopeFields):
     type: Literal["tool_finished"]
-    data: Data4
+    data: Annotated[ToolFinishedData, Field(title="ToolFinishedData")]
 
 
-class Data7(BaseModel):
+class ErrorData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -113,10 +113,10 @@ class Data7(BaseModel):
 
 class ErrorEvent(EnvelopeFields):
     type: Literal["error"]
-    data: Data7
+    data: Annotated[ErrorData, Field(title="ErrorData")]
 
 
-class Usage(BaseModel):
+class DoneUsage(BaseModel):
     model_config = ConfigDict(
         extra="allow",
     )
@@ -125,20 +125,20 @@ class Usage(BaseModel):
     tool_calls: Annotated[int | None, Field(ge=0)] = None
 
 
-class Data8(BaseModel):
+class DoneData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
     status: Literal["completed", "interrupted", "failed"]
-    usage: Usage | None = None
+    usage: Annotated[DoneUsage | None, Field(title="DoneUsage")] = None
 
 
 class DoneEvent(EnvelopeFields):
     type: Literal["done"]
-    data: Data8
+    data: Annotated[DoneData, Field(title="DoneData")]
 
 
-class Data5(BaseModel):
+class ComponentData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -148,10 +148,10 @@ class Data5(BaseModel):
 
 class ComponentEvent(EnvelopeFields):
     type: Literal["component"]
-    data: Data5
+    data: Annotated[ComponentData, Field(title="ComponentData")]
 
 
-class Item(BaseModel):
+class SuggestionItem(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -159,16 +159,16 @@ class Item(BaseModel):
     input: user_input_schema.UserInput
 
 
-class Data6(BaseModel):
+class SuggestionsData(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    items: Annotated[list[Item], Field(min_length=1)]
+    items: Annotated[list[SuggestionItem], Field(min_length=1)]
 
 
 class SuggestionsEvent(EnvelopeFields):
     type: Literal["suggestions"]
-    data: Data6
+    data: Annotated[SuggestionsData, Field(title="SuggestionsData")]
 
 
 class Event(

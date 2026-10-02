@@ -1,6 +1,6 @@
 // Проверка на этапе `tsc`: сгенерированные контракты импортируются и union сужается по `type`.
 // В рантайме не используется.
-import type { Component, Event, UserInput } from "@/contracts";
+import type { Component, Event, TextDeltaData, UserInput } from "@/contracts";
 
 export function blockIdOf(event: Event): string | null {
   switch (event.type) {
@@ -21,3 +21,5 @@ export const sampleCard: Component = {
   title: "Крем",
   price: { amount: 4990, currency: "SEK" },
 };
+
+export const sampleDelta: TextDeltaData = { block_id: "b1", delta: "При" };

@@ -36,7 +36,7 @@
           "type": "object",
           "properties": {
             "type": { "const": "turn_started" },
-            "data": { "type": "object", "additionalProperties": false }
+            "data": { "title": "TurnStartedData", "type": "object", "additionalProperties": false }
           },
           "required": ["type", "data"]
         }
@@ -50,6 +50,7 @@
           "properties": {
             "type": { "const": "text_delta" },
             "data": {
+              "title": "TextDeltaData",
               "type": "object",
               "properties": {
                 "block_id": { "type": "string" },
@@ -71,6 +72,7 @@
           "properties": {
             "type": { "const": "text_done" },
             "data": {
+              "title": "TextDoneData",
               "type": "object",
               "properties": {
                 "block_id": { "type": "string" }
@@ -91,6 +93,7 @@
           "properties": {
             "type": { "const": "status" },
             "data": {
+              "title": "StatusData",
               "type": "object",
               "properties": {
                 "kind": {
@@ -115,6 +118,7 @@
           "properties": {
             "type": { "const": "tool_started" },
             "data": {
+              "title": "ToolStartedData",
               "type": "object",
               "properties": {
                 "tool_call_id": { "type": "string" },
@@ -138,6 +142,7 @@
           "properties": {
             "type": { "const": "tool_finished" },
             "data": {
+              "title": "ToolFinishedData",
               "type": "object",
               "properties": {
                 "tool_call_id": { "type": "string" },
@@ -160,6 +165,7 @@
           "properties": {
             "type": { "const": "component" },
             "data": {
+              "title": "ComponentData",
               "type": "object",
               "properties": {
                 "block_id": { "type": "string" },
@@ -182,11 +188,13 @@
           "properties": {
             "type": { "const": "suggestions" },
             "data": {
+              "title": "SuggestionsData",
               "type": "object",
               "properties": {
                 "items": {
                   "type": "array",
                   "items": {
+                    "title": "SuggestionItem",
                     "type": "object",
                     "properties": {
                       "label": { "type": "string" },
@@ -214,6 +222,7 @@
           "properties": {
             "type": { "const": "error" },
             "data": {
+              "title": "ErrorData",
               "type": "object",
               "properties": {
                 "code": {
@@ -247,6 +256,7 @@
           "properties": {
             "type": { "const": "done" },
             "data": {
+              "title": "DoneData",
               "type": "object",
               "properties": {
                 "status": {
@@ -254,6 +264,7 @@
                   "enum": ["completed", "interrupted", "failed"]
                 },
                 "usage": {
+                  "title": "DoneUsage",
                   "type": "object",
                   "properties": {
                     "input_tokens": { "type": "integer", "minimum": 0 },

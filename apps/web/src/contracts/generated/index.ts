@@ -40,7 +40,7 @@ export type Event =
  */
 export type TurnStartedEvent = EnvelopeFields & {
   type: "turn_started";
-  data: {};
+  data: TurnStartedData;
 };
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -48,10 +48,7 @@ export type TurnStartedEvent = EnvelopeFields & {
  */
 export type TextDeltaEvent = EnvelopeFields & {
   type: "text_delta";
-  data: {
-    block_id: string;
-    delta: string;
-  };
+  data: TextDeltaData;
 };
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -59,9 +56,7 @@ export type TextDeltaEvent = EnvelopeFields & {
  */
 export type TextDoneEvent = EnvelopeFields & {
   type: "text_done";
-  data: {
-    block_id: string;
-  };
+  data: TextDoneData;
 };
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -69,10 +64,7 @@ export type TextDoneEvent = EnvelopeFields & {
  */
 export type StatusEvent = EnvelopeFields & {
   type: "status";
-  data: {
-    kind: "searching" | "thinking" | "calling_api";
-    label: string;
-  };
+  data: StatusData;
 };
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -80,11 +72,7 @@ export type StatusEvent = EnvelopeFields & {
  */
 export type ToolStartedEvent = EnvelopeFields & {
   type: "tool_started";
-  data: {
-    tool_call_id: string;
-    name: string;
-    display_label?: string | null;
-  };
+  data: ToolStartedData;
 };
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -92,11 +80,7 @@ export type ToolStartedEvent = EnvelopeFields & {
  */
 export type ToolFinishedEvent = EnvelopeFields & {
   type: "tool_finished";
-  data: {
-    tool_call_id: string;
-    ok: boolean;
-    duration_ms: number;
-  };
+  data: ToolFinishedData;
 };
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -104,10 +88,7 @@ export type ToolFinishedEvent = EnvelopeFields & {
  */
 export type ComponentEvent = EnvelopeFields & {
   type: "component";
-  data: {
-    block_id: string;
-    component: Component;
-  };
+  data: ComponentData;
 };
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -115,21 +96,7 @@ export type ComponentEvent = EnvelopeFields & {
  */
 export type SuggestionsEvent = EnvelopeFields & {
   type: "suggestions";
-  data: {
-    /**
-     * @minItems 1
-     */
-    items: [
-      {
-        label: string;
-        input: UserInput;
-      },
-      ...{
-        label: string;
-        input: UserInput;
-      }[],
-    ];
-  };
+  data: SuggestionsData;
 };
 /**
  * Ввод пользователя в POST .../messages: текст, нажатие action-кнопки или отправка формы.
@@ -144,18 +111,7 @@ export type UserInput = TextInput | ActionInput | FormSubmitInput;
  */
 export type ErrorEvent = EnvelopeFields & {
   type: "error";
-  data: {
-    code:
-      | "llm_unavailable"
-      | "turn_timeout"
-      | "step_limit"
-      | "invalid_input"
-      | "conversation_not_found"
-      | "rate_limited"
-      | "internal";
-    message: string;
-    retryable: boolean;
-  };
+  data: ErrorData;
 };
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -163,15 +119,7 @@ export type ErrorEvent = EnvelopeFields & {
  */
 export type DoneEvent = EnvelopeFields & {
   type: "done";
-  data: {
-    status: "completed" | "interrupted" | "failed";
-    usage?: {
-      input_tokens?: number;
-      output_tokens?: number;
-      tool_calls?: number;
-      [k: string]: unknown;
-    };
-  };
+  data: DoneData;
 };
 
 export interface Contracts {
@@ -669,6 +617,42 @@ export interface EnvelopeFields {
   message_id?: string | null;
   ts: string;
 }
+export interface TurnStartedData {}
+export interface TextDeltaData {
+  block_id: string;
+  delta: string;
+}
+export interface TextDoneData {
+  block_id: string;
+}
+export interface StatusData {
+  kind: "searching" | "thinking" | "calling_api";
+  label: string;
+}
+export interface ToolStartedData {
+  tool_call_id: string;
+  name: string;
+  display_label?: string | null;
+}
+export interface ToolFinishedData {
+  tool_call_id: string;
+  ok: boolean;
+  duration_ms: number;
+}
+export interface ComponentData {
+  block_id: string;
+  component: Component;
+}
+export interface SuggestionsData {
+  /**
+   * @minItems 1
+   */
+  items: [SuggestionItem, ...SuggestionItem[]];
+}
+export interface SuggestionItem {
+  label: string;
+  input: UserInput;
+}
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
  * via the `definition` "TextInput".
@@ -698,6 +682,28 @@ export interface FormSubmitInput {
   type: "form_submit";
   form_id: string;
   values: {};
+}
+export interface ErrorData {
+  code:
+    | "llm_unavailable"
+    | "turn_timeout"
+    | "step_limit"
+    | "invalid_input"
+    | "conversation_not_found"
+    | "rate_limited"
+    | "internal";
+  message: string;
+  retryable: boolean;
+}
+export interface DoneData {
+  status: "completed" | "interrupted" | "failed";
+  usage?: DoneUsage;
+}
+export interface DoneUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  tool_calls?: number;
+  [k: string]: unknown;
 }
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema

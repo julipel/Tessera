@@ -1,10 +1,12 @@
 """Сгенерированные контракты (ADR-0005) принимают примеры из docs/contracts.md
 и отклоняют невалидные данные."""
 
+import inspect
+import re
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.contracts import (
     ActionInput,
@@ -15,11 +17,13 @@ from app.contracts import (
     Event,
     FormSubmitInput,
     HttpToolDefinition,
+    TextDeltaData,
     TextDeltaEvent,
     TextInput,
     TurnStartedEvent,
     UserInput,
 )
+from app.contracts.generated import events_schema
 
 ENVELOPE: dict[str, Any] = {
     "protocol_version": "1",
@@ -149,6 +153,26 @@ def test_event_json_roundtrip() -> None:
     raw = {**ENVELOPE, "type": "text_delta", "data": {"block_id": "b1", "delta": "x"}}
     event = Event.model_validate(raw)
     assert Event.model_validate_json(event.model_dump_json()) == event
+
+
+def test_event_built_from_named_data_type() -> None:
+    event = TextDeltaEvent(
+        **ENVELOPE, type="text_delta", data=TextDeltaData(block_id="b1", delta="x")
+    )
+    parsed = Event.model_validate_json(event.model_dump_json())
+    assert isinstance(parsed.root, TextDeltaEvent)
+    assert parsed.root.data == TextDeltaData(block_id="b1", delta="x")
+
+
+def test_event_payload_types_have_stable_names() -> None:
+    """Вложенные объекты в events.schema.json должны иметь title, иначе генератор
+    называет их Data1, Data2… и имена сдвигаются при добавлении событий."""
+    anonymous = [
+        name
+        for name, obj in inspect.getmembers(events_schema, inspect.isclass)
+        if issubclass(obj, BaseModel) and re.fullmatch(r"(Data|Item|Usage)\d*", name)
+    ]
+    assert anonymous == []
 
 
 def test_event_rejects_extra_data_fields() -> None:

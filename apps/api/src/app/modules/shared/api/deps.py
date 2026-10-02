@@ -21,3 +21,7 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
 
 # scope="function": commit до отправки ответа, иначе ошибка commit не дойдёт до клиента.
 DbSession = Annotated[AsyncSession, Depends(get_session, scope="function")]
+
+# scope="request": сессия живёт до конца отправки ответа — для SSE-стрима, который пишет в БД
+# после возврата из эндпоинта. Фиксировать изменения стрим должен сам (commit), до `done`.
+StreamDbSession = Annotated[AsyncSession, Depends(get_session, scope="request")]

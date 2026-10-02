@@ -26,6 +26,7 @@ type ErrorCode = Literal[
     "internal",
     "unauthorized",
     "not_found",
+    "duplicate_message",
 ]
 ERROR_CODES: tuple[str, ...] = get_args(ErrorCode.__value__)
 

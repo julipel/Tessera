@@ -55,7 +55,7 @@ class ChatMessage:
 
 @dataclass(frozen=True, slots=True)
 class NewMessage:
-    """Данные для записи сообщения; id и created_at назначает хранилище."""
+    """Данные для записи сообщения; created_at (и id, если не задан) назначает хранилище."""
 
     conversation_id: UUID
     role: MessageRole
@@ -64,3 +64,21 @@ class NewMessage:
     input: dict[str, Any] | None = None
     blocks: tuple[dict[str, Any], ...] = ()
     client_message_id: UUID | None = None
+    id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TurnRequest:
+    """Вход хода агента: `input` — ввод пользователя по контракту UserInput."""
+
+    tenant_id: TenantId
+    conversation_id: UUID
+    agent_config_id: UUID
+    input: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class AgentTextDelta:
+    """Кусок текста ответа. Пока единственное событие агента; набор расширит P2-08."""
+
+    text: str

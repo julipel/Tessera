@@ -28,11 +28,12 @@
 как в стриме), `status`: `completed` | `interrupted` | `failed`. Чужой/несуществующий диалог —
 404 `conversation_not_found`.
 
-Тело `POST .../messages`:
+Тело `POST .../messages` (`SendMessageRequest`):
 ```json
 {
   "client_message_id": "uuid",           // идемпотентность: повтор в том же диалоге не создаёт
-                                         // второе сообщение (уникален в пределах диалога)
+                                         // второе сообщение и не запускает ход → 409
+                                         // `duplicate_message`, ответ — из истории
   "input": { "type": "text", "text": "Нужен подарок маме, до 5000" }
 }
 ```
@@ -55,7 +56,7 @@
 { "error": { "code": "unauthorized", "message": "неизвестный ключ виджета", "retryable": false } }
 ```
 Статусы: 401 `unauthorized` (нет/неверный `X-Widget-Key`), 404 `not_found` /
-`conversation_not_found`, 405/422 `invalid_input`, 429 `rate_limited`, 500 `internal`
+`conversation_not_found`, 409 `duplicate_message`, 405/422 `invalid_input`, 429 `rate_limited`, 500 `internal`
 (подробности — только в логе с `trace_id`; `X-Trace-Id` есть в любом ответе).
 
 ## 2. SSE-протокол
@@ -87,6 +88,11 @@
 | `suggestions` | `{ "items": [{ "label", "input": UserInput }] }` | быстрые ответы под сообщением |
 | `error` | `{ "code", "message", "retryable": bool }` | ошибка хода |
 | `done` | `{ "status": "completed" \| "interrupted" \| "failed", "usage": {...} }` | конец хода |
+
+Ошибки ввода и доступа (401/404/409/422) приходят обычным HTTP-ответом до начала стрима.
+Ход без ошибок: `turn_started` → `text_delta`… → `text_done` → `done`; сбой агента —
+`error` → `done{failed}`. `seq` начинается с 1. Ответ ассистента записан в историю до `done`;
+при обрыве соединения клиентом частичный ответ сохраняется со статусом `interrupted`.
 
 Правила: `seq` монотонно растёт в пределах хода; блоки сообщения упорядочены по первому
 появлению `block_id`; клиент игнорирует неизвестные `type`. Сырые результаты инструментов
@@ -239,4 +245,4 @@ branding:
 `llm_unavailable` (retryable), `turn_timeout` (retryable), `step_limit`, `invalid_input`,
 `conversation_not_found`, `rate_limited` (retryable), `internal`.
 
-Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `not_found`.
+Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `not_found`, `duplicate_message`.

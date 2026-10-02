@@ -13,10 +13,12 @@ TRACE_ID_HEADER = "X-Trace-Id"
 
 def configure_logging(settings: Settings) -> None:
     """Локально — читаемый вывод в консоль, в остальных окружениях — JSON."""
-    renderer: structlog.typing.Processor = (
-        structlog.dev.ConsoleRenderer()
+    # ConsoleRenderer сам форматирует исключение; dict_tracebacks превратил бы трейсбек в список,
+    # и logger.exception падал бы в локальном окружении.
+    renderers: list[structlog.typing.Processor] = (
+        [structlog.dev.ConsoleRenderer()]
         if settings.is_local
-        else structlog.processors.JSONRenderer()
+        else [structlog.processors.dict_tracebacks, structlog.processors.JSONRenderer()]
     )
     structlog.configure(
         processors=[
@@ -24,8 +26,7 @@ def configure_logging(settings: Settings) -> None:
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             structlog.processors.StackInfoRenderer(),
-            structlog.processors.dict_tracebacks,
-            renderer,
+            *renderers,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(
             logging.getLevelNamesMapping()[settings.log_level]

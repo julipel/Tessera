@@ -28,7 +28,7 @@ async def start_conversation(
     return await conversations.create(tenant_id, config_id, Channel.WEB, visitor_id)
 
 
-async def _require_conversation(
+async def require_conversation(
     tenant_id: TenantId, conversation_id: UUID, conversations: ConversationStore
 ) -> Conversation:
     conversation = await conversations.find(tenant_id, conversation_id)
@@ -43,7 +43,7 @@ async def get_history(
     conversations: ConversationStore,
     messages: MessageStore,
 ) -> MessageHistory:
-    await _require_conversation(tenant_id, conversation_id, conversations)
+    await require_conversation(tenant_id, conversation_id, conversations)
     items = await messages.list_for(tenant_id, conversation_id)
     return MessageHistory(
         conversation_id=conversation_id, messages=[_history_message(m) for m in items]
@@ -73,9 +73,17 @@ async def append_user_message(
 ) -> tuple[ChatMessage, bool]:
     """Повтор с тем же client_message_id (ретрай клиента) возвращает уже записанное
     сообщение, даже если ввод отличается: идемпотентность по ключу, а не по содержимому."""
-    await _require_conversation(tenant_id, conversation_id, conversations)
+    await require_conversation(tenant_id, conversation_id, conversations)
+    return await messages.add_once(
+        tenant_id, user_message(conversation_id, client_message_id, user_input)
+    )
+
+
+def user_message(
+    conversation_id: UUID, client_message_id: UUID, user_input: UserInput
+) -> NewMessage:
     payload = user_input.root
-    message = NewMessage(
+    return NewMessage(
         conversation_id=conversation_id,
         role=MessageRole.USER,
         status=MessageStatus.COMPLETED,
@@ -83,4 +91,3 @@ async def append_user_message(
         input=user_input.model_dump(mode="json"),
         client_message_id=client_message_id,
     )
-    return await messages.add_once(tenant_id, message)

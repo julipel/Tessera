@@ -604,28 +604,17 @@ export interface CreateConversationResponse {
   conversation_id: string;
 }
 /**
- * Ответ GET /v1/conversations/{id}/messages: сообщения в порядке создания.
+ * Тело POST /v1/conversations/{id}/messages; ответ — SSE-стрим (docs/contracts.md §2).
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "MessageHistory".
+ * via the `definition` "SendMessageRequest".
  */
-export interface MessageHistory {
-  conversation_id: string;
-  messages: HistoryMessage[];
-}
-/**
- * Сообщение истории. У user — исходный ввод (input), у assistant — блоки в порядке первого появления block_id в стриме.
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "HistoryMessage".
- */
-export interface HistoryMessage {
-  message_id: string;
-  role: "user" | "assistant";
-  status: "completed" | "interrupted" | "failed";
-  created_at: string;
-  input?: UserInput;
-  blocks: MessageBlock[];
+export interface SendMessageRequest {
+  /**
+   * Ключ идемпотентности, уникален в пределах диалога: повтор → 409 duplicate_message.
+   */
+  client_message_id: string;
+  input: UserInput;
 }
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -656,6 +645,30 @@ export interface FormSubmitInput {
   type: "form_submit";
   form_id: string;
   values: {};
+}
+/**
+ * Ответ GET /v1/conversations/{id}/messages: сообщения в порядке создания.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "MessageHistory".
+ */
+export interface MessageHistory {
+  conversation_id: string;
+  messages: HistoryMessage[];
+}
+/**
+ * Сообщение истории. У user — исходный ввод (input), у assistant — блоки в порядке первого появления block_id в стриме.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "HistoryMessage".
+ */
+export interface HistoryMessage {
+  message_id: string;
+  role: "user" | "assistant";
+  status: "completed" | "interrupted" | "failed";
+  created_at: string;
+  input?: UserInput;
+  blocks: MessageBlock[];
 }
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -787,7 +800,7 @@ export interface HttpError {
  */
 export interface HttpErrorBody {
   /**
-   * Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), not_found (404).
+   * Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), not_found (404), duplicate_message (409).
    */
   code:
     | "llm_unavailable"
@@ -798,7 +811,8 @@ export interface HttpErrorBody {
     | "rate_limited"
     | "internal"
     | "unauthorized"
-    | "not_found";
+    | "not_found"
+    | "duplicate_message";
   message: string;
   retryable: boolean;
 }

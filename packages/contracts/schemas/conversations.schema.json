@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "conversations.schema.json",
   "title": "ConversationsSchema",
-  "description": "HTTP API диалогов (docs/contracts.md §1). Файл без единого корневого типа — экспортируемые типы в $defs: CreateConversationRequest, CreateConversationResponse, MessageHistory, HistoryMessage, MessageBlock.",
+  "description": "HTTP API диалогов (docs/contracts.md §1). Файл без единого корневого типа — экспортируемые типы в $defs: CreateConversationRequest, CreateConversationResponse, SendMessageRequest, MessageHistory, HistoryMessage, MessageBlock.",
   "$defs": {
     "CreateConversationRequest": {
       "type": "object",
@@ -19,6 +19,20 @@
         "conversation_id": { "type": "string", "format": "uuid" }
       },
       "required": ["conversation_id"],
+      "additionalProperties": false
+    },
+    "SendMessageRequest": {
+      "type": "object",
+      "description": "Тело POST /v1/conversations/{id}/messages; ответ — SSE-стрим (docs/contracts.md §2).",
+      "properties": {
+        "client_message_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Ключ идемпотентности, уникален в пределах диалога: повтор → 409 duplicate_message."
+        },
+        "input": { "$ref": "user_input.schema.json" }
+      },
+      "required": ["client_message_id", "input"],
       "additionalProperties": false
     },
     "MessageHistory": {

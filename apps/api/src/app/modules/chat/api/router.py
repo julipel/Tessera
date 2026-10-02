@@ -1,23 +1,46 @@
 """Публичный API диалогов (docs/contracts.md §1)."""
 
+from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
+from fastapi.sse import EventSourceResponse
 
-from app.contracts import CreateConversationRequest, CreateConversationResponse, MessageHistory
+from app.contracts import (
+    CreateConversationRequest,
+    CreateConversationResponse,
+    MessageHistory,
+    SendMessageRequest,
+)
+from app.modules.chat.api.sse import sse_stream
 from app.modules.chat.application.conversations import get_history, start_conversation
-from app.modules.chat.domain.errors import ConversationNotFoundError, NoActiveConfigError
+from app.modules.chat.application.turns import start_turn
+from app.modules.chat.domain.errors import (
+    ConversationNotFoundError,
+    DuplicateMessageError,
+    NoActiveConfigError,
+)
+from app.modules.chat.domain.ports import TurnAgent
+from app.modules.chat.infrastructure.echo_agent import EchoAgent
 from app.modules.chat.infrastructure.repositories import (
     ConversationRepository,
     MessageRepository,
     TenantsActiveConfig,
 )
-from app.modules.shared.public import ApiError, DbSession
+from app.modules.shared.public import ApiError, DbSession, StreamDbSession
 from app.modules.tenants.public import WidgetTenant
 
 router = APIRouter(prefix="/v1/conversations", tags=["conversations"])
 logger = structlog.get_logger(__name__)
+
+
+def get_turn_agent() -> TurnAgent:
+    """Эхо-заглушка до P2-08; тесты подменяют через dependency_overrides."""
+    return EchoAgent(chunk_delay=0.03)
+
+
+Agent = Annotated[TurnAgent, Depends(get_turn_agent)]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -50,3 +73,40 @@ async def conversation_messages(
         )
     except ConversationNotFoundError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e
+
+
+@router.post(
+    "/{conversation_id}/messages",
+    # Не response_class=EventSourceResponse: с ним FastAPI ждёт эндпоинт-генератор, а здесь
+    # ошибки ввода и доступа должны уйти обычным HTTP-ответом до начала стрима.
+    responses={
+        200: {"description": "SSE-стрим хода", "content": {"text/event-stream": {}}},
+        409: {"description": "client_message_id уже отправлен (duplicate_message)"},
+    },
+)
+async def send_message(
+    conversation_id: UUID,
+    body: SendMessageRequest,
+    tenant_id: WidgetTenant,
+    session: StreamDbSession,
+    agent: Agent,
+) -> EventSourceResponse:
+    structlog.contextvars.bind_contextvars(conversation_id=str(conversation_id))
+    try:
+        turn = await start_turn(
+            tenant_id,
+            conversation_id,
+            body.client_message_id,
+            body.input,
+            ConversationRepository(session),
+            MessageRepository(session),
+            agent,
+            session.commit,
+        )
+    except ConversationNotFoundError as e:
+        raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e
+    except DuplicateMessageError as e:
+        raise ApiError(status.HTTP_409_CONFLICT, "duplicate_message", str(e)) from e
+    structlog.contextvars.bind_contextvars(turn_id=str(turn.turn_id))
+    logger.info("turn_started")
+    return EventSourceResponse(sse_stream(turn))

@@ -81,6 +81,8 @@ class MessageRepository(TenantRepository[MessageRecord]):
         stmt = (
             insert(MessageRecord)
             .values(
+                # id задан, когда он заранее отдан клиенту (message_id в SSE-событиях хода).
+                **({"id": message.id} if message.id is not None else {}),
                 tenant_id=tenant_id,
                 conversation_id=message.conversation_id,
                 role=message.role,

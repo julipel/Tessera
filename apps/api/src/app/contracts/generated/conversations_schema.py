@@ -14,7 +14,7 @@ from . import components_schema, user_input_schema
 class ConversationsSchema(RootModel[Any]):
     root: Annotated[Any, Field(title="ConversationsSchema")]
     """
-    HTTP API диалогов (docs/contracts.md §1). Файл без единого корневого типа — экспортируемые типы в $defs: CreateConversationRequest, CreateConversationResponse, MessageHistory, HistoryMessage, MessageBlock.
+    HTTP API диалогов (docs/contracts.md §1). Файл без единого корневого типа — экспортируемые типы в $defs: CreateConversationRequest, CreateConversationResponse, SendMessageRequest, MessageHistory, HistoryMessage, MessageBlock.
     """
 
 
@@ -52,6 +52,21 @@ class ComponentBlock(BaseModel):
     type: Literal["component"]
     block_id: Annotated[str, Field(min_length=1)]
     component: components_schema.Component
+
+
+class SendMessageRequest(BaseModel):
+    """
+    Тело POST /v1/conversations/{id}/messages; ответ — SSE-стрим (docs/contracts.md §2).
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    client_message_id: UUID
+    """
+    Ключ идемпотентности, уникален в пределах диалога: повтор → 409 duplicate_message.
+    """
+    input: user_input_schema.UserInput
 
 
 class MessageBlock(RootModel[TextBlock | ComponentBlock]):

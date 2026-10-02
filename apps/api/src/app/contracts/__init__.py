@@ -13,6 +13,7 @@ from app.contracts.generated.conversations_schema import (
     HistoryMessage,
     MessageBlock,
     MessageHistory,
+    SendMessageRequest,
     TextBlock,
 )
 from app.contracts.generated.envelope_schema import Envelope
@@ -83,6 +84,7 @@ __all__ = [
     "Price",
     "PublicAssistant",
     "PublicConfig",
+    "SendMessageRequest",
     "StatusData",
     "StatusEvent",
     "SuggestionItem",

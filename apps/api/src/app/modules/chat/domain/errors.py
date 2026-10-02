@@ -1,6 +1,6 @@
 """Ошибки модуля chat."""
 
-from app.modules.shared.kernel import NotFoundError
+from app.modules.shared.kernel import DomainError, NotFoundError
 
 
 class ConversationNotFoundError(NotFoundError):
@@ -9,3 +9,7 @@ class ConversationNotFoundError(NotFoundError):
 
 class NoActiveConfigError(NotFoundError):
     """Нет активного AgentConfig тенанта — диалог начать нельзя."""
+
+
+class DuplicateMessageError(DomainError):
+    """Сообщение с таким client_message_id в диалоге уже есть — новый ход не запускается."""

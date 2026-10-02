@@ -22,7 +22,8 @@ const files = (await readdir(schemasDir)).filter((f) => f.endsWith(".schema.json
 const defs = {};
 for (const file of files) {
   const schema = JSON.parse(await readFile(path.join(schemasDir, file), "utf8"));
-  if (schema.title) {
+  // Корень без собственного типа (tools.schema.json) — только контейнер для $defs.
+  if (schema.title && (schema.type || schema.oneOf)) {
     defs[schema.title] = { $ref: file };
   }
   for (const name of Object.keys(schema.$defs ?? {})) {

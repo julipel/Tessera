@@ -31,6 +31,10 @@
 - [x] **P1-05a Имена типов событий.** Добавить `title` inline-объектам `data` в
   `events.schema.json` (напр. `TextDeltaData`, `DoneData`), `make contracts`, обновить тест
   и README схем. Сделать до P1-08. DoD: в generated нет классов `Data`/`Data1…`, `make check` зелёный.
+- [x] **P1-05b Имена типов AgentConfig и tools.** `title` для `SlotDefinition.items` в
+  `agent_config.schema.json` (сейчас класс `Items`); убрать пустой корневой `Model(RootModel[Any])`
+  из `tools_schema` (корень без типа). Можно вместе с P1-06. DoD: в generated нет `Items`/`Model`,
+  тест на безымянные классы покрывает все схемы, `make check` зелёный.
 - [ ] **P1-06 Tenants.** Tenant, AgentConfig (версии, draft/active), WidgetKey, загрузка конфига
   из YAML (seed-команда), `GET /v1/public/config`. DoD: seed демо-тенанта, тесты.
 - [ ] **P1-07 Chat: диалоги и сообщения.** Conversation, Message, эндпоинты создания и истории,

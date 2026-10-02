@@ -86,6 +86,7 @@
           "description": "Допустимые значения (для string)."
         },
         "items": {
+          "title": "SlotItems",
           "type": "object",
           "description": "Используется при type=array, напр. concerns[] из пилота beauty.",
           "properties": {

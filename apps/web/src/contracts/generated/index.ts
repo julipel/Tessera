@@ -241,13 +241,14 @@ export interface SlotDefinition {
    * Допустимые значения (для string).
    */
   enum?: string[];
-  /**
-   * Используется при type=array, напр. concerns[] из пилота beauty.
-   */
-  items?: {
-    type: "string" | "number";
-    enum?: string[];
-  };
+  items?: SlotItems;
+}
+/**
+ * Используется при type=array, напр. concerns[] из пилота beauty.
+ */
+export interface SlotItems {
+  type: "string" | "number";
+  enum?: string[];
 }
 /**
  * This interface was referenced by `AgentConfig`'s JSON-Schema

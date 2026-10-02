@@ -1,7 +1,9 @@
 """Сгенерированные контракты (ADR-0005) принимают примеры из docs/contracts.md
 и отклоняют невалидные данные."""
 
+import importlib
 import inspect
+import pkgutil
 import re
 from typing import Any
 
@@ -22,8 +24,8 @@ from app.contracts import (
     TextInput,
     TurnStartedEvent,
     UserInput,
+    generated,
 )
-from app.contracts.generated import events_schema
 
 ENVELOPE: dict[str, Any] = {
     "protocol_version": "1",
@@ -164,13 +166,16 @@ def test_event_built_from_named_data_type() -> None:
     assert parsed.root.data == TextDeltaData(block_id="b1", delta="x")
 
 
-def test_event_payload_types_have_stable_names() -> None:
-    """Вложенные объекты в events.schema.json должны иметь title, иначе генератор
-    называет их Data1, Data2… и имена сдвигаются при добавлении событий."""
+def test_generated_types_have_stable_names() -> None:
+    """Вложенные объекты в схемах должны иметь title, иначе генератор называет их
+    Data1, Items, Model… и имена сдвигаются при добавлении новых."""
     anonymous = [
-        name
-        for name, obj in inspect.getmembers(events_schema, inspect.isclass)
-        if issubclass(obj, BaseModel) and re.fullmatch(r"(Data|Item|Usage)\d*", name)
+        f"{info.name}.{name}"
+        for info in pkgutil.iter_modules(generated.__path__)
+        for name, obj in inspect.getmembers(
+            importlib.import_module(f"{generated.__name__}.{info.name}"), inspect.isclass
+        )
+        if issubclass(obj, BaseModel) and re.fullmatch(r"(Data|Items?|Usage|Model)\d*", name)
     ]
     assert anonymous == []
 

@@ -48,7 +48,7 @@ class LimitsConfig(BaseModel):
     max_tool_retries: Annotated[int | None, Field(ge=0)] = 2
 
 
-class Items(BaseModel):
+class SlotItems(BaseModel):
     """
     Используется при type=array, напр. concerns[] из пилота beauty.
     """
@@ -74,7 +74,7 @@ class SlotDefinition(BaseModel):
     """
     Допустимые значения (для string).
     """
-    items: Items | None = None
+    items: Annotated[SlotItems | None, Field(title="SlotItems")] = None
     """
     Используется при type=array, напр. concerns[] из пилота beauty.
     """

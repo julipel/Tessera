@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "tools.schema.json",
+  "title": "ToolsSchema",
   "description": "Интерфейс инструментов агента. Файл без единого корневого типа — экспортируемые типы в $defs: ToolDefinition, ToolResult, ToolError, HttpToolDefinition.",
   "$defs": {
     "ToolError": {

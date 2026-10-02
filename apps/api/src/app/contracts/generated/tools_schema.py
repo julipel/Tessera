@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 from . import components_schema
 
 
-class Model(RootModel[Any]):
-    root: Any
+class ToolsSchema(RootModel[Any]):
+    root: Annotated[Any, Field(title="ToolsSchema")]
     """
     Интерфейс инструментов агента. Файл без единого корневого типа — экспортируемые типы в $defs: ToolDefinition, ToolResult, ToolError, HttpToolDefinition.
     """

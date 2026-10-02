@@ -61,12 +61,12 @@ ifneq ($(HAS_WEB),)
 	cd $(WEB) && pnpm test --if-present
 endif
 
-# Реализуется в P1-05
+# JSON Schema → Pydantic (apps/api) и TS (apps/web), ADR-0005
 contracts:
-	@echo "TODO(P1-05): генерация Pydantic и TS из packages/contracts/schemas"
+	scripts/contracts.sh generate
 
 contracts-check:
-	@echo "TODO(P1-05): проверка актуальности сгенерированных контрактов"
+	scripts/contracts.sh check
 
 migrate:
 	cd $(API) && uv run alembic upgrade head

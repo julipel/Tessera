@@ -26,8 +26,11 @@
   мимо public.py; mypy strict; ruff. DoD: намеренное нарушение ловится (тест-пример в PR, затем убрать).
 - [x] **P1-04 БД и миграции.** Async SQLAlchemy, Alembic, базовый репозиторий с обязательным
   tenant_id, фикстуры pytest с транзакцией на тест. DoD: миграция применяется, тест изоляции тенантов.
-- [ ] **P1-05 Генерация контрактов.** `make contracts` → Pydantic + TS. DoD: сгенерированные
+- [x] **P1-05 Генерация контрактов.** `make contracts` → Pydantic + TS. DoD: сгенерированные
   типы импортируются в api и web, проверка в `make check`, что генерация актуальна.
+- [ ] **P1-05a Имена типов событий.** Добавить `title` inline-объектам `data` в
+  `events.schema.json` (напр. `TextDeltaData`, `DoneData`), `make contracts`, обновить тест
+  и README схем. Сделать до P1-08. DoD: в generated нет классов `Data`/`Data1…`, `make check` зелёный.
 - [ ] **P1-06 Tenants.** Tenant, AgentConfig (версии, draft/active), WidgetKey, загрузка конфига
   из YAML (seed-команда), `GET /v1/public/config`. DoD: seed демо-тенанта, тесты.
 - [ ] **P1-07 Chat: диалоги и сообщения.** Conversation, Message, эндпоинты создания и истории,

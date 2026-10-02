@@ -24,6 +24,8 @@ packages = ["src/app"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+# Сгенерировано из JSON Schema (make contracts), формат задаёт scripts/contracts.sh.
+extend-exclude = ["src/app/contracts/generated"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "ASYNC", "SIM", "RUF"]
@@ -199,6 +201,7 @@ allowed_importers = ["app.modules.shared"]
 
 [dependency-groups]
 dev = [
+    "datamodel-code-generator>=0.83.0",
     "httpx>=0.28.1",
     "import-linter>=2.15",
     "mypy>=2.3.1",

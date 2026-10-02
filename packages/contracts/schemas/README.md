@@ -31,5 +31,13 @@ HTTP-инструмент `HttpToolDefinition` для `check_stock`.
 (`skin_types`, `concerns`, `families` и т.п. из docs/pilot.md §3) — они живут в данных каталога
 и в `filterable_attributes`/`slots` конкретного `AgentConfig`, а не в JSON Schema контрактов.
 
-Генерация: `make contracts` (P1-05) → Pydantic v2 (`apps/api`) и TypeScript (`apps/web`).
-Сгенерированный код не редактировать.
+Генерация: `make contracts` (`scripts/contracts.sh`) → Pydantic v2 в
+`apps/api/src/app/contracts/generated/` (datamodel-code-generator) и TypeScript в
+`apps/web/src/contracts/generated/index.ts` (json-schema-to-typescript,
+`packages/contracts/scripts/generate-ts.mjs`). Импортировать из точек входа `app.contracts` и
+`@/contracts`. `make check` (цель `contracts-check`) падает, если generated не совпадает
+со схемами. Сгенерированный код не редактировать.
+
+Ограничения генерации: `if/then` (у `select` должны быть `options`) в Pydantic не переносится —
+проверять в коде, который строит форму; inline-объекты `data` событий без `title` получают имена
+`Data`, `Data1`… — в Python обращаться к ним через поле события, не по имени класса.

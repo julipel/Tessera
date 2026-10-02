@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.api import health
 from app.logs import TraceIdMiddleware, configure_logging
+from app.modules.chat.public import TurnRegistry
 from app.modules.chat.public import router as chat_router
 from app.modules.shared.public import (
     create_engine,
@@ -33,6 +34,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # а не в lifespan: так он доступен и в тестах без запуска lifespan.
     app.state.engine = create_engine(settings.database_url, echo=settings.database_echo)
     app.state.session_factory = create_session_factory(app.state.engine)
+    app.state.turn_registry = TurnRegistry()  # текущие ходы процесса — для отмены
     install_error_handlers(app)
     app.add_middleware(TraceIdMiddleware)  # после: снаружи обработчика 500
     app.include_router(health.router)

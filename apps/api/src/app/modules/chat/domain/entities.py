@@ -74,6 +74,7 @@ class TurnRequest:
     tenant_id: TenantId
     conversation_id: UUID
     agent_config_id: UUID
+    turn_id: UUID
     input: dict[str, Any]
 
 

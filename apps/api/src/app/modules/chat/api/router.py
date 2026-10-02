@@ -4,7 +4,7 @@ from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.sse import EventSourceResponse
 
 from app.contracts import (
@@ -15,7 +15,7 @@ from app.contracts import (
 )
 from app.modules.chat.api.sse import sse_stream
 from app.modules.chat.application.conversations import get_history, start_conversation
-from app.modules.chat.application.turns import start_turn
+from app.modules.chat.application.turns import TurnRegistry, start_turn
 from app.modules.chat.domain.errors import (
     ConversationNotFoundError,
     DuplicateMessageError,
@@ -41,6 +41,14 @@ def get_turn_agent() -> TurnAgent:
 
 
 Agent = Annotated[TurnAgent, Depends(get_turn_agent)]
+
+
+def get_turn_registry(request: Request) -> TurnRegistry:
+    registry: TurnRegistry = request.app.state.turn_registry
+    return registry
+
+
+Registry = Annotated[TurnRegistry, Depends(get_turn_registry)]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -90,6 +98,7 @@ async def send_message(
     tenant_id: WidgetTenant,
     session: StreamDbSession,
     agent: Agent,
+    registry: Registry,
 ) -> EventSourceResponse:
     structlog.contextvars.bind_contextvars(conversation_id=str(conversation_id))
     try:
@@ -102,6 +111,7 @@ async def send_message(
             MessageRepository(session),
             agent,
             session.commit,
+            registry,
         )
     except ConversationNotFoundError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e
@@ -110,3 +120,14 @@ async def send_message(
     structlog.contextvars.bind_contextvars(turn_id=str(turn.turn_id))
     logger.info("turn_started")
     return EventSourceResponse(sse_stream(turn))
+
+
+@router.post("/{conversation_id}/turns/{turn_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_turn(
+    conversation_id: UUID, turn_id: UUID, tenant_id: WidgetTenant, registry: Registry
+) -> Response:
+    """Стрим хода закончится `done{interrupted}`. 404 — хода нет, он завершён или чужой."""
+    structlog.contextvars.bind_contextvars(conversation_id=str(conversation_id))
+    if not registry.cancel(tenant_id, conversation_id, turn_id):
+        raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", f"ход {turn_id} не выполняется")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

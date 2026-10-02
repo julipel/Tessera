@@ -54,6 +54,9 @@ modules/<module>/
 
 Правило зависимостей: `api → application → domain`, `infrastructure → domain`.
 `domain` не импортирует ничего из фреймворков.
+`api` может импортировать `infrastructure` — для сборки зависимостей через FastAPI dependencies
+(репозиторий/адаптер → use case). `application` и `infrastructure` друг о друге не знают.
+Правила проверяет import-linter (контракты в `apps/api/pyproject.toml`).
 
 ## 4. Поток обработки сообщения
 

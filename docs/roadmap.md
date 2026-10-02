@@ -22,7 +22,7 @@
   (Postgres, Redis, Qdrant), Makefile по CLAUDE.md, `.env.example`. DoD: `make up` поднимает всё.
 - [x] **P1-02 Скелет API.** FastAPI app factory, настройки (pydantic-settings), structlog,
   модули-заглушки со слоями и `public.py`, `/health`. DoD: `make check-fast` зелёный.
-- [ ] **P1-03 Архитектурные проверки.** import-linter: слои и запрет импорта чужих модулей
+- [x] **P1-03 Архитектурные проверки.** import-linter: слои и запрет импорта чужих модулей
   мимо public.py; mypy strict; ruff. DoD: намеренное нарушение ловится (тест-пример в PR, затем убрать).
 - [ ] **P1-04 БД и миграции.** Async SQLAlchemy, Alembic, базовый репозиторий с обязательным
   tenant_id, фикстуры pytest с транзакцией на тест. DoD: миграция применяется, тест изоляции тенантов.

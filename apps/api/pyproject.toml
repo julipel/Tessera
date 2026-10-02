@@ -24,12 +24,15 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "ASYNC", "SIM", "RUF"]
+# Кириллица в комментариях и docstrings — норма для проекта, не путаем её с латиницей.
+allowed-confusables = ["а", "в", "е", "к", "м", "н", "о", "р", "с", "т", "у", "х", "А", "В", "Е", "К", "М", "Н", "О", "Р", "С", "Т", "Х"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 mypy_path = "src"
-packages = ["app"]
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -37,7 +40,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = ["live: тесты с реальными внешними сервисами (LLM-провайдеры и т.п.)"]
 
-# Минимальный контракт-заглушка. Слои и границы модулей — в P1-03.
+# Архитектурные границы (architecture.md §2–3, ADR-0001). Нарушение ломает `make check`.
 [tool.importlinter]
 root_package = "app"
 include_external_packages = true
@@ -47,6 +50,149 @@ name = "Прод-код не зависит от тестовых инструм
 type = "forbidden"
 source_modules = ["app"]
 forbidden_modules = ["pytest"]
+
+[[tool.importlinter.contracts]]
+name = "Слои внутри модуля: api → application | infrastructure → domain"
+type = "layers"
+layers = ["api", "application | infrastructure", "domain"]
+containers = [
+    "app.modules.tenants",
+    "app.modules.chat",
+    "app.modules.agent",
+    "app.modules.tools",
+    "app.modules.knowledge",
+    "app.modules.memory",
+    "app.modules.observability",
+    "app.modules.shared",
+]
+exhaustive = true
+exhaustive_ignores = ["public"]
+
+[[tool.importlinter.contracts]]
+name = "Направление зависимостей между модулями"
+type = "layers"
+layers = [
+    "app.modules.chat",
+    "app.modules.agent",
+    "app.modules.tools | app.modules.memory | app.modules.tenants",
+    "app.modules.knowledge",
+    "app.modules.observability",
+    "app.modules.shared",
+]
+
+[[tool.importlinter.contracts]]
+name = "domain не зависит от фреймворков, БД и SDK"
+type = "forbidden"
+source_modules = ["app.modules.*.domain"]
+forbidden_modules = [
+    "fastapi",
+    "starlette",
+    "sqlalchemy",
+    "pydantic_settings",
+    "httpx",
+    "structlog",
+    "redis",
+    "arq",
+    "qdrant_client",
+    "openai",
+    "anthropic",
+]
+
+[[tool.importlinter.contracts]]
+name = "agent не знает про HTTP"
+type = "forbidden"
+source_modules = ["app.modules.agent"]
+forbidden_modules = ["fastapi", "starlette"]
+
+# Внутренности модуля доступны только ему самому; остальным — только public.py.
+
+[[tool.importlinter.contracts]]
+name = "tenants: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.tenants.domain",
+    "app.modules.tenants.application",
+    "app.modules.tenants.infrastructure",
+    "app.modules.tenants.api",
+]
+allowed_importers = ["app.modules.tenants"]
+
+[[tool.importlinter.contracts]]
+name = "chat: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.chat.domain",
+    "app.modules.chat.application",
+    "app.modules.chat.infrastructure",
+    "app.modules.chat.api",
+]
+allowed_importers = ["app.modules.chat"]
+
+[[tool.importlinter.contracts]]
+name = "agent: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.agent.domain",
+    "app.modules.agent.application",
+    "app.modules.agent.infrastructure",
+    "app.modules.agent.api",
+]
+allowed_importers = ["app.modules.agent"]
+
+[[tool.importlinter.contracts]]
+name = "tools: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.tools.domain",
+    "app.modules.tools.application",
+    "app.modules.tools.infrastructure",
+    "app.modules.tools.api",
+]
+allowed_importers = ["app.modules.tools"]
+
+[[tool.importlinter.contracts]]
+name = "knowledge: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.knowledge.domain",
+    "app.modules.knowledge.application",
+    "app.modules.knowledge.infrastructure",
+    "app.modules.knowledge.api",
+]
+allowed_importers = ["app.modules.knowledge"]
+
+[[tool.importlinter.contracts]]
+name = "memory: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.memory.domain",
+    "app.modules.memory.application",
+    "app.modules.memory.infrastructure",
+    "app.modules.memory.api",
+]
+allowed_importers = ["app.modules.memory"]
+
+[[tool.importlinter.contracts]]
+name = "observability: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.observability.domain",
+    "app.modules.observability.application",
+    "app.modules.observability.infrastructure",
+    "app.modules.observability.api",
+]
+allowed_importers = ["app.modules.observability"]
+
+[[tool.importlinter.contracts]]
+name = "shared: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.shared.domain",
+    "app.modules.shared.application",
+    "app.modules.shared.infrastructure",
+    "app.modules.shared.api",
+]
+allowed_importers = ["app.modules.shared"]
 
 [dependency-groups]
 dev = [

@@ -20,7 +20,7 @@
 
 - [x] **P1-01 Монорепо и инфраструктура.** uv-проект apps/api, pnpm apps/web, Docker Compose
   (Postgres, Redis, Qdrant), Makefile по CLAUDE.md, `.env.example`. DoD: `make up` поднимает всё.
-- [ ] **P1-02 Скелет API.** FastAPI app factory, настройки (pydantic-settings), structlog,
+- [x] **P1-02 Скелет API.** FastAPI app factory, настройки (pydantic-settings), structlog,
   модули-заглушки со слоями и `public.py`, `/health`. DoD: `make check-fast` зелёный.
 - [ ] **P1-03 Архитектурные проверки.** import-linter: слои и запрет импорта чужих модулей
   мимо public.py; mypy strict; ruff. DoD: намеренное нарушение ловится (тест-пример в PR, затем убрать).

@@ -3,7 +3,12 @@ name = "app"
 version = "0.1.0"
 description = "API платформы AI-консультанта"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "fastapi>=0.142.2",
+    "pydantic-settings>=2.15.0",
+    "structlog>=26.1.0",
+    "uvicorn[standard]>=0.54.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -45,6 +50,7 @@ forbidden_modules = ["pytest"]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "import-linter>=2.15",
     "mypy>=2.3.1",
     "pytest>=9.1.1",

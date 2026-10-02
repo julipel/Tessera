@@ -1,0 +1,1 @@
+"""observability.domain: сущности, value objects, доменные ошибки, порты. Без фреймворков."""

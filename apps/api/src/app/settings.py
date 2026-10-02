@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     database_echo: bool = False
     redis_url: str = "redis://localhost:6379/0"
     qdrant_url: str = "http://localhost:6333"
+    # Ключ виджета, который `make seed` выдаёт новому тенанту; пусто — сгенерировать.
+    seed_widget_key: str | None = None
 
     @property
     def is_local(self) -> bool:

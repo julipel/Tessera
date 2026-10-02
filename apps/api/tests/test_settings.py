@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -29,3 +31,13 @@ def test_unknown_app_env_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_seed_widget_key_read_from_env_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SEED_WIDGET_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("SEED_WIDGET_KEY=wk_from_file\n")
+
+    assert Settings(_env_file=env_file).seed_widget_key == "wk_from_file"

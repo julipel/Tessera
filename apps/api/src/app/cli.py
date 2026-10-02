@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -52,8 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     seed_cmd.add_argument("paths", nargs="*", type=Path, help="по умолчанию config/tenants/*.yaml")
     seed_cmd.add_argument(
         "--widget-key",
-        default=os.environ.get("SEED_WIDGET_KEY"),
-        help="ключ виджета для нового тенанта (иначе SEED_WIDGET_KEY или случайный)",
+        help="ключ виджета для нового тенанта (иначе SEED_WIDGET_KEY из env/.env или случайный)",
     )
     args = parser.parse_args(argv)
 
@@ -62,7 +60,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"нет файлов тенантов в {DEFAULT_TENANTS_DIR}", file=sys.stderr)
         return 1
     try:
-        asyncio.run(seed(paths, args.widget_key, Settings()))
+        settings = Settings()
+        # Settings читает и env, и .env — os.environ один .env не видит.
+        widget_key = args.widget_key or settings.seed_widget_key or None
+        asyncio.run(seed(paths, widget_key, settings))
     except InvalidTenantSpecError as e:
         print(f"невалидное описание тенанта: {e}", file=sys.stderr)
         return 1

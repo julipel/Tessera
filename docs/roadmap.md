@@ -79,7 +79,7 @@
   `AgentLoop`), маппинг AgentEvent → SSE (блоки текст/компонент, `done.usage`, `LLMError` →
   `llm_unavailable`), `LLMClients` по провайдеру, `agent.kernel`; e2e — через мок
   OpenAI-совместимого API. DoD: диалог в web-чате с реальной моделью без инструментов.
-- [ ] **P2-08b Сохранение ToolCall.** Таблица `tool_calls` (миграция), в `ToolFinished` —
+- [x] **P2-08b Сохранение ToolCall.** Таблица `tool_calls` (миграция), в `ToolFinished` —
   аргументы, результат, ошибка, `duration_ms` (в SSE `tool_finished` — замер цикла вместо
   оценки chat от раннего `tool_started`); запись в `save()` вместе с ответом, в т.ч.
   `interrupted`. DoD: тесты записи и изоляции тенантов.

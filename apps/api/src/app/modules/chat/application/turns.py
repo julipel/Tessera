@@ -1,7 +1,6 @@
 """Ход ассистента: события агента → SSE-протокол (docs/contracts.md §2) и запись ответа."""
 
 import asyncio
-import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -27,6 +26,7 @@ from app.modules.chat.domain.entities import (
     MessageRole,
     MessageStatus,
     NewMessage,
+    ToolCallEntry,
     TurnRequest,
 )
 from app.modules.chat.domain.errors import AgentConfigMissingError, DuplicateMessageError
@@ -34,6 +34,7 @@ from app.modules.chat.domain.ports import (
     AgentConfigSource,
     ConversationStore,
     MessageStore,
+    ToolCallStore,
     TurnAgent,
 )
 from app.modules.shared.kernel import TenantId
@@ -77,6 +78,8 @@ class TurnStream:
 
     Блоки ответа — в порядке первого появления: текст до инструмента или компонента — один
     блок, текст после — новый. `tool_started` и `component` закрывают открытый текстовый блок.
+    Завершённые вызовы инструментов записываются вместе с ответом; аргументы и результаты
+    в клиент не уходят.
     """
 
     def __init__(
@@ -85,6 +88,7 @@ class TurnStream:
         request: TurnRequest,
         agent: TurnAgent,
         messages: MessageStore,
+        tool_calls: ToolCallStore,
         commit: Commit,
         registry: "TurnRegistry",
     ) -> None:
@@ -92,6 +96,7 @@ class TurnStream:
         self.request = request
         self.agent = agent
         self.messages = messages
+        self.tool_calls = tool_calls
         self.commit = commit
         self.registry = registry
         self.turn_id = request.turn_id
@@ -99,8 +104,8 @@ class TurnStream:
         self._seq = 0
         self._blocks: list[dict[str, Any]] = []
         self._open_text: dict[str, Any] | None = None
-        self._tools_started: dict[str, float] = {}
-        self._tool_calls = 0
+        self._tools_started = 0
+        self._finished_calls: list[ToolCallEntry] = []
         self._usage: dict[str, int] | None = None
         self._saved = False
         self._cancel_requested = False
@@ -148,21 +153,18 @@ class TurnStream:
                 )
             case ToolStarted(tool_call_id=call_id, name=name):
                 yield from self._close_text()
-                self._tool_calls += 1
-                self._tools_started[call_id] = time.perf_counter()
+                self._tools_started += 1
                 yield self._event(
                     "tool_started", {"tool_call_id": call_id, "name": name, "display_label": None}
                 )
-            case ToolFinished(tool_call_id=call_id, ok=ok):
-                # От раннего tool_started (ещё до аргументов) до результата: верхняя оценка
-                # длительности инструмента, включает стрим аргументов моделью.
-                started = self._tools_started.pop(call_id, time.perf_counter())
+            case ToolFinished() as finished:
+                self._finished_calls.append(_tool_call_entry(finished))
                 yield self._event(
                     "tool_finished",
                     {
-                        "tool_call_id": call_id,
-                        "ok": ok,
-                        "duration_ms": round((time.perf_counter() - started) * 1000),
+                        "tool_call_id": finished.tool_call_id,
+                        "ok": finished.ok,
+                        "duration_ms": finished.duration_ms,
                     },
                 )
             case ComponentEmitted(component=component):
@@ -175,7 +177,7 @@ class TurnStream:
                 self._usage = {
                     "input_tokens": usage.input_tokens,
                     "output_tokens": usage.output_tokens,
-                    "tool_calls": self._tool_calls,
+                    "tool_calls": self._tools_started,
                 }
 
     def _add_block(self, block: dict[str, Any]) -> dict[str, Any]:
@@ -223,8 +225,9 @@ class TurnStream:
             self.registry.remove(self)
 
     async def save(self, status: MessageStatus) -> None:
-        """Записать ответ с накопленными блоками. Только первый вызов: после `done`
-        повторный вызов (например, при закрытии стрима) ничего не меняет."""
+        """Записать ответ с накопленными блоками и завершёнными вызовами инструментов (вызовы,
+        прерванные отменой, не записываются). Только первый вызов: после `done` повторный
+        вызов (например, при закрытии стрима) ничего не меняет."""
         if self._saved:
             return
         self._saved = True
@@ -240,6 +243,10 @@ class TurnStream:
                 blocks=tuple(self._blocks),
             ),
         )
+        if self._finished_calls:
+            await self.tool_calls.add_many(
+                self.conversation.tenant_id, self.message_id, self._finished_calls
+            )
         await self.commit()
         logger.info("turn_finished", turn_id=str(self.turn_id), status=status)
 
@@ -266,6 +273,7 @@ async def start_turn(
     user_input: UserInput,
     conversations: ConversationStore,
     messages: MessageStore,
+    tool_calls: ToolCallStore,
     configs: AgentConfigSource,
     agent: TurnAgent,
     commit: Commit,
@@ -295,7 +303,23 @@ async def start_turn(
         agent_config=config,
         history=tuple(await messages.list_for(tenant_id, conversation_id)),
     )
-    return TurnStream(conversation, request, agent, messages, commit, registry)
+    return TurnStream(conversation, request, agent, messages, tool_calls, commit, registry)
+
+
+def _tool_call_entry(finished: ToolFinished) -> ToolCallEntry:
+    error = (
+        {"code": finished.error_code, "message": finished.error_message or ""}
+        if finished.error_code
+        else None
+    )
+    return ToolCallEntry(
+        tool_call_id=finished.tool_call_id,
+        name=finished.name,
+        arguments=finished.arguments if finished.arguments is not None else {},
+        result=None if error else finished.content,
+        error=error,
+        duration_ms=finished.duration_ms,
+    )
 
 
 def _report_cancelled(queue: asyncio.Queue[_QueueItem], task: asyncio.Task[None]) -> None:

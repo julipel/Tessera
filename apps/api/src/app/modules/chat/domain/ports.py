@@ -10,6 +10,7 @@ from app.modules.chat.domain.entities import (
     ChatMessage,
     Conversation,
     NewMessage,
+    ToolCallEntry,
     TurnRequest,
 )
 from app.modules.shared.kernel import TenantId
@@ -31,6 +32,16 @@ class MessageStore(Protocol):
     async def add_once(self, tenant_id: TenantId, message: NewMessage) -> tuple[ChatMessage, bool]:
         """Записать сообщение; если в диалоге уже есть сообщение с тем же client_message_id —
         вернуть существующее. Второй элемент — создано ли новое."""
+        ...
+
+
+class ToolCallStore(Protocol):
+    async def add_many(
+        self, tenant_id: TenantId, message_id: UUID, calls: Sequence[ToolCallEntry]
+    ) -> None: ...
+
+    async def list_for(self, tenant_id: TenantId, message_id: UUID) -> Sequence[ToolCallEntry]:
+        """Вызовы сообщения в порядке записи."""
         ...
 
 

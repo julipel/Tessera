@@ -29,6 +29,7 @@ from app.modules.chat.infrastructure.repositories import (
     MessageRepository,
     TenantsActiveConfig,
     TenantsAgentConfigs,
+    ToolCallRepository,
 )
 from app.modules.shared.public import ApiError, DbSession, StreamDbSession
 from app.modules.tenants.public import WidgetTenant
@@ -115,6 +116,7 @@ async def send_message(
             body.input,
             ConversationRepository(session),
             MessageRepository(session),
+            ToolCallRepository(session),
             TenantsAgentConfigs(session),
             agent,
             session.commit,

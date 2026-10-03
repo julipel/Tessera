@@ -32,13 +32,14 @@ from app.modules.agent.public import (
 from app.modules.chat.api.router import get_turn_agent
 from app.modules.chat.api.sse import sse_stream
 from app.modules.chat.application.turns import TurnRegistry, start_turn
-from app.modules.chat.domain.entities import TurnRequest
+from app.modules.chat.domain.entities import ToolCallEntry, TurnRequest
 from app.modules.chat.domain.ports import TurnAgent
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent
 from app.modules.chat.infrastructure.repositories import (
     ConversationRepository,
     MessageRepository,
     TenantsAgentConfigs,
+    ToolCallRepository,
 )
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import (
@@ -318,6 +319,7 @@ async def test_client_disconnect_saves_partial_answer_as_interrupted(
         UserInput.model_validate(TEXT),
         ConversationRepository(db_session),
         MessageRepository(db_session),
+        ToolCallRepository(db_session),
         TenantsAgentConfigs(db_session),
         agent,
         db_session.commit,
@@ -438,6 +440,7 @@ async def test_cancel_before_agent_start_skips_agent(
         UserInput.model_validate(TEXT),
         ConversationRepository(db_session),
         MessageRepository(db_session),
+        ToolCallRepository(db_session),
         TenantsAgentConfigs(db_session),
         agent,
         db_session.commit,
@@ -462,14 +465,25 @@ CARD = {"type": "info_card", "title": "Доставка", "body_markdown": "1-3 
 
 
 async def test_tool_and_component_split_text_into_blocks(
-    db_client: AsyncClient, conversation_id: UUID, use_agent: Any
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
 ) -> None:
     use_agent(
         ScriptedAgent(
             [
                 AnswerDelta("Смотрю. "),
                 ToolStarted("call_1", "get_delivery"),
-                ToolFinished("call_1", "get_delivery", ok=True),
+                ToolFinished(
+                    "call_1",
+                    "get_delivery",
+                    ok=True,
+                    arguments={"city": "Москва"},
+                    content={"days": "1-3"},
+                    duration_ms=17,
+                ),
                 ComponentEmitted(CARD),
                 AnswerDelta("Что-то ещё?"),
                 TurnCompleted(FinishReason.ANSWERED, Usage(30, 8), steps=2),
@@ -495,7 +509,8 @@ async def test_tool_and_component_split_text_into_blocks(
         "name": "get_delivery",
         "display_label": None,
     }
-    assert events[4]["data"]["ok"] is True and events[4]["data"]["duration_ms"] >= 0
+    # Аргументы и результат инструмента в клиент не уходят.
+    assert events[4]["data"] == {"tool_call_id": "call_1", "ok": True, "duration_ms": 17}
     assert events[-1]["data"]["usage"] == {"input_tokens": 30, "output_tokens": 8, "tool_calls": 1}
     _, assistant = (await _history(db_client, conversation_id)).messages
     assert [b.root.model_dump(exclude_none=True) for b in assistant.blocks] == [
@@ -503,6 +518,86 @@ async def test_tool_and_component_split_text_into_blocks(
         {"type": "component", "block_id": "b2", "component": CARD},
         {"type": "text", "block_id": "b3", "text": "Что-то ещё?"},
     ]
+    assert await ToolCallRepository(db_session).list_for(shop, assistant.message_id) == [
+        ToolCallEntry(
+            tool_call_id="call_1",
+            name="get_delivery",
+            arguments={"city": "Москва"},
+            result={"days": "1-3"},
+            error=None,
+            duration_ms=17,
+        )
+    ]
+
+
+async def test_failed_tool_call_is_saved_with_error(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
+) -> None:
+    use_agent(
+        ScriptedAgent(
+            [
+                ToolStarted("call_1", "search_catalog"),
+                ToolFinished(
+                    "call_1",
+                    "search_catalog",
+                    ok=False,
+                    error_code="validation_error",
+                    arguments="{query:",
+                    error_message="аргументы должны быть JSON-объектом",
+                ),
+                AnswerDelta("Уточните запрос."),
+                TurnCompleted(FinishReason.ANSWERED, Usage(), steps=2),
+            ]
+        )
+    )
+
+    await _send(db_client, conversation_id)
+
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    [saved] = await ToolCallRepository(db_session).list_for(shop, assistant.message_id)
+    assert (saved.arguments, saved.result, saved.error) == (
+        "{query:",
+        None,
+        {"code": "validation_error", "message": "аргументы должны быть JSON-объектом"},
+    )
+
+
+class ToolThenGateAgent(GatedAgent):
+    """Завершает вызов инструмента, начинает второй и ждёт отмены."""
+
+    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
+        self.turn_id = request.turn_id
+        yield ToolStarted("call_1", "search_catalog")
+        yield ToolFinished("call_1", "search_catalog", ok=True, arguments={}, content="ok")
+        yield ToolStarted("call_2", "get_entity")
+        self.first_sent.set()
+        await anyio.sleep_forever()
+        yield ToolFinished("call_2", "get_entity", ok=True)
+
+
+async def test_cancelled_turn_keeps_only_finished_tool_calls(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
+) -> None:
+    agent = ToolThenGateAgent()
+    use_agent(agent)
+    stream = asyncio.create_task(_send(db_client, conversation_id))
+    await asyncio.wait_for(agent.first_sent.wait(), WAIT)
+
+    await _cancel(db_client, conversation_id, agent.turn_id)
+    await asyncio.wait_for(stream, WAIT)
+
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    assert assistant.status == "interrupted"
+    saved = await ToolCallRepository(db_session).list_for(shop, assistant.message_id)
+    assert [c.tool_call_id for c in saved] == ["call_1"]
 
 
 @pytest.mark.parametrize("retryable", [True, False])

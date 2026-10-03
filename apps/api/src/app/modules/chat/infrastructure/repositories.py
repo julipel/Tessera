@@ -12,8 +12,13 @@ from app.modules.chat.domain.entities import (
     ChatMessage,
     Conversation,
     NewMessage,
+    ToolCallEntry,
 )
-from app.modules.chat.infrastructure.models import ConversationRecord, MessageRecord
+from app.modules.chat.infrastructure.models import (
+    ConversationRecord,
+    MessageRecord,
+    ToolCallRecord,
+)
 from app.modules.shared.public import TenantId, TenantRepository
 from app.modules.tenants.public import AgentConfigRepository
 
@@ -106,6 +111,46 @@ class MessageRepository(TenantRepository[MessageRecord]):
             )
         )
         return _message(existing.scalar_one()), False
+
+
+class ToolCallRepository(TenantRepository[ToolCallRecord]):
+    model = ToolCallRecord
+
+    async def add_many(
+        self, tenant_id: TenantId, message_id: UUID, calls: Sequence[ToolCallEntry]
+    ) -> None:
+        for call in calls:
+            await self.add(
+                tenant_id,
+                ToolCallRecord(
+                    tenant_id=tenant_id,
+                    message_id=message_id,
+                    tool_call_id=call.tool_call_id,
+                    name=call.name,
+                    arguments=call.arguments,
+                    result=call.result,
+                    error=call.error,
+                    duration_ms=call.duration_ms,
+                ),
+            )
+
+    async def list_for(self, tenant_id: TenantId, message_id: UUID) -> Sequence[ToolCallEntry]:
+        stmt = (
+            self._scoped(tenant_id)
+            .where(ToolCallRecord.message_id == message_id)
+            .order_by(ToolCallRecord.created_at, ToolCallRecord.id)
+        )
+        return [
+            ToolCallEntry(
+                tool_call_id=r.tool_call_id,
+                name=r.name,
+                arguments=r.arguments,
+                result=r.result,
+                error=r.error,
+                duration_ms=r.duration_ms,
+            )
+            for r in (await self.session.execute(stmt)).scalars()
+        ]
 
 
 class TenantsActiveConfig:

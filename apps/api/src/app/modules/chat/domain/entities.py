@@ -68,6 +68,22 @@ class NewMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolCallEntry:
+    """Вызов инструмента в ответе ассистента (таблица tool_calls). В клиент не отдаётся.
+
+    `tool_call_id` — id вызова у провайдера; `arguments` — разобранные аргументы или исходная
+    строка, если модель прислала не JSON-объект; `result` — результат для модели (None при
+    ошибке); `error` — `{code, message}`."""
+
+    tool_call_id: str
+    name: str
+    arguments: dict[str, Any] | str
+    result: str | dict[str, Any] | None
+    error: dict[str, str] | None
+    duration_ms: int
+
+
+@dataclass(frozen=True, slots=True)
 class TurnRequest:
     """Вход хода агента: `input` — ввод пользователя по контракту UserInput, `agent_config` —
     версия AgentConfig диалога, `history` — сообщения диалога, включая этот ввод. Всё загружено

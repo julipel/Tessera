@@ -13,11 +13,13 @@ from app.modules.chat.domain.entities import (
     MessageRole,
     MessageStatus,
     NewMessage,
+    ToolCallEntry,
 )
 from app.modules.chat.domain.errors import ConversationNotFoundError
 from app.modules.chat.infrastructure.repositories import (
     ConversationRepository,
     MessageRepository,
+    ToolCallRepository,
 )
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import AgentConfigRepository, SqlTenantDirectory
@@ -211,3 +213,32 @@ async def test_append_to_foreign_conversation_is_not_found(
             other, conversation.id, uuid4(), _user_input("a"), conversations, messages
         )
     assert await messages.list_for(conversation.tenant_id, conversation.id) == []
+
+
+async def test_tool_calls_are_stored_in_order_and_isolated_by_tenant(
+    db_session: AsyncSession,
+    conversations: ConversationRepository,
+    messages: MessageRepository,
+) -> None:
+    a, config_a = await _tenant_with_config(db_session, "tenant-a")
+    b, _ = await _tenant_with_config(db_session, "tenant-b")
+    conversation = await conversations.create(a, config_a, Channel.WEB, "v")
+    answer, _ = await messages.add_once(
+        a,
+        NewMessage(
+            conversation_id=conversation.id,
+            role=MessageRole.ASSISTANT,
+            status=MessageStatus.COMPLETED,
+            content="Нашла",
+        ),
+    )
+    calls = [
+        ToolCallEntry("call_1", "search_catalog", {"query": "крем"}, {"items": [1]}, None, 12),
+        ToolCallEntry("call_2", "get_entity", "{id:", None, {"code": "timeout", "message": "-"}, 0),
+    ]
+    tool_calls = ToolCallRepository(db_session)
+
+    await tool_calls.add_many(a, answer.id, calls)
+
+    assert await tool_calls.list_for(a, answer.id) == calls
+    assert await tool_calls.list_for(b, answer.id) == []

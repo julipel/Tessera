@@ -1,6 +1,7 @@
 """Агентный цикл (architecture.md §5); поведение задают tests/test_agent_loop.py."""
 
 import json
+import time
 from collections.abc import AsyncIterator, Sequence
 
 import structlog
@@ -75,13 +76,19 @@ class AgentLoop:
                 finish = FinishReason.ANSWERED
                 break
 
+            started = time.perf_counter()
             results = await self._execute(response.tool_calls, ctx)
+            batch_ms = round((time.perf_counter() - started) * 1000)
             for call, result in zip(response.tool_calls, results, strict=True):
                 yield ToolFinished(
                     tool_call_id=call.id,
                     name=call.name,
                     ok=result.ok,
                     error_code=result.error.code if result.error else None,
+                    arguments=call.raw_arguments if call.arguments is None else call.arguments,
+                    content=result.content,
+                    error_message=result.error.message if result.error else None,
+                    duration_ms=batch_ms if call.arguments is not None else 0,
                 )
                 for component in result.components:
                     yield ComponentEmitted(component)

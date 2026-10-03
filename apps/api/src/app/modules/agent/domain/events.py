@@ -1,7 +1,8 @@
-"""События хода агента; chat переводит их в SSE (P2-08). Сырые результаты инструментов
-сюда не попадают — только статус и UI-компоненты."""
+"""События хода агента; chat переводит их в SSE и сохраняет ответ. События внутренние:
+`ToolFinished` несёт аргументы и результат инструмента для записи ToolCall, а в клиент
+(SSE `tool_finished`) уходят только статус и длительность."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -26,10 +27,20 @@ class ToolStarted:
 
 @dataclass(frozen=True, slots=True)
 class ToolFinished:
+    """Вызов инструмента завершён. `arguments` — разобранные аргументы или исходная строка,
+    если модель прислала не JSON-объект; `content` — результат для модели.
+
+    `duration_ms` — длительность пакета параллельных вызовов шага (верхняя оценка вызова),
+    0 — вызов отклонён без исполнения. Недетерминирована, поэтому не участвует в сравнении."""
+
     tool_call_id: str
     name: str
     ok: bool
     error_code: ToolErrorCode | None = None
+    arguments: dict[str, Any] | str | None = None
+    content: str | dict[str, Any] = ""
+    error_message: str | None = None
+    duration_ms: int = field(default=0, compare=False)
 
 
 @dataclass(frozen=True, slots=True)

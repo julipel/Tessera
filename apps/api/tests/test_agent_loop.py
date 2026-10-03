@@ -62,11 +62,19 @@ def failure(code: ToolErrorCode, message: str) -> ToolResult:
 class FakeTools:
     """ToolExecutor со сценарием по `tool_call_id`; по умолчанию — успешный результат.
 
-    `hang=True` — исполнение висит до отмены; `cancelled` фиксирует, что отмена дошла."""
+    `hang=True` — исполнение висит до отмены; `cancelled` фиксирует, что отмена дошла;
+    `delay_s` — длительность пакета."""
 
-    def __init__(self, results: dict[str, ToolResult] | None = None, *, hang: bool = False):
+    def __init__(
+        self,
+        results: dict[str, ToolResult] | None = None,
+        *,
+        hang: bool = False,
+        delay_s: float = 0.0,
+    ):
         self.results = results or {}
         self.hang = hang
+        self.delay_s = delay_s
         self.batches: list[tuple[ToolCall, ...]] = []
         self.cancelled = False
 
@@ -81,6 +89,7 @@ class FakeTools:
             except asyncio.CancelledError:
                 self.cancelled = True
                 raise
+        await asyncio.sleep(self.delay_s)
         return [self.results.get(c.id, ToolResult(content={"found": 1})) for c in calls]
 
     @property
@@ -154,7 +163,13 @@ async def test_single_tool_call_then_answer() -> None:
     assert events[:-1] == [
         AnswerDelta("Ищу. "),
         ToolStarted(tool_call_id="call_1", name="search_catalog"),
-        ToolFinished(tool_call_id="call_1", name="search_catalog", ok=True),
+        ToolFinished(
+            tool_call_id="call_1",
+            name="search_catalog",
+            ok=True,
+            arguments={"query": "крем"},
+            content={"items": ["e_1"]},
+        ),
         ComponentEmitted(CARD),
         AnswerDelta("Нашла "),
         AnswerDelta("крем."),
@@ -208,6 +223,16 @@ async def test_parallel_calls_run_in_one_batch_in_call_order() -> None:
     assert results[1].content == "тоник: 2 шт."
 
 
+async def test_parallel_calls_get_batch_duration() -> None:
+    a, b = call("call_a"), call("call_b")
+    llm = FakeLLM([FakeReply(tool_calls=(a, b)), FakeReply(text="Готово.")])
+
+    events = await run(llm, FakeTools(delay_s=0.05))
+
+    durations = [e.duration_ms for e in events if isinstance(e, ToolFinished)]
+    assert len(durations) == 2 and durations[0] == durations[1] >= 45
+
+
 async def test_validation_error_goes_to_model_which_corrects_itself() -> None:
     bad, good = call("call_1", {"qeury": "крем"}), call("call_2", {"query": "крем"})
     llm = FakeLLM([FakeReply(tool_calls=(bad,)), FakeReply(tool_calls=(good,)), FakeReply("Ок.")])
@@ -216,7 +241,15 @@ async def test_validation_error_goes_to_model_which_corrects_itself() -> None:
     events = await run(llm, tools, context(max_tool_retries=1))
 
     assert (
-        ToolFinished("call_1", "search_catalog", ok=False, error_code="validation_error") in events
+        ToolFinished(
+            "call_1",
+            "search_catalog",
+            ok=False,
+            error_code="validation_error",
+            arguments={"qeury": "крем"},
+            error_message="query: обязательное поле",
+        )
+        in events
     )
     [error] = tool_results(llm.requests[1])
     assert error.is_error is True
@@ -234,9 +267,13 @@ async def test_unparseable_arguments_are_rejected_without_executor() -> None:
     events = await run(llm, tools)
 
     assert broken not in tools.executed
-    assert (
-        ToolFinished("call_1", "search_catalog", ok=False, error_code="validation_error") in events
+    [finished] = [e for e in events if isinstance(e, ToolFinished)]
+    assert (finished.ok, finished.error_code, finished.arguments) == (
+        False,
+        "validation_error",
+        "{query:",  # исходная строка: для записи ToolCall сохраняется как прислала модель
     )
+    assert finished.error_message is not None and finished.duration_ms == 0
     [error] = tool_results(llm.requests[1])
     assert error.tool_call_id == "call_1"
     assert error.is_error is True
@@ -276,7 +313,9 @@ async def test_tool_timeout_is_reported_to_model_and_not_counted_as_retry() -> N
 
     events = await run(llm, tools, context(max_tool_retries=0))
 
-    assert ToolFinished("call_1", "search_catalog", ok=False, error_code="timeout") in events
+    [finished] = [e for e in events if isinstance(e, ToolFinished)]
+    assert (finished.ok, finished.error_code) == (False, "timeout")
+    assert finished.error_message == "search_catalog: нет ответа за 10 с"
     [error] = tool_results(llm.requests[1])
     assert error.is_error is True
     assert "нет ответа" in error.content

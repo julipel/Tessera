@@ -4,7 +4,17 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -76,6 +86,26 @@ class MessageRecord(TenantScopedBase):
         JSONB, default=list, server_default=text("'[]'::jsonb")
     )
     client_message_id: Mapped[UUID | None]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=_CREATED_AT
+    )
+
+
+class ToolCallRecord(TenantScopedBase):
+    __tablename__ = "tool_calls"
+    __table_args__ = (Index("ix_tool_calls_message_id_created_at", "message_id", "created_at"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    message_id: Mapped[UUID] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"))
+    tool_call_id: Mapped[str] = mapped_column(String(128))
+    name: Mapped[str] = mapped_column(String(128))
+    # JSONB хранит и объект, и строку: неразобранные аргументы, текстовый результат.
+    arguments: Mapped[dict[str, Any] | str] = mapped_column(JSONB)
+    result: Mapped[dict[str, Any] | str | None] = mapped_column(JSONB)
+    error: Mapped[dict[str, str] | None] = mapped_column(JSONB)
+    duration_ms: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=_CREATED_AT
     )

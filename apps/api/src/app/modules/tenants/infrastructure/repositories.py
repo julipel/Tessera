@@ -68,6 +68,11 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
         record = (await self.session.execute(stmt)).scalar_one_or_none()
         return _config(record) if record else None
 
+    async def get_version(self, tenant_id: TenantId, config_id: UUID) -> AgentConfigVersion | None:
+        """Любая версия, в т.ч. архивная: диалог работает на той, с которой начат."""
+        record = await self.get(tenant_id, config_id)
+        return _config(record) if record else None
+
     async def list_versions(self, tenant_id: TenantId) -> Sequence[AgentConfigVersion]:
         stmt = self._scoped(tenant_id).order_by(AgentConfigRecord.version)
         return [_config(r) for r in (await self.session.execute(stmt)).scalars()]

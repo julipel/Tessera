@@ -21,6 +21,10 @@ class TenantDirectory(Protocol):
 class AgentConfigStore(Protocol):
     async def get_active(self, tenant_id: TenantId) -> AgentConfigVersion | None: ...
 
+    async def get_version(
+        self, tenant_id: TenantId, config_id: UUID
+    ) -> AgentConfigVersion | None: ...
+
     async def list_versions(self, tenant_id: TenantId) -> Sequence[AgentConfigVersion]: ...
 
     async def create_draft(

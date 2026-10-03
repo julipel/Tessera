@@ -69,17 +69,14 @@ class NewMessage:
 
 @dataclass(frozen=True, slots=True)
 class TurnRequest:
-    """Вход хода агента: `input` — ввод пользователя по контракту UserInput."""
+    """Вход хода агента: `input` — ввод пользователя по контракту UserInput, `agent_config` —
+    версия AgentConfig диалога, `history` — сообщения диалога, включая этот ввод. Всё загружено
+    до запуска агента: задача агента отменяема и в БД не ходит."""
 
     tenant_id: TenantId
     conversation_id: UUID
     agent_config_id: UUID
     turn_id: UUID
     input: dict[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
-class AgentTextDelta:
-    """Кусок текста ответа. Пока единственное событие агента; набор расширит P2-08."""
-
-    text: str
+    agent_config: dict[str, Any]
+    history: tuple[ChatMessage, ...]

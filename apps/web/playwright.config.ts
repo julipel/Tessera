@@ -1,5 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
-import { API_PORT, API_URL, E2E_ENV, HOST, WEB_PORT, WEB_URL } from "./e2e/env";
+import {
+  API_PORT,
+  API_URL,
+  E2E_ENV,
+  HOST,
+  MOCK_LLM_PORT,
+  MOCK_LLM_URL,
+  WEB_PORT,
+  WEB_URL,
+} from "./e2e/env";
 
 // Проверка готовности webServer идёт через HTTP_PROXY, если он задан, а маски вида `127.*`
 // в NO_PROXY Node не понимает — исключаем хост e2e явно.
@@ -7,8 +16,8 @@ for (const name of ["NO_PROXY", "no_proxy"]) {
   process.env[name] = [process.env[name], HOST].filter(Boolean).join(",");
 }
 
-// E2E: настоящий API (эхо-агент) на отдельной базе и порту + Next dev — не мешают dev-серверам
-// на :8000/:3000. Нужен `make up` (Postgres). Юнит-тесты `*.unit.spec.ts` идут без браузера.
+// E2E: настоящий API на отдельной базе и порту (модель — мок OpenAI-совместимого API)
+// + Next dev — не мешают dev-серверам на :8000/:3000. Нужен `make up` (Postgres). Юнит-тесты `*.unit.spec.ts` идут без браузера.
 export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
@@ -22,6 +31,12 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
+    {
+      command: "node e2e/mock-llm.mjs",
+      url: `${MOCK_LLM_URL}/health`,
+      env: { MOCK_LLM_HOST: HOST, MOCK_LLM_PORT: String(MOCK_LLM_PORT) },
+      reuseExistingServer: false,
+    },
     {
       command: `uv run uvicorn app.main:app --host ${HOST} --port ${API_PORT}`,
       cwd: "../api",

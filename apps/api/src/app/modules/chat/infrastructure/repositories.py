@@ -1,6 +1,7 @@
 """Репозитории модуля chat (реализации портов из domain/ports.py)."""
 
 from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.dialects.postgresql import insert
@@ -116,3 +117,14 @@ class TenantsActiveConfig:
     async def active_config_id(self, tenant_id: TenantId) -> UUID | None:
         active = await self.configs.get_active(tenant_id)
         return active.id if active else None
+
+
+class TenantsAgentConfigs:
+    """AgentConfigSource поверх модуля tenants."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.configs = AgentConfigRepository(session)
+
+    async def config(self, tenant_id: TenantId, config_id: UUID) -> dict[str, Any] | None:
+        version = await self.configs.get_version(tenant_id, config_id)
+        return version.config if version else None

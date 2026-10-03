@@ -7,10 +7,15 @@ export const WEB_PORT = 3001;
 export const API_URL = `http://${HOST}:${API_PORT}`;
 export const WEB_URL = `http://${HOST}:${WEB_PORT}`;
 export const WIDGET_KEY = "wk_e2e_demo_beauty";
+// Мок OpenAI-совместимого API (e2e/mock-llm.mjs): демо-тенант настроен на provider openai.
+export const MOCK_LLM_PORT = 8002;
+export const MOCK_LLM_URL = `http://${HOST}:${MOCK_LLM_PORT}`;
 
 export const E2E_ENV: Record<string, string> = {
   APP_ENV: "test",
   DATABASE_URL:
     process.env.E2E_DATABASE_URL ?? "postgresql+asyncpg://app:app@localhost:5432/app_e2e",
   CORS_ORIGINS: JSON.stringify([WEB_URL]),
+  OPENAI_API_KEY: "sk-e2e",
+  OPENAI_BASE_URL: `${MOCK_LLM_URL}/v1`,
 };

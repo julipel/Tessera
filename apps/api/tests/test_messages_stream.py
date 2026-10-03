@@ -1,4 +1,4 @@
-"""POST /v1/conversations/{id}/messages: SSE-стрим хода с эхо-агентом (docs/contracts.md §2)."""
+"""POST /v1/conversations/{id}/messages: события агента → SSE-стрим хода (docs/contracts.md §2)."""
 
 import asyncio
 import json
@@ -15,15 +15,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts import Event, HttpError, MessageHistory, UserInput
 from app.logs import TRACE_ID_HEADER
+from app.modules.agent.public import (
+    AgentEvent,
+    AnswerDelta,
+    ComponentEmitted,
+    FakeLLM,
+    FakeReply,
+    FinishReason,
+    LLMError,
+    RegistryToolExecutor,
+    ToolFinished,
+    ToolStarted,
+    TurnCompleted,
+    Usage,
+)
 from app.modules.chat.api.router import get_turn_agent
 from app.modules.chat.api.sse import sse_stream
 from app.modules.chat.application.turns import TurnRegistry, start_turn
-from app.modules.chat.domain.entities import AgentTextDelta, TurnRequest
+from app.modules.chat.domain.entities import TurnRequest
 from app.modules.chat.domain.ports import TurnAgent
-from app.modules.chat.infrastructure.echo_agent import EchoAgent
+from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent
 from app.modules.chat.infrastructure.repositories import (
     ConversationRepository,
     MessageRepository,
+    TenantsAgentConfigs,
 )
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import (
@@ -32,16 +47,28 @@ from app.modules.tenants.public import (
     WidgetKeyRepository,
     hash_widget_key,
 )
+from app.modules.tools.public import ToolRegistry
 
 URL = "/v1/conversations"
 TEXT = {"type": "text", "text": "Нужен подарок маме"}
+ANSWER = "Подскажите, какой бюджет?"
+
+
+def _config(slug: str) -> dict[str, Any]:
+    return {
+        "assistant": {"name": slug, "greeting": "Привет!", "fallback_message": "Не получилось."},
+        "model": {"primary": {"provider": "openai", "name": "test-model"}},
+        "limits": {},
+        "prompt": {"tenant": f"Ты — консультант {slug}."},
+        "tools": {},
+    }
 
 
 async def _tenant(session: AsyncSession, slug: str) -> TenantId:
     tenant = await SqlTenantDirectory(session).create(slug, slug)
     await WidgetKeyRepository(session).add_key(tenant.id, hash_widget_key(f"wk_{slug}"), [])
     configs = AgentConfigRepository(session)
-    draft = await configs.create_draft(tenant.id, {"assistant": {"name": slug}})
+    draft = await configs.create_draft(tenant.id, _config(slug))
     await configs.activate(tenant.id, draft.id)
     return tenant.id
 
@@ -65,10 +92,29 @@ def _parse_sse(body: str) -> list[tuple[str, Event]]:
     return parsed
 
 
+class ScriptedAgent:
+    """Отдаёт заданные события; по умолчанию — ответ ANSWER кусками по словам."""
+
+    def __init__(self, events: list[AgentEvent] | None = None) -> None:
+        self.events = events or [
+            *(AnswerDelta(w) for w in ("Подскажите, ", "какой ", "бюджет?")),
+            TurnCompleted(FinishReason.ANSWERED, Usage(12, 3), steps=1),
+        ]
+        self.requests: list[TurnRequest] = []
+
+    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
+        self.requests.append(request)
+        for event in self.events:
+            yield event
+
+
 class FailingAgent:
-    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentTextDelta]:
-        yield AgentTextDelta("Сейчас ")
-        raise RuntimeError("агент упал")
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error or RuntimeError("агент упал")
+
+    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
+        yield AnswerDelta("Сейчас ")
+        raise self.error
 
 
 @pytest.fixture
@@ -76,7 +122,7 @@ def use_agent(app: FastAPI) -> Iterator[Any]:
     def use(agent: TurnAgent) -> None:
         app.dependency_overrides[get_turn_agent] = lambda: agent
 
-    use(EchoAgent())
+    use(ScriptedAgent())
     yield use
 
 
@@ -128,9 +174,12 @@ async def test_stream_follows_protocol(db_client: AsyncClient, conversation_id: 
         (str(conversation_id), first.turn_id, rest[0].message_id)
     }
     deltas = [e.root.data for _, e in events if e.root.type == "text_delta"]
-    assert "".join(d.delta for d in deltas) == "Вы написали: Нужен подарок маме"
+    assert "".join(d.delta for d in deltas) == ANSWER
     assert {d.block_id for d in deltas} == {"b1"}
-    assert events[-1][1].model_dump()["data"]["status"] == "completed"
+    assert events[-1][1].model_dump()["data"] == {
+        "status": "completed",
+        "usage": {"input_tokens": 12, "output_tokens": 3, "tool_calls": 0},
+    }
 
 
 async def test_turn_is_saved_to_history(db_client: AsyncClient, conversation_id: UUID) -> None:
@@ -141,24 +190,8 @@ async def test_turn_is_saved_to_history(db_client: AsyncClient, conversation_id:
     assert (assistant.role, assistant.status) == ("assistant", "completed")
     assert str(assistant.message_id) == events[-1][1].root.message_id
     assert [b.root.model_dump() for b in assistant.blocks] == [
-        {"type": "text", "block_id": "b1", "text": "Вы написали: Нужен подарок маме"}
+        {"type": "text", "block_id": "b1", "text": ANSWER}
     ]
-
-
-@pytest.mark.parametrize(
-    ("user_input", "echo"),
-    [
-        ({"type": "action", "action_id": "select_product"}, "Нажата кнопка: select_product"),
-        ({"type": "form_submit", "form_id": "f_1", "values": {}}, "Отправлена форма: f_1"),
-    ],
-)
-async def test_non_text_input_is_echoed(
-    db_client: AsyncClient, conversation_id: UUID, user_input: dict[str, Any], echo: str
-) -> None:
-    events = _parse_sse((await _send(db_client, conversation_id, user_input)).text)
-
-    deltas = [e.model_dump()["data"]["delta"] for _, e in events if e.root.type == "text_delta"]
-    assert "".join(deltas) == echo
 
 
 async def test_repeated_client_message_id_is_409(
@@ -266,12 +299,12 @@ class GatedAgent:
         self.first_sent = anyio.Event()
         self.turn_id: UUID | None = None
 
-    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentTextDelta]:
+    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
         self.turn_id = request.turn_id
-        yield AgentTextDelta("Подбираю ")
+        yield AnswerDelta("Подбираю ")
         self.first_sent.set()
         await anyio.sleep_forever()
-        yield AgentTextDelta("не дойдёт")
+        yield AnswerDelta("не дойдёт")
 
 
 async def test_client_disconnect_saves_partial_answer_as_interrupted(
@@ -285,6 +318,7 @@ async def test_client_disconnect_saves_partial_answer_as_interrupted(
         UserInput.model_validate(TEXT),
         ConversationRepository(db_session),
         MessageRepository(db_session),
+        TenantsAgentConfigs(db_session),
         agent,
         db_session.commit,
         registry,
@@ -388,9 +422,9 @@ class RecordingAgent:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentTextDelta]:
+    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
         self.calls += 1
-        yield AgentTextDelta("ответ")
+        yield AnswerDelta("ответ")
 
 
 async def test_cancel_before_agent_start_skips_agent(
@@ -404,6 +438,7 @@ async def test_cancel_before_agent_start_skips_agent(
         UserInput.model_validate(TEXT),
         ConversationRepository(db_session),
         MessageRepository(db_session),
+        TenantsAgentConfigs(db_session),
         agent,
         db_session.commit,
         registry,
@@ -419,3 +454,112 @@ async def test_cancel_before_agent_start_skips_agent(
         ("done", {"status": "interrupted", "usage": None})
     ]
     assert agent.calls == 0
+
+
+# --- Маппинг событий агента и ход через агентный цикл ---
+
+CARD = {"type": "info_card", "title": "Доставка", "body_markdown": "1-3 дня"}
+
+
+async def test_tool_and_component_split_text_into_blocks(
+    db_client: AsyncClient, conversation_id: UUID, use_agent: Any
+) -> None:
+    use_agent(
+        ScriptedAgent(
+            [
+                AnswerDelta("Смотрю. "),
+                ToolStarted("call_1", "get_delivery"),
+                ToolFinished("call_1", "get_delivery", ok=True),
+                ComponentEmitted(CARD),
+                AnswerDelta("Что-то ещё?"),
+                TurnCompleted(FinishReason.ANSWERED, Usage(30, 8), steps=2),
+            ]
+        )
+    )
+
+    events = [e.model_dump() for _, e in _parse_sse((await _send(db_client, conversation_id)).text)]
+
+    assert [(e["type"], e["data"].get("block_id")) for e in events] == [
+        ("turn_started", None),
+        ("text_delta", "b1"),
+        ("text_done", "b1"),
+        ("tool_started", None),
+        ("tool_finished", None),
+        ("component", "b2"),
+        ("text_delta", "b3"),
+        ("text_done", "b3"),
+        ("done", None),
+    ]
+    assert events[3]["data"] == {
+        "tool_call_id": "call_1",
+        "name": "get_delivery",
+        "display_label": None,
+    }
+    assert events[4]["data"]["ok"] is True and events[4]["data"]["duration_ms"] >= 0
+    assert events[-1]["data"]["usage"] == {"input_tokens": 30, "output_tokens": 8, "tool_calls": 1}
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    assert [b.root.model_dump(exclude_none=True) for b in assistant.blocks] == [
+        {"type": "text", "block_id": "b1", "text": "Смотрю. "},
+        {"type": "component", "block_id": "b2", "component": CARD},
+        {"type": "text", "block_id": "b3", "text": "Что-то ещё?"},
+    ]
+
+
+@pytest.mark.parametrize("retryable", [True, False])
+async def test_llm_error_ends_turn_with_llm_unavailable(
+    db_client: AsyncClient, conversation_id: UUID, use_agent: Any, retryable: bool
+) -> None:
+    use_agent(FailingAgent(LLMError("503 от провайдера", retryable=retryable)))
+
+    events = [e.model_dump() for _, e in _parse_sse((await _send(db_client, conversation_id)).text)]
+
+    assert [e["type"] for e in events] == ["turn_started", "text_delta", "error", "done"]
+    assert (events[2]["data"]["code"], events[2]["data"]["retryable"]) == (
+        "llm_unavailable",
+        retryable,
+    )
+    assert events[3]["data"]["status"] == "failed"
+
+
+async def test_dialog_through_agent_loop_keeps_history(
+    db_client: AsyncClient, conversation_id: UUID, use_agent: Any
+) -> None:
+    llm = FakeLLM(
+        [
+            FakeReply(text=ANSWER, usage=Usage(40, 6)),
+            FakeReply(text="Тогда посмотрите наборы до 3000.", usage=Usage(55, 9)),
+        ]
+    )
+    providers: list[str] = []
+
+    def llm_for(provider: str) -> FakeLLM:
+        providers.append(provider)
+        return llm
+
+    use_agent(LoopTurnAgent(llm_for, RegistryToolExecutor(ToolRegistry([]))))
+
+    first = _parse_sse((await _send(db_client, conversation_id)).text)
+    await _send(db_client, conversation_id, {"type": "text", "text": "До 3000"})
+
+    assert first[-1][1].model_dump()["data"]["usage"] == {
+        "input_tokens": 40,
+        "output_tokens": 6,
+        "tool_calls": 0,
+    }
+    assert providers == ["openai", "openai"]
+    second = llm.requests[1]
+    assert second.model == "test-model"
+    assert second.tools == () and second.temperature is None
+    assert "Ты — консультант shop." in second.system
+    assert [type(m).__name__ for m in second.messages] == [
+        "UserMessage",
+        "AssistantMessage",
+        "UserMessage",
+    ]
+    assert second.messages[1].text == ANSWER  # type: ignore[union-attr]
+    texts = [
+        m.blocks[0].root.model_dump()["text"]
+        for m in (await _history(db_client, conversation_id)).messages
+        if m.role == "assistant"
+    ]
+    assert texts == [ANSWER, "Тогда посмотрите наборы до 3000."]

@@ -125,3 +125,20 @@ async def test_widget_keys_are_isolated_between_tenants(
     assert key.allowed_origins == ["https://shop.example"]
     assert await keys.delete(b, key.id) is False
     assert await keys.get(b, uuid4()) is None
+
+
+async def test_get_version_returns_archived_and_respects_tenant(
+    configs: AgentConfigRepository, tenants: tuple[TenantId, TenantId]
+) -> None:
+    a, b = tenants
+    v1 = await configs.create_draft(a, CONFIG)
+    await configs.activate(a, v1.id)
+    v2 = await configs.create_draft(a, CONFIG)
+    await configs.activate(a, v2.id)
+
+    archived = await configs.get_version(a, v1.id)
+
+    assert archived is not None
+    assert (archived.version, archived.status) == (1, AgentConfigStatus.ARCHIVED)
+    assert await configs.get_version(b, v1.id) is None
+    assert await configs.get_version(a, uuid4()) is None

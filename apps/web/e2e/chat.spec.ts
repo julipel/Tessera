@@ -14,7 +14,7 @@ test("отправка сообщения: ответ стримится, пос
   const user = page.locator('li[data-role="user"]');
   const assistant = page.locator('li[data-role="assistant"]');
   await expect(user).toHaveText("Нужен подарок маме");
-  // Пока ход идёт, отправка заблокирована; эхо-агент отдаёт текст по словам.
+  // Пока ход идёт, отправка заблокирована; мок модели отдаёт текст по словам.
   await expect(send).toBeDisabled();
   await expect(assistant).toHaveText("Вы написали: Нужен подарок маме");
   await expect(assistant).toHaveAttribute("data-status", "completed");

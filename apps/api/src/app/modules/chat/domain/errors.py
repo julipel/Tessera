@@ -13,3 +13,7 @@ class NoActiveConfigError(NotFoundError):
 
 class DuplicateMessageError(DomainError):
     """Сообщение с таким client_message_id в диалоге уже есть — новый ход не запускается."""
+
+
+class AgentConfigMissingError(DomainError):
+    """Версии AgentConfig, с которой начат диалог, нет. Нарушение инварианта: FK с RESTRICT."""

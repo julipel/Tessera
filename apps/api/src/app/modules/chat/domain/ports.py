@@ -1,11 +1,11 @@
 """Порты хранилищ модуля chat (реализации — в infrastructure)."""
 
 from collections.abc import AsyncIterator, Sequence
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
+from app.modules.agent.kernel import AgentEvent
 from app.modules.chat.domain.entities import (
-    AgentTextDelta,
     Channel,
     ChatMessage,
     Conversation,
@@ -40,7 +40,15 @@ class ActiveConfigLookup(Protocol):
     async def active_config_id(self, tenant_id: TenantId) -> UUID | None: ...
 
 
-class TurnAgent(Protocol):
-    """Агент, отвечающий на ход пользователя потоком событий (до P2-08 — эхо-заглушка)."""
+class AgentConfigSource(Protocol):
+    """Конкретная версия AgentConfig тенанта (данные модуля tenants)."""
 
-    def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentTextDelta]: ...
+    async def config(self, tenant_id: TenantId, config_id: UUID) -> dict[str, Any] | None: ...
+
+
+class TurnAgent(Protocol):
+    """Агент, отвечающий на ход пользователя потоком событий (docs/architecture.md §5).
+
+    Ошибка провайдера — исключение `LLMError` из потока; остальные исключения — сбой хода."""
+
+    def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]: ...

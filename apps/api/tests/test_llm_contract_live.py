@@ -1,7 +1,8 @@
 """Контрактный тест LLM-адаптеров на реальных провайдерах (маркер `live`, не в `make test`).
 
-Запуск: `OPENAI_API_KEY=... LIVE_OPENAI_MODEL=... uv run pytest -m live`. Провайдер без ключа
-или модели пропускается. Новый адаптер (P2-07) добавляется в `PROVIDERS`.
+Запуск: `OPENAI_API_KEY=... LIVE_OPENAI_MODEL=... ANTHROPIC_API_KEY=... LIVE_ANTHROPIC_MODEL=...
+uv run pytest -m live`. Провайдер без ключа или модели пропускается. Новый адаптер добавляется
+в `PROVIDERS`.
 """
 
 import os
@@ -21,6 +22,7 @@ from app.modules.agent.public import (
     ToolResultMessage,
     ToolSchema,
     UserMessage,
+    create_anthropic_llm,
     create_openai_llm,
 )
 from app.settings import Settings
@@ -42,7 +44,17 @@ def _openai(settings: Settings) -> LLMClient | None:
     return create_openai_llm(key, base_url=settings.openai_base_url)
 
 
-PROVIDERS = [Provider("openai", "LIVE_OPENAI_MODEL", _openai)]
+def _anthropic(settings: Settings) -> LLMClient | None:
+    key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
+    if not key:
+        return None
+    return create_anthropic_llm(key, base_url=settings.anthropic_base_url)
+
+
+PROVIDERS = [
+    Provider("openai", "LIVE_OPENAI_MODEL", _openai),
+    Provider("anthropic", "LIVE_ANTHROPIC_MODEL", _anthropic),
+]
 
 
 @dataclass(frozen=True)

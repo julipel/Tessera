@@ -5,6 +5,7 @@ description = "API платформы AI-консультанта"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.0",
+    "anthropic>=1.11.0",
     "asyncpg>=0.31.0",
     "fastapi>=0.142.2",
     "jsonschema>=4.26.0",

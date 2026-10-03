@@ -30,9 +30,11 @@ class Settings(BaseSettings):
     seed_widget_key: str | None = None
     # Origin веб-чата для CORS (env — JSON-список). Origin виджетов тенантов — P5-06.
     cors_origins: list[str] = ["http://localhost:3000"]
-    # LLM-провайдеры; base_url — для OpenAI-совместимых API (пусто — api.openai.com).
+    # LLM-провайдеры; base_url пусто — официальный endpoint (для OpenAI — и совместимые API).
     openai_api_key: SecretStr | None = None
     openai_base_url: str | None = None
+    anthropic_api_key: SecretStr | None = None
+    anthropic_base_url: str | None = None
 
     @property
     def is_local(self) -> bool:

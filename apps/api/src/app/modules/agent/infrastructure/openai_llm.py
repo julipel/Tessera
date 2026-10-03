@@ -5,10 +5,8 @@
 аргументы. Ошибки SDK переводятся в `LLMError` с признаком `retryable`.
 """
 
-import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
 
 from openai import (
     APIConnectionError,
@@ -40,6 +38,7 @@ from app.modules.agent.domain.llm import (
     Usage,
     UserMessage,
 )
+from app.modules.agent.infrastructure.llm_arguments import parse_arguments
 
 # 408 Request Timeout, 409 Conflict, 429 Rate Limit — временные, как и 5xx (их же ретраит SDK).
 _RETRYABLE_STATUSES = frozenset({408, 409, 429})
@@ -141,17 +140,6 @@ def to_llm_error(error: APIError) -> LLMError:
         return LLMError(f"OpenAI: {type(error).__name__}: {error.message}", retryable=True)
     # Ошибка, пришедшая событием внутри уже открытого стрима, — сбой на стороне провайдера.
     return LLMError(f"OpenAI: ошибка стрима: {error.message}", retryable=True)
-
-
-def parse_arguments(raw: str) -> dict[str, Any] | None:
-    """Пустая строка — инструмент без аргументов; не JSON-объект — None (цикл вернёт ошибку)."""
-    if not raw.strip():
-        return {}
-    try:
-        value = json.loads(raw)
-    except ValueError:
-        return None
-    return value if isinstance(value, dict) else None
 
 
 @dataclass(slots=True)

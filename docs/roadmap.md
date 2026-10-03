@@ -123,7 +123,7 @@
 - [x] **P3-01b LLM-as-judge.** `clarifies`, `max_questions`, `judge` — один вызов судьи на ход
   через порт `LLMClient`, ответ JSON, ошибки разбора → статус `error`; флаги
   `--judge-provider/--judge-model`. DoD: тесты судьи на FakeLLM, отчёт с пояснениями судьи.
-- [ ] **P3-02 Сравнение прогонов.** Diff двух отчётов: что улучшилось/ухудшилось. DoD: `make eval-diff`.
+- [x] **P3-02 Сравнение прогонов.** Diff двух отчётов: что улучшилось/ухудшилось. DoD: `make eval-diff`.
 
 ## P4. Знания
 

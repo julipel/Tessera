@@ -22,7 +22,7 @@ _STATUS_ICON = {
     RunStatus.ERROR: "⚠️",
     RunStatus.SKIPPED: "⏭",
 }
-_CHECK_ICON = {
+CHECK_ICON = {
     CheckStatus.PASSED: "✅",
     CheckStatus.FAILED: "❌",
     CheckStatus.ERROR: "⚠️",
@@ -210,7 +210,7 @@ def _render_turn(turn: TurnResult) -> list[str]:
         lines.append("")
         for check in turn.checks:
             detail = f" — {check.detail}" if check.detail else ""
-            lines.append(f"- {_CHECK_ICON[check.status]} `{check.name}`{detail}")
+            lines.append(f"- {CHECK_ICON[check.status]} `{check.name}`{detail}")
     return lines
 
 
@@ -231,5 +231,5 @@ def _dialog_counts(total: Totals) -> str:
 
 def _check_counts(total: Totals) -> str:
     count = sum(total.checks.values())
-    parts = [f"{_CHECK_ICON[s]} {total.checks[s]}" for s in CheckStatus if total.checks[s]]
+    parts = [f"{CHECK_ICON[s]} {total.checks[s]}" for s in CheckStatus if total.checks[s]]
     return f"{count}" + (f" · {' · '.join(parts)}" if parts else "")

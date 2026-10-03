@@ -95,5 +95,7 @@ eval:
 	cd $(API) && uv run python -m evals.run $(if $(f),--filter $(f),) \
 		--judge-provider $(EVAL_JUDGE_PROVIDER) --judge-model $(EVAL_JUDGE_MODEL)
 
+# Без аргументов — два последних отчёта; иначе make eval-diff a=<старый> b=<новый>
+# (имя отчёта без .json или путь от корня репозитория). Код 1 — есть ухудшения.
 eval-diff:
-	cd $(API) && uv run python -m evals.diff
+	cd $(API) && uv run python -m evals.diff $(a) $(b)

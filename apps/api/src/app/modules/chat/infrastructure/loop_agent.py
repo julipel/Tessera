@@ -17,6 +17,7 @@ from app.modules.agent.public import (
     LLMClient,
     LLMMessage,
     Provider,
+    RegistryToolExecutor,
     RuntimeContext,
     ToolExecutor,
     TurnContext,
@@ -26,6 +27,7 @@ from app.modules.agent.public import (
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, TurnRequest
 from app.modules.memory.public import DialogState
+from app.modules.tools.public import ToolRegistry, builtin_tools
 
 type LLMForProvider = Callable[[Provider], LLMClient]
 type ToolsForConfig = Callable[[AgentConfig], ToolExecutor]
@@ -76,6 +78,14 @@ class LoopTurnAgent:
         loop = AgentLoop(self._llm_for(primary.provider), self._tools_for(config))
         async for event in loop.run_turn(ctx):
             yield event
+
+
+def builtin_turn_agent(llm_for: LLMForProvider) -> LoopTurnAgent:
+    """Агентный цикл со встроенными инструментами из `tools.builtin` конфига — так ход
+    собирают chat API и раннер эвалов (ADR-0011)."""
+    return LoopTurnAgent(
+        llm_for, lambda config: RegistryToolExecutor(ToolRegistry(builtin_tools(config)))
+    )
 
 
 def to_llm_messages(history: Iterable[ChatMessage]) -> Iterable[LLMMessage]:

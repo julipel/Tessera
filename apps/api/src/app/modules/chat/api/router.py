@@ -13,7 +13,7 @@ from app.contracts import (
     MessageHistory,
     SendMessageRequest,
 )
-from app.modules.agent.public import LLMClients, RegistryToolExecutor
+from app.modules.agent.public import LLMClients
 from app.modules.chat.api.sse import sse_stream
 from app.modules.chat.application.conversations import get_history, start_conversation
 from app.modules.chat.application.turns import TurnRegistry, start_turn
@@ -23,7 +23,7 @@ from app.modules.chat.domain.errors import (
     NoActiveConfigError,
 )
 from app.modules.chat.domain.ports import TurnAgent
-from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent
+from app.modules.chat.infrastructure.loop_agent import builtin_turn_agent
 from app.modules.chat.infrastructure.repositories import (
     ConversationRepository,
     MessageRepository,
@@ -33,7 +33,6 @@ from app.modules.chat.infrastructure.repositories import (
 )
 from app.modules.shared.public import ApiError, DbSession, StreamDbSession
 from app.modules.tenants.public import WidgetTenant
-from app.modules.tools.public import ToolRegistry, builtin_tools
 
 router = APIRouter(prefix="/v1/conversations", tags=["conversations"])
 logger = structlog.get_logger(__name__)
@@ -43,10 +42,7 @@ def get_turn_agent(request: Request) -> TurnAgent:
     """Агентный цикл с LLM-клиентами приложения и встроенными инструментами из
     `tools.builtin` конфига; тесты подменяют через dependency_overrides."""
     llms: LLMClients = request.app.state.llm_clients
-    return LoopTurnAgent(
-        llms.for_provider,
-        lambda config: RegistryToolExecutor(ToolRegistry(builtin_tools(config))),
-    )
+    return builtin_turn_agent(llms.for_provider)
 
 
 Agent = Annotated[TurnAgent, Depends(get_turn_agent)]

@@ -27,7 +27,7 @@ packages = ["src/app"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests"]
+src = ["src", "tests", "."]
 # Сгенерировано из JSON Schema (make contracts), формат задаёт scripts/contracts.sh.
 extend-exclude = ["src/app/contracts/generated"]
 
@@ -40,11 +40,13 @@ allowed-confusables = ["а", "в", "г", "е", "к", "м", "н", "о", "р", "с
 python_version = "3.12"
 strict = true
 mypy_path = "src"
-files = ["src", "tests", "migrations"]
+files = ["src", "tests", "migrations", "evals"]
 plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Раннер эвалов (`evals/`, ADR-0011) лежит рядом с src и импортируется тестами.
+pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = ["live: тесты с реальными внешними сервисами (LLM-провайдеры и т.п.)"]

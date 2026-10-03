@@ -4,6 +4,23 @@
 реплики пользователя через агента и проверяет ожидания на каждом ходе. Отчёты — в `reports/`
 (в .gitignore).
 
+## Запуск
+
+```bash
+make eval                 # все диалоги
+make eval f=beauty_14     # подстрока id или тег (f=lead)
+cd apps/api && uv run python -m evals.run --concurrency 2 -v   # флаги: --help
+```
+
+Раннер (`apps/api/evals/`, ADR-0011) гоняет агента in-process: тот же `LoopTurnAgent`, что и
+chat API, конфиг тенанта — из `config/tenants/<tenant>.yaml` (seed и Docker не нужны), ключи
+провайдера — из `.env`. Диалоги идут параллельно, ходы внутри диалога — по очереди; ошибка
+агента на ходе помечает ход ⚠️, остальные ходы диалога пропускаются.
+
+Результат — `reports/<timestamp>.md` (читать) и `reports/<timestamp>.json` (сравнение
+прогонов, P3-02), сводка — в консоль. Код выхода 1, если есть проваленные или упавшие
+диалоги. Проверки судьи (`clarifies`, `max_questions`, `judge`) пока `skipped` — P3-01b.
+
 ## Формат
 
 ```yaml

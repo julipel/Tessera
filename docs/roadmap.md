@@ -127,7 +127,7 @@
 
 ## P4. Знания
 
-- [ ] **P4-01 Модель данных знаний.** Source, SourceSync, Document, Chunk, Entity, миграции.
+- [x] **P4-01 Модель данных знаний.** Source, SourceSync, Document, Chunk, Entity, миграции.
 - [ ] **P4-02 Ingestion-пайплайн.** arq-воркер, интерфейс SourceConnector, статусы синхронизации,
   дедупликация по content_hash. DoD: тест на фейковом коннекторе.
 - [ ] **P4-03 Коннектор file.** PDF/DOCX/MD/TXT → Document. Структурный чанкинг.

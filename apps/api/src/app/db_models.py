@@ -5,6 +5,13 @@
 """
 
 from app.modules.chat.public import ConversationRecord, MessageRecord, ToolCallRecord
+from app.modules.knowledge.public import (
+    ChunkRecord,
+    DocumentRecord,
+    EntityRecord,
+    SourceRecord,
+    SourceSyncRecord,
+)
 from app.modules.shared.public import Base
 from app.modules.tenants.public import AgentConfigRecord, TenantRecord, WidgetKeyRecord
 
@@ -16,6 +23,11 @@ _registered = (
     ConversationRecord,
     MessageRecord,
     ToolCallRecord,
+    SourceRecord,
+    SourceSyncRecord,
+    EntityRecord,
+    DocumentRecord,
+    ChunkRecord,
 )
 
 __all__ = ["metadata"]

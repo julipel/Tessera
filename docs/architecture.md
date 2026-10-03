@@ -204,12 +204,15 @@ Entity хранится в Postgres: нормализованные поля (`t
 Tenant(id, slug, name, status)
 AgentConfig(id, tenant_id, version, status, config JSONB, created_at)
 WidgetKey(id, tenant_id, key_hash, allowed_origins[])
-Source(id, tenant_id, kind, config JSONB, schedule, status)
-SourceSync(id, source_id, started_at, finished_at, status, stats JSONB, cursor)
-Document(id, tenant_id, source_id, external_id, title, url, content_hash, metadata JSONB)
-Chunk(id, document_id, tenant_id, ord, text, token_count)  # вектор — в Qdrant, id совпадает
+Source(id, tenant_id, kind, config JSONB, schedule, status, created_at)
+SourceSync(id, tenant_id, source_id, started_at, finished_at, status, stats JSONB, cursor, error)
+Document(id, tenant_id, source_id, entity_id?, external_id, title, url, content_hash,
+         metadata JSONB, updated_at)  # entity_id — документ-описание Entity (§8)
+Chunk(id, document_id, tenant_id, ord, section, text, token_count)  # вектор — в Qdrant, id совпадает
 Entity(id, tenant_id, source_id, external_id, type, title, price, currency, in_stock,
-       category, url, image_url, attributes JSONB, updated_at)
+       category, url, image_url, attributes JSONB, content_hash, updated_at)
+# external_id уникален в пределах source_id (Document, Entity); удаление Source/Entity/Document
+# каскадно удаляет зависимые строки.
 Conversation(id, tenant_id, agent_config_id, channel, visitor_id, state JSONB, summary, created_at)
 Message(id, conversation_id, tenant_id, role, status, content, input JSONB, blocks JSONB,
         client_message_id, created_at)  # input — UserInput (user); blocks — текст/компоненты

@@ -120,7 +120,7 @@
   (`tools_called`/`tools_not_called`, `components`, `state_contains`, `must`/`must_not_contain`),
   подстановка реальных `form_id`/`confirm`; проверки судьи — `skipped`.
   DoD: отчёт в `evals/reports/<timestamp>.md` (+ `.json` для P3-02) и сводка в консоль; тесты на FakeLLM.
-- [ ] **P3-01b LLM-as-judge.** `clarifies`, `max_questions`, `judge` — один вызов судьи на ход
+- [x] **P3-01b LLM-as-judge.** `clarifies`, `max_questions`, `judge` — один вызов судьи на ход
   через порт `LLMClient`, ответ JSON, ошибки разбора → статус `error`; флаги
   `--judge-provider/--judge-model`. DoD: тесты судьи на FakeLLM, отчёт с пояснениями судьи.
 - [ ] **P3-02 Сравнение прогонов.** Diff двух отчётов: что улучшилось/ухудшилось. DoD: `make eval-diff`.

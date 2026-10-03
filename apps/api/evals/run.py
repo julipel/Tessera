@@ -17,6 +17,7 @@ from app.modules.agent.public import PLATFORM_PROMPT_VERSION, LLMClients
 from app.modules.chat.public import builtin_turn_agent
 from app.settings import Settings
 from evals.dialogs import DIALOGS_DIR, InvalidDialogError, load_dialogs, select_dialogs
+from evals.judge import JUDGE_PROMPT_VERSION, Judge
 from evals.report import REPORTS_DIR, RunInfo, render_summary, totals, write_report
 from evals.runner import TENANTS_DIR, DialogRunner, TenantConfigs, run_dialogs
 
@@ -54,23 +55,34 @@ async def main_async(args: argparse.Namespace) -> int:
     configure_logging(settings)
 
     configs = TenantConfigs(args.tenants)
-    runner = DialogRunner(builtin_turn_agent(llm_clients(settings).for_provider), configs)
+    llms = llm_clients(settings)
+    judge = (
+        None if args.no_judge else Judge(llms.for_provider, args.judge_provider, args.judge_model)
+    )
+    runner = DialogRunner(builtin_turn_agent(llms.for_provider), configs, judge)
     started_at = datetime.now(UTC)
     print(f"Диалогов: {len(dialogs)}, параллельно: {args.concurrency}…", flush=True)
     results = await run_dialogs(runner, dialogs, args.concurrency)
 
     models: dict[str, str] = {}
+    judges: dict[str, str] = {}
     for tenant in sorted({d.tenant for d in dialogs}):
         try:
-            primary = configs.get(tenant)["model"]["primary"]
-            models[tenant] = f"{primary['provider']}/{primary['name']}"
+            config = configs.get(tenant)
         except Exception:
             models[tenant] = "конфиг не загружен"
+            continue
+        primary = config["model"]["primary"]
+        models[tenant] = f"{primary['provider']}/{primary['name']}"
+        if judge is not None:
+            judges[tenant] = "/".join(judge.model_for(config))
     info = RunInfo(
         started_at=started_at,
         finished_at=datetime.now(UTC),
         platform_prompt_version=PLATFORM_PROMPT_VERSION,
+        judge_prompt_version=JUDGE_PROMPT_VERSION,
         models=models,
+        judges=judges,
         filter=args.filter,
     )
     report = write_report(results, info, args.reports)
@@ -85,6 +97,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dialogs", type=Path, default=DIALOGS_DIR)
     parser.add_argument("--tenants", type=Path, default=TENANTS_DIR)
     parser.add_argument("--reports", type=Path, default=REPORTS_DIR)
+    parser.add_argument(
+        "--judge-provider",
+        choices=["openai", "openai_compatible", "anthropic"],
+        help="провайдер судьи (по умолчанию — model.primary тенанта)",
+    )
+    parser.add_argument("--judge-model", help="модель судьи (по умолчанию — model.primary тенанта)")
+    parser.add_argument("--no-judge", action="store_true", help="без судьи: его проверки skipped")
     parser.add_argument("-v", "--verbose", action="store_true", help="логи агента (LOG_LEVEL)")
     return asyncio.run(main_async(parser.parse_args(argv)))
 

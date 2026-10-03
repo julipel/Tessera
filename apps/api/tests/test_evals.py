@@ -24,6 +24,7 @@ from app.modules.agent.public import (
 from app.modules.chat.public import TurnRequest, builtin_turn_agent
 from evals.checks import CheckResult, CheckStatus, TurnOutcome, check_turn
 from evals.dialogs import Dialog, Expect, InvalidDialogError, load_dialogs, select_dialogs
+from evals.judge import Judge, TranscriptTurn, parse_verdict
 from evals.report import RunInfo, render_markdown, render_summary, totals, write_report
 from evals.runner import DialogRunner, RunStatus, TenantConfigs, run_dialogs
 
@@ -334,6 +335,7 @@ async def test_report_markdown_json_and_summary(configs: TenantConfigs, tmp_path
         started_at=start,
         finished_at=start.replace(minute=2),
         platform_prompt_version="1",
+        judge_prompt_version="1",
         models={"eval-shop": "openai/test-model"},
     )
 
@@ -344,9 +346,10 @@ async def test_report_markdown_json_and_summary(configs: TenantConfigs, tmp_path
     assert report.read_text(encoding="utf-8") == markdown
     assert "| [d1](#d1) | ❌ | 0/1 | tools_called |" in markdown
     assert "- ❌ `tools_called` — не вызваны: search_catalog" in markdown
-    assert "- ⏭ `judge` — LLM-судья — P3-01b" in markdown
-    assert "Токены: вход 150, выход 30" in markdown
+    assert "- ⏭ `judge` — судья выключен" in markdown
+    assert "Токены агента: вход 150, выход 30" in markdown
     assert "eval-shop — openai/test-model" in markdown
+    assert "- Судья: выключен (промпт v1)" in markdown
 
     data = json.loads((tmp_path / "reports" / "20261003-120000.json").read_text("utf-8"))
     assert [d["status"] for d in data["dialogs"]] == ["failed", "passed"]
@@ -359,3 +362,134 @@ async def test_report_markdown_json_and_summary(configs: TenantConfigs, tmp_path
     assert str(report) in summary
     assert not totals(results).ok
     assert totals([passed]).ok
+
+
+# --- LLM-судья ---
+
+
+def judge_reply(questions: int, clarifies: bool, rubric: dict[str, Any] | None) -> FakeReply:
+    verdict = {"questions": questions, "clarifies": clarifies, "rubric": rubric}
+    return FakeReply(text=json.dumps(verdict, ensure_ascii=False), usage=Usage(300, 40))
+
+
+def judge_of(llm: FakeLLM) -> Judge:
+    return Judge(lambda provider: llm)
+
+
+async def test_judge_verdict_becomes_checks(configs: TenantConfigs) -> None:
+    llm = FakeLLM([judge_reply(2, True, {"pass": False, "reason": "Не опирается на атрибуты"})])
+    expect = Expect.model_validate({"clarifies": True, "max_questions": 1, "judge": "Атрибуты"})
+
+    verdict = await judge_of(llm).judge_turn(
+        configs.get("eval-shop"),
+        [TranscriptTurn("Посоветуйте крем", "Какой тип кожи?")],
+        "Сухая",
+        TurnOutcome(text="Вот крем", tools_called=("search_catalog",), slots={"skin": "dry"}),
+        expect,
+    )
+
+    assert {n: (c.status, c.detail) for n, c in verdict.checks.items()} == {
+        "clarifies": (CheckStatus.PASSED, "уточняет, вопросов: 2"),
+        "max_questions": (CheckStatus.FAILED, "вопросов: 2, не больше 1"),
+        "judge": (CheckStatus.FAILED, "Не опирается на атрибуты"),
+    }
+    assert verdict.usage == Usage(300, 40)
+    [request] = llm.requests
+    assert request.model == "test-model"
+    assert request.tools == ()
+    [task] = request.messages
+    assert isinstance(task, UserMessage)
+    for part in ("Посоветуйте крем", "Какой тип кожи?", "Сухая", "Вот крем", "search_catalog"):
+        assert part in task.text
+    assert task.text.rstrip().endswith("Атрибуты")
+
+
+async def test_judge_model_override(configs: TenantConfigs) -> None:
+    providers: list[str] = []
+    llm = FakeLLM([judge_reply(0, False, None)])
+
+    def llm_for(provider: Any) -> FakeLLM:
+        providers.append(provider)
+        return llm
+
+    judge = Judge(llm_for, provider="anthropic", model="judge-model")
+    verdict = await judge.judge_turn(
+        configs.get("eval-shop"), [], "Привет", TurnOutcome(), Expect(clarifies=False)
+    )
+
+    assert providers == ["anthropic"]
+    assert llm.requests[0].model == "judge-model"
+    assert verdict.checks["clarifies"].status is CheckStatus.PASSED
+
+
+def test_parse_verdict_accepts_code_fence_and_rejects_garbage() -> None:
+    fenced = 'Вот оценка:\n```json\n{"questions": 1, "clarifies": true, "rubric": null}\n```'
+
+    assert parse_verdict(fenced).questions == 1
+    with pytest.raises(ValueError, match="нет JSON"):
+        parse_verdict("всё хорошо")
+    with pytest.raises(ValueError, match="не по схеме"):
+        parse_verdict('{"questions": -1, "clarifies": "да"}')
+
+
+@pytest.mark.parametrize(
+    "step",
+    [FakeReply(text="не JSON"), LLMError("429", retryable=True)],
+    ids=["invalid_json", "llm_error"],
+)
+async def test_judge_failure_is_error_on_its_checks(
+    configs: TenantConfigs, step: FakeReply | LLMError
+) -> None:
+    expect = Expect.model_validate({"clarifies": False, "judge": "Вежлив", "must_contain": ["ок"]})
+
+    verdict = await judge_of(FakeLLM([step])).judge_turn(
+        configs.get("eval-shop"), [], "Привет", TurnOutcome(text="ок"), expect
+    )
+
+    assert set(verdict.checks) == {"clarifies", "judge"}
+    assert {c.status for c in verdict.checks.values()} == {CheckStatus.ERROR}
+    assert all(c.detail.startswith("судья: ") for c in verdict.checks.values())
+
+
+async def test_judge_missing_rubric_is_error(configs: TenantConfigs) -> None:
+    verdict = await judge_of(FakeLLM([judge_reply(0, False, None)])).judge_turn(
+        configs.get("eval-shop"), [], "Привет", TurnOutcome(), Expect(judge="Вежлив")
+    )
+
+    assert verdict.checks["judge"] == CheckResult(
+        "judge", CheckStatus.ERROR, "судья не оценил рубрику"
+    )
+
+
+async def test_runner_calls_judge_only_for_turns_with_judge_checks(
+    configs: TenantConfigs,
+) -> None:
+    agent = ScriptedAgent(
+        [AnswerDelta("Какой тип кожи?"), done()],
+        [AnswerDelta("Вот крем"), done()],
+        [AnswerDelta("Пожалуйста"), done()],
+    )
+    judge_llm = FakeLLM(
+        [
+            judge_reply(1, True, None),
+            judge_reply(0, False, {"pass": True, "reason": "Помнит тип кожи"}),
+        ]
+    )
+
+    result = await DialogRunner(agent, configs, judge_of(judge_llm)).run(
+        dialog(
+            {"user": "Крем", "expect": {"clarifies": True, "max_questions": 1}},
+            {"user": "Сухая", "expect": {"clarifies": False, "judge": "Помнит"}},
+            {"user": "Спасибо", "expect": {"must_contain": ["пожалуйста"]}},
+        )
+    )
+
+    assert result.status is RunStatus.PASSED
+    assert len(judge_llm.requests) == 2
+    second = judge_llm.requests[1].messages[0]
+    assert isinstance(second, UserMessage)
+    assert "Пользователь: Крем" in second.text
+    assert "Консультант: Какой тип кожи?" in second.text
+    assert result.turns[1].checks[-1] == CheckResult("judge", CheckStatus.PASSED, "Помнит тип кожи")
+    assert result.turns[1].judge_input_tokens == 300
+    assert result.turns[2].judge_input_tokens == 0

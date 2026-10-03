@@ -1,5 +1,6 @@
 """Эталонные диалоги `evals/dialogs/*.yaml` (формат — evals/README.md)."""
 
+import json
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Self
@@ -67,6 +68,13 @@ class Dialog(BaseModel):
     scenario: str | None = None
     tags: list[str] = Field(default_factory=list)
     turns: list[DialogTurn] = Field(min_length=1)
+
+
+def describe_input(user_input: dict[str, Any]) -> str:
+    """Реплика пользователя для отчёта и судьи: текст или UserInput в JSON."""
+    if user_input.get("type") == "text":
+        return str(user_input.get("text", ""))
+    return json.dumps(user_input, ensure_ascii=False)
 
 
 def load_dialog(path: Path) -> Dialog:

@@ -1,9 +1,8 @@
-"""Детерминированные проверки хода по фактическим данным (evals/README.md, «Проверки»).
-
-`clarifies`, `max_questions`, `judge` оценивает LLM-судья (P3-01b); пока они `skipped`.
+"""Проверки хода (evals/README.md, «Проверки»): детерминированные — по фактическим данным,
+`clarifies`, `max_questions`, `judge` — по вердикту LLM-судьи (evals/judge.py).
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -41,14 +40,22 @@ class TurnOutcome:
 JUDGE_CHECKS = ("clarifies", "max_questions", "judge")
 
 
-def check_turn(expect: Expect, outcome: TurnOutcome) -> list[CheckResult]:
-    """Проверки в порядке полей `Expect`; незаданные ожидания не проверяются."""
+def needs_judge(expect: Expect) -> bool:
+    return any(name in expect.model_fields_set for name in JUDGE_CHECKS)
+
+
+def check_turn(
+    expect: Expect, outcome: TurnOutcome, judged: Mapping[str, CheckResult] | None = None
+) -> list[CheckResult]:
+    """Проверки в порядке полей `Expect`; незаданные ожидания не проверяются. Проверки судьи
+    берутся из `judged`; без вердикта (судья выключен) — `skipped`."""
     results: list[CheckResult] = []
     for name in Expect.model_fields:
         if name not in expect.model_fields_set:
             continue
         if name in JUDGE_CHECKS:
-            results.append(CheckResult(name, CheckStatus.SKIPPED, "LLM-судья — P3-01b"))
+            skipped = CheckResult(name, CheckStatus.SKIPPED, "судья выключен")
+            results.append((judged or {}).get(name, skipped))
             continue
         problems = _CHECKS[name](getattr(expect, name), outcome)
         status = CheckStatus.FAILED if problems else CheckStatus.PASSED

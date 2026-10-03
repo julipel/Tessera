@@ -26,8 +26,9 @@ from app.modules.agent.public import (
 from app.modules.chat.public import ChatMessage, MessageRole, MessageStatus, TurnRequest
 from app.modules.shared.kernel import TenantId
 from app.modules.tenants.public import load_tenant_spec
-from evals.checks import CheckResult, CheckStatus, TurnOutcome, check_turn
-from evals.dialogs import REPO_ROOT, Dialog
+from evals.checks import CheckResult, CheckStatus, TurnOutcome, check_turn, needs_judge
+from evals.dialogs import REPO_ROOT, Dialog, describe_input
+from evals.judge import Judge, TranscriptTurn
 
 TENANTS_DIR = REPO_ROOT / "config" / "tenants"
 # Служебное `action_id` эталона: раннер подставляет действие последнего компонента `confirm`.
@@ -59,6 +60,8 @@ class TurnResult:
     finish: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    judge_input_tokens: int = 0
+    judge_output_tokens: int = 0
     duration_ms: int = 0
     error: str | None = None
     skipped: bool = False
@@ -116,13 +119,19 @@ class TenantConfigs:
 
 
 class DialogRunner:
-    """`turn_timeout_s` — страховка от зависшего хода; лимиты хода задаёт AgentConfig."""
+    """`judge` — LLM-судья; None — его проверки `skipped`. `turn_timeout_s` — страховка от
+    зависшего хода; лимиты хода задаёт AgentConfig."""
 
     def __init__(
-        self, agent: TurnAgent, configs: TenantConfigs, turn_timeout_s: float = 180
+        self,
+        agent: TurnAgent,
+        configs: TenantConfigs,
+        judge: Judge | None = None,
+        turn_timeout_s: float = 180,
     ) -> None:
         self._agent = agent
         self._configs = configs
+        self._judge = judge
         self._turn_timeout_s = turn_timeout_s
 
     async def run(self, dialog: Dialog) -> DialogResult:
@@ -135,6 +144,7 @@ class DialogRunner:
 
         tenant_id = TenantId(uuid5(_EVAL_NAMESPACE, f"tenant:{dialog.tenant}"))
         conversation = _Conversation(tenant_id=tenant_id, conversation_id=uuid4())
+        transcript: list[TranscriptTurn] = []
         failed = False
         for index, turn in enumerate(dialog.turns, start=1):
             user_input = conversation.resolve_input(turn.user_input())
@@ -147,7 +157,17 @@ class DialogRunner:
             if turn_result.error is not None:
                 failed = True
                 continue
-            turn_result.checks = check_turn(turn.expect, turn_result.outcome)
+            judged: dict[str, CheckResult] = {}
+            user = describe_input(user_input)
+            if self._judge is not None and needs_judge(turn.expect):
+                verdict = await self._judge.judge_turn(
+                    config, transcript, user, turn_result.outcome, turn.expect
+                )
+                judged = verdict.checks
+                turn_result.judge_input_tokens = verdict.usage.input_tokens
+                turn_result.judge_output_tokens = verdict.usage.output_tokens
+            turn_result.checks = check_turn(turn.expect, turn_result.outcome, judged)
+            transcript.append(TranscriptTurn(user, turn_result.outcome.text))
         return result
 
     async def _play(

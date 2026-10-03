@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.checks import CheckStatus
-from evals.dialogs import REPO_ROOT
+from evals.dialogs import REPO_ROOT, describe_input
 from evals.runner import DialogResult, RunStatus, TurnResult
 
 REPORTS_DIR = REPO_ROOT / "evals" / "reports"
@@ -33,12 +33,15 @@ _PROBLEMS = (CheckStatus.FAILED, CheckStatus.ERROR)
 
 @dataclass(frozen=True, slots=True)
 class RunInfo:
-    """Условия прогона: `models` — модель по тенанту (`provider/name`)."""
+    """Условия прогона: `models` — модель агента по тенанту (`provider/name`), `judges` — модель
+    судьи по тенанту (пусто — судья выключен)."""
 
     started_at: datetime
     finished_at: datetime
     platform_prompt_version: str
+    judge_prompt_version: str
     models: dict[str, str] = field(default_factory=dict)
+    judges: dict[str, str] = field(default_factory=dict)
     filter: str | None = None
 
 
@@ -48,6 +51,8 @@ class Totals:
     checks: Counter[CheckStatus]
     input_tokens: int
     output_tokens: int
+    judge_input_tokens: int
+    judge_output_tokens: int
 
     @property
     def ok(self) -> bool:
@@ -61,6 +66,8 @@ def totals(results: Sequence[DialogResult]) -> Totals:
         checks=Counter(check.status for result in results for check in result.checks),
         input_tokens=sum(turn.input_tokens for turn in turns),
         output_tokens=sum(turn.output_tokens for turn in turns),
+        judge_input_tokens=sum(turn.judge_input_tokens for turn in turns),
+        judge_output_tokens=sum(turn.judge_output_tokens for turn in turns),
     )
 
 
@@ -86,8 +93,11 @@ def render_markdown(results: Sequence[DialogResult], info: RunInfo) -> str:
         f"- Диалоги: {_dialog_counts(total)}",
         f"- Проверки: {_check_counts(total)}",
         f"- Модели: {', '.join(f'{t} — {m}' for t, m in info.models.items()) or '—'}",
+        f"- Судья: {', '.join(f'{t} — {m}' for t, m in info.judges.items()) or 'выключен'}"
+        f" (промпт v{info.judge_prompt_version})",
         f"- Platform-промпт: v{info.platform_prompt_version}",
-        f"- Токены: вход {total.input_tokens}, выход {total.output_tokens}",
+        f"- Токены агента: вход {total.input_tokens}, выход {total.output_tokens}",
+        f"- Токены судьи: вход {total.judge_input_tokens}, выход {total.judge_output_tokens}",
         f"- Длительность: {(info.finished_at - info.started_at).total_seconds():.0f} с",
     ]
     if info.filter:
@@ -128,7 +138,9 @@ def to_json(results: Sequence[DialogResult], info: RunInfo) -> dict[str, Any]:
         "started_at": info.started_at.isoformat(),
         "finished_at": info.finished_at.isoformat(),
         "platform_prompt_version": info.platform_prompt_version,
+        "judge_prompt_version": info.judge_prompt_version,
         "models": info.models,
+        "judges": info.judges,
         "filter": info.filter,
         "dialogs": [
             {
@@ -157,6 +169,8 @@ def _turn_json(turn: TurnResult) -> dict[str, Any]:
         "slots": turn.outcome.slots,
         "input_tokens": turn.input_tokens,
         "output_tokens": turn.output_tokens,
+        "judge_input_tokens": turn.judge_input_tokens,
+        "judge_output_tokens": turn.judge_output_tokens,
         "duration_ms": turn.duration_ms,
         "checks": [
             {"name": c.name, "status": c.status.value, "detail": c.detail} for c in turn.checks
@@ -201,9 +215,8 @@ def _render_turn(turn: TurnResult) -> list[str]:
 
 
 def _input_label(user_input: dict[str, Any]) -> str:
-    if user_input.get("type") == "text":
-        return str(user_input.get("text", ""))
-    return f"`{json.dumps(user_input, ensure_ascii=False)}`"
+    label = describe_input(user_input)
+    return label if user_input.get("type") == "text" else f"`{label}`"
 
 
 def _quote(text: str) -> str:

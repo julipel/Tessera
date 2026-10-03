@@ -76,6 +76,15 @@ async def test_tool_calls_are_announced_then_returned_in_response() -> None:
     assert response.as_message().tool_calls == (SEARCH,)
 
 
+async def test_provider_items_are_returned_in_response_and_message() -> None:
+    items = ({"type": "reasoning", "encrypted_content": "gAAA…"},)
+    chunks = await collect(FakeLLM([FakeReply(tool_calls=(SEARCH,), provider_items=items)]))
+
+    response = completed(chunks).response
+    assert response.provider_items == items
+    assert response.as_message().provider_items == items
+
+
 async def test_invalid_arguments_are_passed_through_raw() -> None:
     broken = ToolCall(id="call_2", name="search_catalog", arguments=None, raw_arguments="{query:")
     response = completed(await collect(FakeLLM([FakeReply(tool_calls=(broken,))]))).response

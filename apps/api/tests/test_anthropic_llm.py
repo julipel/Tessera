@@ -176,6 +176,7 @@ async def test_request_maps_messages_tools_and_options() -> None:
                     call("tu_1", {"query": "крем"}, '{"query": "крем"}'),
                     call("tu_2", {"query": "сыворотка"}, '{"query": "сыворотка"}'),
                 ),
+                provider_items=({"type": "x"},),  # чужие данные провайдера игнорируются
             ),
             ToolResultMessage(tool_call_id="tu_1", content='{"items": []}'),
             ToolResultMessage(tool_call_id="tu_2", content="timeout", is_error=True),

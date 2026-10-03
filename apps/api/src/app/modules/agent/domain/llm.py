@@ -30,10 +30,18 @@ class UserMessage:
     text: str
 
 
+type ProviderItem = dict[str, Any]
+
+
 @dataclass(frozen=True, slots=True)
 class AssistantMessage:
+    """`provider_items` — непрозрачные данные провайдера, которые он просит вернуть во входе
+    следующего шага (ADR-0010; например, reasoning items Responses API). Живут в пределах хода,
+    в БД не пишутся. Адаптер, который их не понимает, игнорирует поле."""
+
     text: str
     tool_calls: tuple[ToolCall, ...] = ()
+    provider_items: tuple[ProviderItem, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,15 +92,19 @@ class Usage:
 
 @dataclass(frozen=True, slots=True)
 class LLMResponse:
-    """Полный ответ шага модели; `text` — склейка всех TextDelta."""
+    """Полный ответ шага модели; `text` — склейка всех TextDelta. `provider_items` цикл
+    возвращает в следующий шаг хода без изменений (см. AssistantMessage)."""
 
     text: str
     tool_calls: tuple[ToolCall, ...] = ()
     stop_reason: StopReason = StopReason.END_TURN
     usage: Usage = field(default_factory=Usage)
+    provider_items: tuple[ProviderItem, ...] = ()
 
     def as_message(self) -> AssistantMessage:
-        return AssistantMessage(text=self.text, tool_calls=self.tool_calls)
+        return AssistantMessage(
+            text=self.text, tool_calls=self.tool_calls, provider_items=self.provider_items
+        )
 
 
 @dataclass(frozen=True, slots=True)

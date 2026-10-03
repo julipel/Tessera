@@ -45,7 +45,11 @@
     "ModelConfig": {
       "type": "object",
       "properties": {
-        "provider": { "type": "string", "enum": ["openai", "anthropic"] },
+        "provider": {
+          "type": "string",
+          "enum": ["openai", "openai_compatible", "anthropic"],
+          "description": "Протокол API, а не производитель модели (ADR-0010): openai — OpenAI Responses API, openai_compatible — Chat Completions OpenAI-совместимого API (прокси, локальные серверы; например, модель anthropic/… через прокси), anthropic — Anthropic Messages API."
+        },
         "name": { "type": "string" },
         "temperature": {
           "type": "number",

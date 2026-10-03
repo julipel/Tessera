@@ -1,8 +1,9 @@
 """Контрактный тест LLM-адаптеров на реальных провайдерах (маркер `live`, не в `make test`).
 
 Запуск: `OPENAI_API_KEY=... LIVE_OPENAI_MODEL=... ANTHROPIC_API_KEY=... LIVE_ANTHROPIC_MODEL=...
-uv run pytest -m live`. Провайдер без ключа или модели пропускается. Новый адаптер добавляется
-в `PROVIDERS`.
+OPENAI_COMPATIBLE_API_KEY=... LIVE_OPENAI_COMPATIBLE_MODEL=... uv run pytest -m live`
+(для `openai_compatible` — модель, которая вызывает инструменты через Chat Completions).
+Провайдер без ключа или модели пропускается. Новый адаптер добавляется в `PROVIDERS`.
 """
 
 import os
@@ -44,6 +45,14 @@ def _openai(settings: Settings) -> LLMClient | None:
     return create_openai_llm(key, base_url=settings.openai_base_url)
 
 
+def _openai_compatible(settings: Settings) -> LLMClient | None:
+    secret = settings.openai_compatible_api_key
+    key = secret.get_secret_value() if secret else ""
+    if not key:
+        return None
+    return create_openai_llm(key, base_url=settings.openai_compatible_base_url)
+
+
 def _anthropic(settings: Settings) -> LLMClient | None:
     key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else ""
     if not key:
@@ -53,6 +62,7 @@ def _anthropic(settings: Settings) -> LLMClient | None:
 
 PROVIDERS = [
     Provider("openai", "LIVE_OPENAI_MODEL", _openai),
+    Provider("openai_compatible", "LIVE_OPENAI_COMPATIBLE_MODEL", _openai_compatible),
     Provider("anthropic", "LIVE_ANTHROPIC_MODEL", _anthropic),
 ]
 

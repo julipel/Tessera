@@ -14,6 +14,7 @@ from app.modules.agent.domain.llm import (
     LLMError,
     LLMRequest,
     LLMResponse,
+    ProviderItem,
     ResponseCompleted,
     StopReason,
     TextDelta,
@@ -29,7 +30,8 @@ class FakeReply:
 
     - `text` режется на куски по словам; `chunks` задаёт куски явно (тогда `text` игнорируется);
     - `delay_s` — пауза перед каждым чанком (таймауты, отмена);
-    - `fail_after_chunks` — поднять `error` после стольких текстовых чанков (обрыв стрима).
+    - `fail_after_chunks` — поднять `error` после стольких текстовых чанков (обрыв стрима);
+    - `provider_items` — непрозрачные данные провайдера в ответе (ADR-0010).
     """
 
     text: str = ""
@@ -39,6 +41,7 @@ class FakeReply:
     usage: Usage | None = None
     fail_after_chunks: int | None = None
     error: LLMError | None = None
+    provider_items: tuple[ProviderItem, ...] = ()
 
     def text_chunks(self) -> list[str]:
         if self.chunks is not None:
@@ -93,6 +96,7 @@ class FakeLLM:
                 tool_calls=step.tool_calls,
                 stop_reason=StopReason.TOOL_CALLS if step.tool_calls else StopReason.END_TURN,
                 usage=step.usage or Usage(input_tokens=0, output_tokens=len(chunks)),
+                provider_items=step.provider_items,
             )
         )
 

@@ -7,7 +7,7 @@ TurnContext.
 import json
 from collections.abc import AsyncIterator, Callable, Iterable
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any
 
 from app.contracts import AgentConfig
 from app.modules.agent.public import (
@@ -16,6 +16,7 @@ from app.modules.agent.public import (
     AssistantMessage,
     LLMClient,
     LLMMessage,
+    Provider,
     RuntimeContext,
     ToolExecutor,
     TurnContext,
@@ -26,7 +27,7 @@ from app.modules.agent.public import (
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, TurnRequest
 from app.modules.memory.public import DialogState
 
-type LLMForProvider = Callable[[Literal["openai", "anthropic"]], LLMClient]
+type LLMForProvider = Callable[[Provider], LLMClient]
 type ToolsForConfig = Callable[[AgentConfig], ToolExecutor]
 
 

@@ -25,7 +25,10 @@ class ModelConfig(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    provider: Literal["openai", "anthropic"]
+    provider: Literal["openai", "openai_compatible", "anthropic"]
+    """
+    Протокол API, а не производитель модели (ADR-0010): openai — OpenAI Responses API, openai_compatible — Chat Completions OpenAI-совместимого API (прокси, локальные серверы; например, модель anthropic/… через прокси), anthropic — Anthropic Messages API.
+    """
     name: str
     temperature: Annotated[float | None, Field(ge=0.0, le=2.0)] = None
     """

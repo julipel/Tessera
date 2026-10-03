@@ -21,6 +21,7 @@ from app.modules.agent.domain.llm import (
     LLMMessage,
     LLMRequest,
     LLMResponse,
+    ProviderItem,
     ResponseCompleted,
     StopReason,
     TextDelta,
@@ -34,7 +35,7 @@ from app.modules.agent.domain.llm import (
 from app.modules.agent.domain.turn import ToolExecutor, TurnContext, TurnLimits
 from app.modules.agent.infrastructure.anthropic_llm import AnthropicLLM, create_anthropic_llm
 from app.modules.agent.infrastructure.fake_llm import FakeLLM, FakeLLMExhaustedError, FakeReply
-from app.modules.agent.infrastructure.llm_clients import LLMClients
+from app.modules.agent.infrastructure.llm_clients import LLMClients, Provider
 from app.modules.agent.infrastructure.openai_llm import OpenAILLM, create_openai_llm
 from app.modules.agent.infrastructure.tool_executor import RegistryToolExecutor
 
@@ -59,6 +60,8 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "OpenAILLM",
+    "Provider",
+    "ProviderItem",
     "RegistryToolExecutor",
     "ResponseCompleted",
     "RuntimeContext",

@@ -184,7 +184,10 @@ export interface ModelsConfig {
  * via the `definition` "ModelConfig".
  */
 export interface ModelConfig {
-  provider: "openai" | "anthropic";
+  /**
+   * Протокол API, а не производитель модели (ADR-0010): openai — OpenAI Responses API, openai_compatible — Chat Completions OpenAI-совместимого API (прокси, локальные серверы; например, модель anthropic/… через прокси), anthropic — Anthropic Messages API.
+   */
+  provider: "openai" | "openai_compatible" | "anthropic";
   name: string;
   /**
    * Подсказка, не требование (ADR-0009): применяется, только если провайдер и модель её поддерживают, иначе адаптер её отбрасывает. Не задана — значение провайдера по умолчанию.

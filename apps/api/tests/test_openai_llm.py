@@ -128,7 +128,8 @@ async def test_request_maps_messages_tools_and_options() -> None:
     req = request(
         messages=(
             UserMessage("Нужен крем"),
-            AssistantMessage(text="", tool_calls=(call,)),
+            # provider_items Chat Completions не понимает и игнорирует (ADR-0010)
+            AssistantMessage(text="", tool_calls=(call,), provider_items=({"type": "x"},)),
             ToolResultMessage(tool_call_id="call_1", content='{"items": []}'),
             AssistantMessage(text="Ничего нет."),
             UserMessage("Жаль"),

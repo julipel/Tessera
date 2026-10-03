@@ -14,6 +14,7 @@ from app.modules.agent.public import (
     LLMClients,
     LLMError,
     OpenAILLM,
+    Provider,
     RegistryToolExecutor,
     UserMessage,
 )
@@ -76,9 +77,18 @@ def config(primary: dict[str, Any], limits: dict[str, Any] | None = None) -> dic
     }
 
 
-async def run(agent_config: dict[str, Any], llm: FakeLLM) -> None:
+async def run(
+    agent_config: dict[str, Any], llm: FakeLLM, providers: list[Provider] | None = None
+) -> None:
+    """`providers` — куда записать, для каких провайдеров агент запрашивал клиента."""
+
+    def llm_for(provider: Provider) -> FakeLLM:
+        if providers is not None:
+            providers.append(provider)
+        return llm
+
     agent = LoopTurnAgent(
-        lambda _: llm, lambda _: RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW
+        llm_for, lambda _: RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW
     )
     request = TurnRequest(
         tenant_id=TENANT,
@@ -130,10 +140,37 @@ def test_llm_clients_without_key_raise_non_retryable_error() -> None:
 
 
 def test_llm_clients_create_client_once_per_provider() -> None:
-    clients = LLMClients(openai_api_key="sk-test", anthropic_api_key="sk-ant-test")
+    clients = LLMClients(
+        openai_api_key="sk-test",
+        openai_compatible_api_key="sk-compat",
+        anthropic_api_key="sk-ant-test",
+    )
 
     openai = clients.for_provider("openai")
 
     assert isinstance(openai, OpenAILLM)
     assert clients.for_provider("openai") is openai
+    compatible = clients.for_provider("openai_compatible")
+    assert isinstance(compatible, OpenAILLM)
+    assert compatible is not openai
     assert isinstance(clients.for_provider("anthropic"), AnthropicLLM)
+
+
+def test_openai_compatible_needs_own_key() -> None:
+    """ADR-0010: ключ `openai` не подходит для `openai_compatible` — у них разные endpoint."""
+    clients = LLMClients(openai_api_key="sk-test")
+
+    with pytest.raises(LLMError) as error:
+        clients.for_provider("openai_compatible")
+
+    assert error.value.retryable is False
+
+
+async def test_openai_compatible_provider_selects_its_client() -> None:
+    llm = FakeLLM([FakeReply(text="Здравствуйте")])
+    providers: list[Provider] = []
+
+    await run(config({"provider": "openai_compatible", "name": "anthropic/m"}), llm, providers)
+
+    assert providers == ["openai_compatible"]
+    assert llm.requests[0].model == "anthropic/m"

@@ -96,7 +96,7 @@
 
   DoD: в unit-тестах обоих адаптеров отброшенный параметр не попадает в тело запроса и
   логируется; конфиг без temperature проходит валидацию и не передаёт её провайдеру.
-- [ ] **P2-11a Порт LLMClient: `provider_items` и `openai_compatible` (ADR-0010).**
+- [x] **P2-11a Порт LLMClient: `provider_items` и `openai_compatible` (ADR-0010).**
   `provider_items` у `LLMResponse`/`AssistantMessage`, цикл возвращает их в следующий шаг
   хода без изменений; `FakeLLM` умеет их отдавать. Chat Completions (`OpenAILLM`) —
   провайдер `openai_compatible`: значение в `ModelConfig.provider` (схема, описание «протокол

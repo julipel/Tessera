@@ -41,6 +41,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.llm_clients = LLMClients(
         openai_api_key=_secret(settings.openai_api_key),
         openai_base_url=settings.openai_base_url,
+        openai_compatible_api_key=_secret(settings.openai_compatible_api_key),
+        openai_compatible_base_url=settings.openai_compatible_base_url,
         anthropic_api_key=_secret(settings.anthropic_api_key),
         anthropic_base_url=settings.anthropic_base_url,
     )

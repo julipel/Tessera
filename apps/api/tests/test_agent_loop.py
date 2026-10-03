@@ -193,6 +193,32 @@ async def test_single_tool_call_then_answer() -> None:
     assert json.loads(result.content) == {"items": ["e_1"]}
 
 
+REASONING = {"type": "reasoning", "id": "rs_1", "encrypted_content": "gAAA…", "summary": []}
+
+
+async def test_provider_items_return_unchanged_in_next_step_of_turn() -> None:
+    """ADR-0010: данные провайдера шага (reasoning items) уходят во вход следующего шага
+    вместе с вызовами инструментов — без изменений и в том же порядке."""
+    search = call("call_1")
+    items = (REASONING, {"type": "opaque", "nested": {"keep": [1, 2]}})
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(search,), provider_items=items),
+            FakeReply(tool_calls=(call("call_2"),), provider_items=()),
+            FakeReply(text="Готово."),
+        ]
+    )
+
+    await run(llm, FakeTools())
+
+    assert llm.requests[0].messages == HISTORY
+    assert llm.requests[1].messages[len(HISTORY)] == AssistantMessage(
+        text="", tool_calls=(search,), provider_items=items
+    )
+    third = [m for m in llm.requests[2].messages if isinstance(m, AssistantMessage)]
+    assert [m.provider_items for m in third] == [items, ()]
+
+
 async def test_tool_chain_accumulates_messages_and_usage() -> None:
     first, second = call("call_1", {"query": "крем"}), call("call_2", {"query": "сыворотка"})
     llm = FakeLLM(

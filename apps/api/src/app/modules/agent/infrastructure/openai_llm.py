@@ -3,6 +3,12 @@
 Подходит и для OpenAI-совместимых API через `base_url`. Чанки стрима собираются вручную:
 фрагменты tool_calls приходят по `index` — первый несёт id и имя, следующие дописывают
 аргументы. Ошибки SDK переводятся в `LLMError` с признаком `retryable`.
+
+Параметры сэмплинга (ADR-0009): передаёт `temperature`, если она задана. Поддержка зависит от
+модели (reasoning-модели принимают только значение по умолчанию), поэтому таблицы моделей нет:
+на 400 с `param: "temperature"` адаптер один раз повторяет запрос без неё и запоминает модель
+до конца жизни процесса; дальше параметр для неё отбрасывается с debug-логом
+`llm.param_dropped`. Ошибка приходит до начала стрима, повтор не дублирует ответ.
 """
 
 from collections.abc import AsyncIterator
@@ -13,6 +19,8 @@ from openai import (
     APIError,
     APIStatusError,
     AsyncOpenAI,
+    AsyncStream,
+    BadRequestError,
     Omit,
     omit,
 )
@@ -39,9 +47,13 @@ from app.modules.agent.domain.llm import (
     UserMessage,
 )
 from app.modules.agent.infrastructure.llm_arguments import parse_arguments
+from app.modules.agent.infrastructure.sampling import log_dropped_param
 
 # 408 Request Timeout, 409 Conflict, 429 Rate Limit — временные, как и 5xx (их же ретраит SDK).
 _RETRYABLE_STATUSES = frozenset({408, 409, 429})
+
+# Коды OpenAI для параметра, который модель не принимает (или принимает только по умолчанию).
+_UNSUPPORTED_CODES = frozenset({"unsupported_parameter", "unsupported_value"})
 
 _STOP_REASONS = {
     "stop": StopReason.END_TURN,
@@ -66,19 +78,12 @@ def create_openai_llm(
 class OpenAILLM:
     def __init__(self, client: AsyncOpenAI) -> None:
         self._client = client
+        self._no_temperature: set[str] = set()  # модели, отклонившие temperature
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
         accumulator = _StreamAccumulator()
         try:
-            stream = await self._client.chat.completions.create(
-                model=request.model,
-                messages=to_openai_messages(request),
-                tools=[to_openai_tool(tool) for tool in request.tools] or omit,
-                temperature=_given(request.temperature),
-                max_completion_tokens=_given(request.max_output_tokens),
-                stream=True,
-                stream_options={"include_usage": True},
-            )
+            stream = await self._open(request)
             async with stream:
                 async for chunk in stream:
                     for item in accumulator.feed(chunk):
@@ -86,6 +91,37 @@ class OpenAILLM:
         except APIError as error:
             raise to_llm_error(error) from error
         yield ResponseCompleted(accumulator.response())
+
+    async def _open(self, request: LLMRequest) -> AsyncStream[ChatCompletionChunk]:
+        temperature = request.temperature
+        if temperature is not None and request.model in self._no_temperature:
+            log_dropped_param("openai", request.model, "temperature")
+            temperature = None
+        try:
+            return await self._create(request, temperature)
+        except BadRequestError as error:
+            if temperature is None or not _rejects(error, "temperature"):
+                raise
+            self._no_temperature.add(request.model)
+            log_dropped_param("openai", request.model, "temperature")
+            return await self._create(request, None)
+
+    async def _create(
+        self, request: LLMRequest, temperature: float | None
+    ) -> AsyncStream[ChatCompletionChunk]:
+        return await self._client.chat.completions.create(
+            model=request.model,
+            messages=to_openai_messages(request),
+            tools=[to_openai_tool(tool) for tool in request.tools] or omit,
+            temperature=_given(temperature),
+            max_completion_tokens=_given(request.max_output_tokens),
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+
+
+def _rejects(error: BadRequestError, param: str) -> bool:
+    return error.param == param and error.code in _UNSUPPORTED_CODES
 
 
 def to_openai_messages(request: LLMRequest) -> list[ChatCompletionMessageParam]:

@@ -4,8 +4,9 @@
 аргументы приходят фрагментами `input_json_delta` по индексу блока. Блоки размышлений и прочие
 служебные блоки пропускаются. Ошибки SDK переводятся в `LLMError` с признаком `retryable`.
 
-`LLMRequest.temperature` не передаётся: актуальные модели Anthropic не принимают параметры
-сэмплинга, и SDK убрал их из сигнатуры `messages.create`.
+Параметры сэмплинга (ADR-0009): не передаёт ни один. Актуальные модели Anthropic их не
+принимают, и SDK убрал их из сигнатуры `messages.create`; заданная `LLMRequest.temperature`
+отбрасывается с debug-логом `llm.param_dropped`.
 """
 
 from collections.abc import AsyncIterator
@@ -42,6 +43,7 @@ from app.modules.agent.domain.llm import (
     UserMessage,
 )
 from app.modules.agent.infrastructure.llm_arguments import parse_arguments
+from app.modules.agent.infrastructure.sampling import log_dropped_param
 
 # 408 Request Timeout, 409 Conflict, 429 Rate Limit — временные, как и 5xx (включая 529 Overloaded).
 _RETRYABLE_STATUSES = frozenset({408, 409, 429})
@@ -84,6 +86,8 @@ class AnthropicLLM:
         self._default_max_tokens = default_max_tokens
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+        if request.temperature is not None:
+            log_dropped_param("anthropic", request.model, "temperature")
         accumulator = _StreamAccumulator()
         try:
             stream = await self._client.messages.create(

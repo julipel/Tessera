@@ -59,8 +59,7 @@ class LoopTurnAgent:
                 max_tool_retries=2 if limits.max_tool_retries is None else limits.max_tool_retries,
             ),
             fallback_message=config.assistant.fallback_message,
-            # ADR-0009: только явно заданная тенантом, без default схемы.
-            temperature=primary.temperature if "temperature" in primary.model_fields_set else None,
+            temperature=primary.temperature,  # подсказка: применяет адаптер (ADR-0009)
         )
         loop = AgentLoop(self._llm_for(primary.provider), self._tools)
         async for event in loop.run_turn(ctx):

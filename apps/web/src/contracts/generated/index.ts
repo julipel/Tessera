@@ -186,6 +186,9 @@ export interface ModelsConfig {
 export interface ModelConfig {
   provider: "openai" | "anthropic";
   name: string;
+  /**
+   * Подсказка, не требование (ADR-0009): применяется, только если провайдер и модель её поддерживают, иначе адаптер её отбрасывает. Не задана — значение провайдера по умолчанию.
+   */
   temperature?: number;
 }
 /**

@@ -1,9 +1,17 @@
-import asyncio
 import os
-from collections.abc import AsyncIterator, Iterator
+
+# До импорта app: модульный `app = create_app()` в app.main настраивает structlog по окружению,
+# а при APP_ENV=local логгеры кэшируются при первом использовании и capture_logs их не видит.
+os.environ["APP_ENV"] = "test"
+
+import asyncio
+import logging
+from collections.abc import AsyncIterator, Iterator, MutableMapping
 from pathlib import Path
+from typing import Any
 
 import pytest
+import structlog
 from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
@@ -102,3 +110,15 @@ async def db_client(app: FastAPI, db_session: AsyncSession) -> AsyncIterator[Asy
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def debug_logs() -> Iterator[list[MutableMapping[str, Any]]]:
+    """Записи structlog, включая debug: приложение фильтрует логгер по LOG_LEVEL (INFO)."""
+    config = structlog.get_config()
+    structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG))
+    try:
+        with structlog.testing.capture_logs() as logs:
+            yield logs
+    finally:
+        structlog.configure(**config)

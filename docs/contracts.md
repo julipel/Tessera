@@ -217,8 +217,10 @@ assistant:
   starter_suggestions: ["Подобрать подарок", "Условия доставки"]
   fallback_message: "Извините, сейчас не получается ответить. Попробуйте ещё раз."
 model:
-  primary: { provider: openai, name: "<model>", temperature: 0.3 }
+  primary: { provider: openai, name: "<model>" }
   fallback: { provider: anthropic, name: "<model>" }
+  # temperature (0–2) — необязательная подсказка: адаптер передаёт её, только если провайдер
+  # и модель её поддерживают, иначе отбрасывает (ADR-0009). Без неё — значение провайдера.
 limits: { max_steps: 6, max_tool_calls_per_step: 4, turn_timeout_s: 60, max_tool_retries: 2 }
 prompt:
   tenant: |

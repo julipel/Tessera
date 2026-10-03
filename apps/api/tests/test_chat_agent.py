@@ -94,7 +94,7 @@ async def run(agent_config: dict[str, Any], llm: FakeLLM) -> None:
 @pytest.mark.parametrize(
     ("primary", "expected"),
     [
-        ({"provider": "openai", "name": "m"}, None),  # default схемы не передаётся (ADR-0009)
+        ({"provider": "openai", "name": "m"}, None),  # не задана — значение провайдера
         ({"provider": "openai", "name": "m", "temperature": 0.7}, 0.7),
     ],
 )

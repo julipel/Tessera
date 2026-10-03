@@ -47,7 +47,12 @@
       "properties": {
         "provider": { "type": "string", "enum": ["openai", "anthropic"] },
         "name": { "type": "string" },
-        "temperature": { "type": "number", "minimum": 0, "maximum": 2, "default": 0.3 }
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Подсказка, не требование (ADR-0009): применяется, только если провайдер и модель её поддерживают, иначе адаптер её отбрасывает. Не задана — значение провайдера по умолчанию."
+        }
       },
       "required": ["provider", "name"],
       "additionalProperties": false

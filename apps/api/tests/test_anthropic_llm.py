@@ -1,7 +1,7 @@
 """Адаптер Anthropic (P2-07) без сети: настоящий AsyncAnthropic поверх MockTransport с SSE."""
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from typing import Any
 
 import httpx2
@@ -466,3 +466,21 @@ async def test_error_event_mid_stream_skips_completion(error_type: str, retryabl
 
     assert raised.value.retryable is retryable
     assert received == [TextDelta("Начало")]
+
+
+async def test_dropped_temperature_is_logged(debug_logs: list[MutableMapping[str, Any]]) -> None:
+    server = Server(text_reply())
+
+    await collect(llm_for(server), request(temperature=0.3))
+    await collect(llm_for(server), request())
+
+    assert "temperature" not in server.requests[0]
+    assert [e for e in debug_logs if e["event"] == "llm.param_dropped"] == [
+        {
+            "event": "llm.param_dropped",
+            "log_level": "debug",
+            "provider": "anthropic",
+            "model": "claude-test",
+            "param": "temperature",
+        }
+    ]

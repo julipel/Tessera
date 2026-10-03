@@ -1,7 +1,7 @@
 """Адаптер OpenAI (P2-06) без сети: настоящий AsyncOpenAI поверх MockTransport с SSE-ответами."""
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from typing import Any
 
 import httpx2
@@ -339,3 +339,74 @@ async def test_error_event_mid_stream_is_retryable_and_skips_completion() -> Non
 
     assert raised.value.retryable
     assert received == [TextDelta("Начало")]
+
+
+# --- temperature: адаптивный отказ (ADR-0009) ---
+
+# Форма ответа OpenAI проверена запросом к reasoning-модели (P2-10).
+UNSUPPORTED_TEMPERATURE = {
+    "error": {
+        "message": "Unsupported value: 'temperature' does not support 0.3 with this model. "
+        "Only the default (1) value is supported.",
+        "type": "invalid_request_error",
+        "param": "temperature",
+        "code": "unsupported_value",
+    }
+}
+
+
+class RejectsTemperature(Server):
+    """Модели из `strict` отвечают 400 на запрос с temperature — как reasoning-модели OpenAI."""
+
+    def __init__(self, *strict: str, error: dict[str, Any] = UNSUPPORTED_TEMPERATURE) -> None:
+        super().__init__(sse(chunk({"content": "ok"}, finish="stop")))
+        self.strict = strict
+        self.error = error
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        response = super().__call__(request)
+        body = self.requests[-1]
+        if body["model"] in self.strict and "temperature" in body:
+            return httpx2.Response(400, json=self.error)
+        return response
+
+
+def dropped(logs: list[MutableMapping[str, Any]]) -> list[str]:
+    return [e["model"] for e in logs if e["event"] == "llm.param_dropped"]
+
+
+async def test_rejected_temperature_is_retried_without_it_and_remembered(
+    debug_logs: list[MutableMapping[str, Any]],
+) -> None:
+    server = RejectsTemperature("gpt-reasoning")
+    llm = llm_for(server)
+
+    first = await collect(llm, request(model="gpt-reasoning", temperature=0.3))
+    await collect(llm, request(model="gpt-reasoning", temperature=0.3))
+    await collect(llm, request(model="gpt-test", temperature=0.3))
+
+    assert completed(first).response.text == "ok"
+    assert [(b["model"], b.get("temperature")) for b in server.requests] == [
+        ("gpt-reasoning", 0.3),
+        ("gpt-reasoning", None),  # повтор без temperature
+        ("gpt-reasoning", None),  # модель запомнена — без лишнего 400
+        ("gpt-test", 0.3),  # другая модель её по-прежнему получает
+    ]
+    assert dropped(debug_logs) == ["gpt-reasoning", "gpt-reasoning"]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        {"error": {"message": "bad", "type": "invalid_request_error", "param": "messages"}},
+        {"error": {"message": "bad", "param": "temperature", "code": "invalid_type"}},
+    ],
+)
+async def test_other_bad_requests_are_not_retried(error: dict[str, Any]) -> None:
+    server = RejectsTemperature("gpt-test", error=error)
+
+    with pytest.raises(LLMError) as raised:
+        await collect(llm_for(server), request(temperature=0.3))
+
+    assert raised.value.retryable is False
+    assert len(server.requests) == 1

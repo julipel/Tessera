@@ -27,7 +27,10 @@ class ModelConfig(BaseModel):
     )
     provider: Literal["openai", "anthropic"]
     name: str
-    temperature: Annotated[float | None, Field(ge=0.0, le=2.0)] = 0.3
+    temperature: Annotated[float | None, Field(ge=0.0, le=2.0)] = None
+    """
+    Подсказка, не требование (ADR-0009): применяется, только если провайдер и модель её поддерживают, иначе адаптер её отбрасывает. Не задана — значение провайдера по умолчанию.
+    """
 
 
 class ModelsConfig(BaseModel):

@@ -1,0 +1,334 @@
+"""Агентный цикл на FakeLLM (P2-02): спецификация до реализации.
+
+Пока цикл — заглушка (P2-03), тесты ожидаемо падают на NotImplementedError. `strict=True`:
+как только тест начнёт проходить, XPASS сломает прогон — маркер нужно снять в P2-03.
+"""
+
+import asyncio
+import json
+from collections.abc import Callable, Sequence
+from typing import Any
+from uuid import uuid4
+
+import pytest
+
+from app.modules.agent.public import (
+    AgentEvent,
+    AgentLoop,
+    AnswerDelta,
+    AssistantMessage,
+    ComponentEmitted,
+    FakeLLM,
+    FakeReply,
+    FinishReason,
+    LLMRequest,
+    ToolCall,
+    ToolExecutor,
+    ToolFinished,
+    ToolResultMessage,
+    ToolSchema,
+    ToolStarted,
+    TurnCompleted,
+    TurnContext,
+    TurnLimits,
+    Usage,
+    UserMessage,
+)
+from app.modules.shared.kernel import TenantId
+from app.modules.tools.public import ToolError, ToolErrorCode, ToolResult
+
+pytestmark = pytest.mark.xfail(
+    strict=True, raises=NotImplementedError, reason="P2-03: агентный цикл не реализован"
+)
+
+FALLBACK = "Извините, сейчас не получается ответить. Попробуйте ещё раз."
+HISTORY = (UserMessage("Подбери крем для сухой кожи"),)
+SCHEMAS = (
+    ToolSchema(
+        name="search_catalog",
+        description="Поиск по каталогу",
+        parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+    ),
+)
+CARD = {"type": "product_card", "entity_id": "e_1"}
+
+
+def call(call_id: str, args: dict[str, Any] | None = None, *, raw: str | None = None) -> ToolCall:
+    arguments = {"query": "крем"} if args is None and raw is None else args
+    return ToolCall(
+        id=call_id,
+        name="search_catalog",
+        arguments=arguments,
+        raw_arguments=raw if raw is not None else json.dumps(arguments, ensure_ascii=False),
+    )
+
+
+def failure(code: ToolErrorCode, message: str) -> ToolResult:
+    return ToolResult(error=ToolError(code=code, message=message, retryable=False))
+
+
+class FakeTools:
+    """ToolExecutor со сценарием по `tool_call_id`; по умолчанию — успешный результат.
+
+    `hang=True` — исполнение висит до отмены; `cancelled` фиксирует, что отмена дошла."""
+
+    def __init__(self, results: dict[str, ToolResult] | None = None, *, hang: bool = False):
+        self.results = results or {}
+        self.hang = hang
+        self.batches: list[tuple[ToolCall, ...]] = []
+        self.cancelled = False
+
+    def schemas(self) -> tuple[ToolSchema, ...]:
+        return SCHEMAS
+
+    async def execute_many(self, calls: Sequence[ToolCall], ctx: TurnContext) -> list[ToolResult]:
+        self.batches.append(tuple(calls))
+        if self.hang:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+        return [self.results.get(c.id, ToolResult(content={"found": 1})) for c in calls]
+
+    @property
+    def executed(self) -> list[ToolCall]:
+        return [c for batch in self.batches for c in batch]
+
+
+def context(*, max_steps: int = 6, max_tool_retries: int = 2) -> TurnContext:
+    return TurnContext(
+        tenant_id=TenantId(uuid4()),
+        conversation_id=uuid4(),
+        turn_id=uuid4(),
+        model="fake-model",
+        system="Ты — консультант.",
+        history=HISTORY,
+        limits=TurnLimits(max_steps=max_steps, max_tool_retries=max_tool_retries),
+        fallback_message=FALLBACK,
+        temperature=0.3,
+    )
+
+
+async def run(
+    llm: FakeLLM, tools: ToolExecutor, ctx: TurnContext | None = None
+) -> list[AgentEvent]:
+    return [e async for e in AgentLoop(llm, tools).run_turn(ctx or context())]
+
+
+def text(events: list[AgentEvent]) -> str:
+    return "".join(e.text for e in events if isinstance(e, AnswerDelta))
+
+
+def completed(events: list[AgentEvent]) -> TurnCompleted:
+    assert sum(isinstance(e, TurnCompleted) for e in events) == 1
+    last = events[-1]
+    assert isinstance(last, TurnCompleted)
+    return last
+
+
+def tool_results(request: LLMRequest) -> list[ToolResultMessage]:
+    return [m for m in request.messages if isinstance(m, ToolResultMessage)]
+
+
+async def test_direct_answer_streams_text_without_tools() -> None:
+    llm = FakeLLM([FakeReply(text="Какой у вас бюджет?", usage=Usage(100, 5))])
+    tools = FakeTools()
+
+    events = await run(llm, tools)
+
+    assert events[:-1] == [AnswerDelta("Какой "), AnswerDelta("у "), AnswerDelta("вас "),
+                           AnswerDelta("бюджет?")]  # fmt: skip
+    assert completed(events) == TurnCompleted(FinishReason.ANSWERED, Usage(100, 5), steps=1)
+    assert llm.requests == [
+        LLMRequest(
+            model="fake-model",
+            system="Ты — консультант.",
+            messages=HISTORY,
+            tools=SCHEMAS,
+            temperature=0.3,
+        )
+    ]
+    assert tools.batches == []
+
+
+async def test_single_tool_call_then_answer() -> None:
+    search = call("call_1")
+    llm = FakeLLM([FakeReply(text="Ищу. ", tool_calls=(search,)), FakeReply(text="Нашла крем.")])
+    tools = FakeTools({"call_1": ToolResult(content={"items": ["e_1"]}, components=(CARD,))})
+
+    events = await run(llm, tools)
+
+    assert events[:-1] == [
+        AnswerDelta("Ищу. "),
+        ToolStarted(tool_call_id="call_1", name="search_catalog"),
+        ToolFinished(tool_call_id="call_1", name="search_catalog", ok=True),
+        ComponentEmitted(CARD),
+        AnswerDelta("Нашла "),
+        AnswerDelta("крем."),
+    ]
+    assert completed(events).finish is FinishReason.ANSWERED
+    assert tools.batches == [(search,)]
+
+    second = llm.requests[1]
+    assert second.messages[: len(HISTORY) + 1] == (
+        *HISTORY,
+        AssistantMessage(text="Ищу. ", tool_calls=(search,)),
+    )
+    [result] = tool_results(second)
+    assert result.tool_call_id == "call_1"
+    assert result.is_error is False
+    assert json.loads(result.content) == {"items": ["e_1"]}
+
+
+async def test_tool_chain_accumulates_messages_and_usage() -> None:
+    first, second = call("call_1", {"query": "крем"}), call("call_2", {"query": "сыворотка"})
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(first,), usage=Usage(100, 10)),
+            FakeReply(tool_calls=(second,), usage=Usage(200, 10)),
+            FakeReply(text="Подойдут два крема.", usage=Usage(300, 20)),
+        ]
+    )
+    tools = FakeTools()
+
+    events = await run(llm, tools)
+
+    assert completed(events) == TurnCompleted(FinishReason.ANSWERED, Usage(600, 40), steps=3)
+    assert tools.batches == [(first,), (second,)]
+    assert [m.tool_call_id for m in tool_results(llm.requests[2])] == ["call_1", "call_2"]
+    assert text(events) == "Подойдут два крема."
+
+
+async def test_parallel_calls_run_in_one_batch_in_call_order() -> None:
+    a, b = call("call_a", {"query": "крем"}), call("call_b", {"query": "тоник"})
+    llm = FakeLLM([FakeReply(tool_calls=(a, b)), FakeReply(text="Вот два варианта.")])
+    tools = FakeTools({"call_b": ToolResult(content="тоник: 2 шт.")})
+
+    events = await run(llm, tools)
+
+    assert tools.batches == [(a, b)]
+    tool_events = [e for e in events if isinstance(e, ToolStarted | ToolFinished)]
+    assert [type(e) for e in tool_events] == [ToolStarted, ToolStarted, ToolFinished, ToolFinished]
+    assert [e.tool_call_id for e in tool_events] == ["call_a", "call_b", "call_a", "call_b"]
+    results = tool_results(llm.requests[1])
+    assert [m.tool_call_id for m in results] == ["call_a", "call_b"]
+    assert results[1].content == "тоник: 2 шт."
+
+
+async def test_validation_error_goes_to_model_which_corrects_itself() -> None:
+    bad, good = call("call_1", {"qeury": "крем"}), call("call_2", {"query": "крем"})
+    llm = FakeLLM([FakeReply(tool_calls=(bad,)), FakeReply(tool_calls=(good,)), FakeReply("Ок.")])
+    tools = FakeTools({"call_1": failure("validation_error", "query: обязательное поле")})
+
+    events = await run(llm, tools, context(max_tool_retries=1))
+
+    assert (
+        ToolFinished("call_1", "search_catalog", ok=False, error_code="validation_error") in events
+    )
+    [error] = tool_results(llm.requests[1])
+    assert error.is_error is True
+    assert "query: обязательное поле" in error.content
+    assert tools.executed == [bad, good]
+    assert completed(events).finish is FinishReason.ANSWERED
+
+
+async def test_unparseable_arguments_are_rejected_without_executor() -> None:
+    broken = call("call_1", raw="{query:")
+    assert broken.arguments is None
+    llm = FakeLLM([FakeReply(tool_calls=(broken,)), FakeReply(text="Уточните запрос.")])
+    tools = FakeTools()
+
+    events = await run(llm, tools)
+
+    assert broken not in tools.executed
+    assert (
+        ToolFinished("call_1", "search_catalog", ok=False, error_code="validation_error") in events
+    )
+    [error] = tool_results(llm.requests[1])
+    assert error.tool_call_id == "call_1"
+    assert error.is_error is True
+    assert completed(events).finish is FinishReason.ANSWERED
+
+
+async def test_tool_retries_exhausted_ends_with_fallback() -> None:
+    bad = [call(f"call_{i}", {"qeury": "крем"}) for i in range(3)]
+    llm = FakeLLM([FakeReply(tool_calls=(c,)) for c in bad])
+    tools = FakeTools({c.id: failure("validation_error", "query: обязательное поле") for c in bad})
+
+    events = await run(llm, tools, context(max_tool_retries=2))
+
+    assert len(llm.requests) == 3
+    assert llm.remaining == 0
+    assert events[-2] == AnswerDelta(FALLBACK)
+    assert completed(events).finish is FinishReason.TOOL_RETRIES_EXHAUSTED
+    assert completed(events).steps == 3
+
+
+async def test_step_limit_ends_with_fallback() -> None:
+    llm = FakeLLM([FakeReply(text="Ищу. ", tool_calls=(call(f"call_{i}"),)) for i in range(3)])
+    tools = FakeTools()
+
+    events = await run(llm, tools, context(max_steps=3))
+
+    assert len(llm.requests) == 3
+    assert events[-2] == AnswerDelta(FALLBACK)
+    assert completed(events).finish is FinishReason.STEP_LIMIT
+    assert completed(events).steps == 3
+
+
+async def test_tool_timeout_is_reported_to_model_and_not_counted_as_retry() -> None:
+    search = call("call_1")
+    llm = FakeLLM([FakeReply(tool_calls=(search,)), FakeReply(text="Каталог недоступен.")])
+    tools = FakeTools({"call_1": failure("timeout", "search_catalog: нет ответа за 10 с")})
+
+    events = await run(llm, tools, context(max_tool_retries=0))
+
+    assert ToolFinished("call_1", "search_catalog", ok=False, error_code="timeout") in events
+    [error] = tool_results(llm.requests[1])
+    assert error.is_error is True
+    assert "нет ответа" in error.content
+    assert completed(events).finish is FinishReason.ANSWERED
+    assert text(events) == "Каталог недоступен."
+
+
+async def wait_until(condition: Callable[[], bool], task: asyncio.Task[Any]) -> None:
+    """Ждать условия, пока ход идёт; если ход завершился раньше — поднять исключение хода."""
+    for _ in range(200):
+        if task.done():
+            task.result()
+            pytest.fail("ход завершился раньше, чем ожидалось")
+        if condition():
+            return
+        await asyncio.sleep(0.005)
+    pytest.fail("условие не наступило")
+
+
+async def cancel(task: asyncio.Task[Any]) -> None:
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_cancel_during_tool_execution_cancels_tools() -> None:
+    llm = FakeLLM([FakeReply(tool_calls=(call("call_1"),)), FakeReply(text="не дойдёт")])
+    tools = FakeTools(hang=True)
+    task = asyncio.create_task(run(llm, tools))
+
+    await wait_until(lambda: bool(tools.batches), task)
+    await cancel(task)
+
+    assert tools.cancelled is True
+    assert len(llm.requests) == 1
+
+
+async def test_cancel_during_llm_stream_stops_turn() -> None:
+    llm = FakeLLM([FakeReply(text="очень долгий ответ", tool_calls=(call("c"),), delay_s=10)])
+    tools = FakeTools()
+    task = asyncio.create_task(run(llm, tools))
+
+    await wait_until(lambda: bool(llm.requests), task)
+    await cancel(task)
+
+    assert tools.batches == []
+    assert len(llm.requests) == 1

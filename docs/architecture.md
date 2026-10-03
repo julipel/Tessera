@@ -102,7 +102,14 @@ async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
 
 Правила:
 - Невалидные аргументы инструмента не ломают ход: модель получает ошибку валидации и может
-  исправиться. После `limits.max_tool_retries` — финальный ответ с извинением.
+  исправиться. Аргументы, не разобранные как JSON-объект, отклоняет сам цикл, не вызывая
+  инструмент. Шаги с `validation_error` считаются за ход; после `limits.max_tool_retries`
+  — мягкое завершение.
+- Мягкое завершение (лимит шагов, исчерпаны ретраи) — детерминированное: текст
+  `assistant.fallback_message` как обычный ответ и `TurnCompleted(finish=step_limit |
+  tool_retries_exhausted)`, без дополнительного вызова модели.
+- Порт `ToolExecutor` принадлежит agent; его реализует Tool Registry: валидация, параллельность,
+  таймауты, ошибки исполнения — в `ToolResult.error`. Таймаут инструмента в ретраи не входит.
 - Лимиты: `max_steps`, `max_tool_calls_per_step`, таймаут инструмента, таймаут хода,
   бюджет токенов на ход.
 - LLM-провайдер за портом `LLMClient` (domain). Реализации: OpenAI, Anthropic, `FakeLLM` для тестов.

@@ -1,3 +1,5 @@
 """Публичный интерфейс модуля tools — единственная точка входа для других модулей."""
 
-__all__: list[str] = []
+from app.modules.tools.domain.result import ToolError, ToolErrorCode, ToolResult
+
+__all__ = ["ToolError", "ToolErrorCode", "ToolResult"]

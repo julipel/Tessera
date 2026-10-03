@@ -86,9 +86,14 @@ dev-web:
 worker:
 	cd $(API) && uv run arq app.worker.WorkerSettings
 
-# Реализуется в P3-01 / P3-02
+# Судья эвалов — другая модель, чем агент тенанта: модель не оценивает сама себя.
+# Переопределить: make eval EVAL_JUDGE_MODEL=... EVAL_JUDGE_PROVIDER=...
+EVAL_JUDGE_PROVIDER ?= openai
+EVAL_JUDGE_MODEL ?= gpt-6.1-sol
+
 eval:
-	cd $(API) && uv run python -m evals.run $(if $(f),--filter $(f),)
+	cd $(API) && uv run python -m evals.run $(if $(f),--filter $(f),) \
+		--judge-provider $(EVAL_JUDGE_PROVIDER) --judge-model $(EVAL_JUDGE_MODEL)
 
 eval-diff:
 	cd $(API) && uv run python -m evals.diff

@@ -29,7 +29,9 @@ chat API, конфиг тенанта — из `config/tenants/<tenant>.yaml` (s
 `{questions, clarifies, rubric: {pass, reason}}`, пояснение попадает в отчёт. Сбой модели или
 неразборчивый ответ — ⚠️ `error` у проверок судьи этого хода, прогон продолжается.
 
-- по умолчанию судит `model.primary` тенанта; `--judge-provider` / `--judge-model` — другая модель;
+- `make eval` судит моделью `EVAL_JUDGE_PROVIDER`/`EVAL_JUDGE_MODEL` из Makefile (по умолчанию
+  `openai/gpt-6.1-sol`, агент demo-beauty — `gpt-6-luna`): модель не оценивает сама себя;
+  `python -m evals.run` без `--judge-provider` / `--judge-model` судит `model.primary` тенанта;
 - `--no-judge` — дешёвый прогон без судьи (его проверки `skipped`);
 - версия промпта судьи (`JUDGE_PROMPT_VERSION`) пишется в отчёт: при её смене прогоны
   сравнивать напрямую нельзя.

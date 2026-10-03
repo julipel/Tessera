@@ -23,7 +23,7 @@ agent_config:
     fallback_message: "Извините, сейчас не получается ответить. Попробуйте, пожалуйста, ещё раз."
 
   model:
-    primary: { provider: openai, name: "gpt-6.1-sol" }
+    primary: { provider: openai, name: "gpt-6-luna" }
 
   limits: { max_steps: 6, max_tool_calls_per_step: 4, turn_timeout_s: 60, max_tool_retries: 2 }
 

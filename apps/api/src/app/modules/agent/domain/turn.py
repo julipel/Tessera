@@ -7,7 +7,7 @@ from uuid import UUID
 
 from app.modules.agent.domain.llm import LLMMessage, ToolCall, ToolSchema
 from app.modules.shared.kernel import TenantId
-from app.modules.tools.public import ToolResult
+from app.modules.tools.kernel import ToolResult
 
 
 @dataclass(frozen=True, slots=True)

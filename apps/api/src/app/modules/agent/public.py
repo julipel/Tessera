@@ -30,6 +30,7 @@ from app.modules.agent.domain.llm import (
 )
 from app.modules.agent.domain.turn import ToolExecutor, TurnContext, TurnLimits
 from app.modules.agent.infrastructure.fake_llm import FakeLLM, FakeLLMExhaustedError, FakeReply
+from app.modules.agent.infrastructure.tool_executor import RegistryToolExecutor
 
 __all__ = [
     "AgentEvent",
@@ -47,6 +48,7 @@ __all__ = [
     "LLMMessage",
     "LLMRequest",
     "LLMResponse",
+    "RegistryToolExecutor",
     "ResponseCompleted",
     "StopReason",
     "TextDelta",

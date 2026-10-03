@@ -6,7 +6,7 @@ from enum import StrEnum
 from typing import Any
 
 from app.modules.agent.domain.llm import Usage
-from app.modules.tools.public import ToolErrorCode
+from app.modules.tools.kernel import ToolErrorCode
 
 
 @dataclass(frozen=True, slots=True)

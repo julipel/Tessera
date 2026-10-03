@@ -1,4 +1,4 @@
-"""Результат инструмента (contracts.md §4). Минимум для агентного цикла; P2-04 дополнит."""
+"""Результат инструмента (contracts.md §4)."""
 
 from dataclasses import dataclass
 from typing import Any, Literal

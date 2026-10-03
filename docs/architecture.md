@@ -83,9 +83,10 @@ Browser ─POST /v1/conversations/{id}/messages (Accept: text/event-stream)─�
 async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
     messages = build_context(ctx)            # промпт + история + состояние диалога
     for step in range(ctx.config.limits.max_steps):
-        async for chunk in llm.stream(messages, tools=ctx.tools.schemas()):
-            yield from translate(chunk)      # text_delta, tool_call_started
-        response = llm.final_response()
+        async for chunk in llm.stream(LLMRequest(messages, tools=ctx.tools.schemas())):
+            match chunk:                     # клиент без состояния:
+                case ResponseCompleted(response): pass   # финальный ответ — последний чанк
+                case _: yield from translate(chunk)      # text_delta, tool_call_started
         if not response.tool_calls:
             yield TurnCompleted(...)
             return

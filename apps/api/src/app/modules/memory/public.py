@@ -1,3 +1,5 @@
 """Публичный интерфейс модуля memory — единственная точка входа для других модулей."""
 
-__all__: list[str] = []
+from app.modules.memory.domain.dialog_state import DialogState
+
+__all__ = ["DialogState"]

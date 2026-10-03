@@ -1,4 +1,5 @@
-"""TurnAgent поверх агентного цикла (модуль agent): AgentConfig и история → TurnContext.
+"""TurnAgent поверх агентного цикла (модуль agent): AgentConfig, история и DialogState →
+TurnContext.
 
 В БД не ходит: конфиг и история приходят в TurnRequest (их загружает start_turn).
 """
@@ -23,29 +24,38 @@ from app.modules.agent.public import (
     build_system_prompt,
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, TurnRequest
+from app.modules.memory.public import DialogState
 
 type LLMForProvider = Callable[[Literal["openai", "anthropic"]], LLMClient]
+type ToolsForConfig = Callable[[AgentConfig], ToolExecutor]
 
 
 class LoopTurnAgent:
     """`llm_for` — клиент по провайдеру из AgentConfig (в приложении — `LLMClients.for_provider`),
-    `now` — часы для Runtime-слоя промпта (в тестах фиксированные)."""
+    `tools_for` — инструменты хода по AgentConfig, `now` — часы для Runtime-слоя промпта
+    (в тестах фиксированные)."""
 
     def __init__(
         self,
         llm_for: LLMForProvider,
-        tools: ToolExecutor,
+        tools_for: ToolsForConfig,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._llm_for = llm_for
-        self._tools = tools
+        self._tools_for = tools_for
         self._now = now
 
     async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
         config = AgentConfig.model_validate(request.agent_config)
         primary = config.model.primary
         limits = config.limits
-        prompt = build_system_prompt(config, RuntimeContext(now=self._now()))
+        state = DialogState.from_dict(request.dialog_state)
+        runtime = RuntimeContext(
+            now=self._now(),
+            dialog_state=state.to_dict(),
+            active_scenario=state.active_scenario,
+        )
+        prompt = build_system_prompt(config, runtime)
         ctx = TurnContext(
             tenant_id=request.tenant_id,
             conversation_id=request.conversation_id,
@@ -60,8 +70,9 @@ class LoopTurnAgent:
             ),
             fallback_message=config.assistant.fallback_message,
             temperature=primary.temperature,  # подсказка: применяет адаптер (ADR-0009)
+            state=state,
         )
-        loop = AgentLoop(self._llm_for(primary.provider), self._tools)
+        loop = AgentLoop(self._llm_for(primary.provider), self._tools_for(config))
         async for event in loop.run_turn(ctx):
             yield event
 

@@ -174,6 +174,16 @@ class ToolError(BaseModel):
     retryable: bool
 ```
 
+`state_patch` — частичное обновление DialogState (architecture.md §7):
+```json
+{ "slots": { "budget": 3000, "skin_type": null }, "facts": ["аллергия на отдушки"],
+  "shown_entities": ["e_1"], "active_scenario": "skincare" }
+```
+Все ключи необязательны. `slots` сливаются со слотами состояния, `null` удаляет слот;
+`facts` и `shown_entities` дописываются без повторов; `active_scenario` заменяется. Патчи
+неуспешных вызовов не применяются. Аргументы `update_dialog_state` — по слотам сценариев
+AgentConfig (лишний слот или неверный тип — `validation_error`).
+
 Встроенные инструменты:
 
 | Имя | Назначение |

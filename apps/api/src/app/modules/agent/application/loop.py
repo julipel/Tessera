@@ -10,6 +10,7 @@ from app.modules.agent.domain.events import (
     AgentEvent,
     AnswerDelta,
     ComponentEmitted,
+    DialogStateUpdated,
     FinishReason,
     ToolFinished,
     ToolStarted,
@@ -46,6 +47,7 @@ class AgentLoop:
         messages: tuple[LLMMessage, ...] = ctx.history
         schemas = self._tools.schemas()
         usage = Usage()
+        state = ctx.state
         retries = 0
         steps = 0
         finish = FinishReason.STEP_LIMIT
@@ -92,6 +94,11 @@ class AgentLoop:
                 )
                 for component in result.components:
                     yield ComponentEmitted(component)
+            patches = [r.state_patch for r in results if r.ok and r.state_patch]
+            if patches:
+                for patch in patches:
+                    state = state.apply(patch)
+                yield DialogStateUpdated(state)
             messages = (
                 *messages,
                 response.as_message(),

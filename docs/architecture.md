@@ -140,8 +140,11 @@ async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
   после хода), сводка кладётся в Runtime context.
 - **Состояние (DialogState)** — JSON: слоты (заданы схемой сценария в AgentConfig, напр. budget,
   size, purpose), `shown_entities` (id показанных товаров), `facts` (что пользователь сообщил),
-  `active_scenario`. Обновляется инструментом `update_dialog_state` и результатами инструментов.
-  Всегда передаётся модели целиком — поэтому агент не переспрашивает.
+  `active_scenario`. Обновляется инструментом `update_dialog_state` и результатами инструментов
+  (`state_patch`, формат — contracts.md §4). Всегда передаётся модели целиком (Runtime-слой
+  промпта) — поэтому агент не переспрашивает. Тип и слияние — `memory` (`memory.kernel`,
+  ADR-0008); патчи применяет агентный цикл; хранится в `Conversation.state`, chat записывает
+  последнее состояние хода вместе с ответом (в т.ч. `interrupted`).
 
 ## 8. Знания
 

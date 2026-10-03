@@ -1,11 +1,12 @@
 """Вход хода агента и порт исполнения инструментов (architecture.md §5)."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
 from app.modules.agent.domain.llm import LLMMessage, ToolCall, ToolSchema
+from app.modules.memory.kernel import DialogState
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.kernel import ToolResult
 
@@ -21,7 +22,8 @@ class TurnLimits:
 @dataclass(frozen=True, slots=True)
 class TurnContext:
     """`history` уже содержит новое сообщение пользователя. `fallback_message` — текст мягкого
-    завершения (лимит шагов, исчерпаны ретраи); берётся из AgentConfig тенанта."""
+    завершения (лимит шагов, исчерпаны ретраи); берётся из AgentConfig тенанта. `state` —
+    состояние диалога на начало хода; цикл применяет к нему `state_patch` инструментов."""
 
     tenant_id: TenantId
     conversation_id: UUID
@@ -32,6 +34,7 @@ class TurnContext:
     limits: TurnLimits
     fallback_message: str
     temperature: float | None = None
+    state: DialogState = field(default_factory=DialogState)
 
 
 class ToolExecutor(Protocol):

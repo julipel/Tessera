@@ -83,7 +83,7 @@
   аргументы, результат, ошибка, `duration_ms` (в SSE `tool_finished` — замер цикла вместо
   оценки chat от раннего `tool_started`); запись в `save()` вместе с ответом, в т.ч.
   `interrupted`. DoD: тесты записи и изоляции тенантов.
-- [ ] **P2-09 DialogState.** Хранение, `update_dialog_state`, передача в Runtime-слой.
+- [x] **P2-09 DialogState.** Хранение, `update_dialog_state`, передача в Runtime-слой.
   DoD: тест — агент не переспрашивает известный слот (FakeLLM + проверка контекста).
 - [x] **P2-10 Сэмплинг по ADR-0009.** Долг из ADR-0009, делать сразу после P2-08 (там
   ModelConfig впервые доходит до адаптера):
@@ -100,8 +100,11 @@
   GPT-6.1 Sol вызывают инструменты только через Responses API, а GPT-6 Sol и Luna — через
   Chat Completions лишь с `reasoning_effort: "none"`; адаптер OpenAI (P2-06) работает через
   Chat Completions, а demo-beauty — на `gpt-6.1-sol`. Решить до инструментов P3 (`/adr`):
-  адаптер на Responses API или другая модель для demo-beauty. DoD: принятое решение; при
-  адаптере — общий контрактный тест LLMClient с вызовом инструмента проходит.
+  адаптер на Responses API или другая модель для demo-beauty. Проверено запросом (P2-09):
+  Chat Completions + tools для `gpt-6.1-sol` → 400 (`param: reasoning_effort`), поэтому
+  `update_dialog_state` временно убран из `tools.builtin` demo-beauty — вернуть.
+  DoD: принятое решение; `update_dialog_state` снова в demo-beauty и живой ход с вызовом
+  инструмента проходит; при адаптере — общий контрактный тест LLMClient с вызовом инструмента.
 
 ## P3. Эвалы (рано!)
 

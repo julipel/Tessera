@@ -19,11 +19,13 @@ from app.modules.agent.public import (
     AgentEvent,
     AnswerDelta,
     ComponentEmitted,
+    DialogStateUpdated,
     FakeLLM,
     FakeReply,
     FinishReason,
     LLMError,
     RegistryToolExecutor,
+    ToolCall,
     ToolFinished,
     ToolStarted,
     TurnCompleted,
@@ -41,6 +43,7 @@ from app.modules.chat.infrastructure.repositories import (
     TenantsAgentConfigs,
     ToolCallRepository,
 )
+from app.modules.memory.public import DialogState
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import (
     AgentConfigRepository,
@@ -48,7 +51,7 @@ from app.modules.tenants.public import (
     WidgetKeyRepository,
     hash_widget_key,
 )
-from app.modules.tools.public import ToolRegistry
+from app.modules.tools.public import ToolRegistry, builtin_tools
 
 URL = "/v1/conversations"
 TEXT = {"type": "text", "text": "Нужен подарок маме"}
@@ -65,11 +68,13 @@ def _config(slug: str) -> dict[str, Any]:
     }
 
 
-async def _tenant(session: AsyncSession, slug: str) -> TenantId:
+async def _tenant(
+    session: AsyncSession, slug: str, config: dict[str, Any] | None = None
+) -> TenantId:
     tenant = await SqlTenantDirectory(session).create(slug, slug)
     await WidgetKeyRepository(session).add_key(tenant.id, hash_widget_key(f"wk_{slug}"), [])
     configs = AgentConfigRepository(session)
-    draft = await configs.create_draft(tenant.id, _config(slug))
+    draft = await configs.create_draft(tenant.id, config or _config(slug))
     await configs.activate(tenant.id, draft.id)
     return tenant.id
 
@@ -631,7 +636,7 @@ async def test_dialog_through_agent_loop_keeps_history(
         providers.append(provider)
         return llm
 
-    use_agent(LoopTurnAgent(llm_for, RegistryToolExecutor(ToolRegistry([]))))
+    use_agent(LoopTurnAgent(llm_for, lambda _: RegistryToolExecutor(ToolRegistry([]))))
 
     first = _parse_sse((await _send(db_client, conversation_id)).text)
     await _send(db_client, conversation_id, {"type": "text", "text": "До 3000"})
@@ -658,3 +663,117 @@ async def test_dialog_through_agent_loop_keeps_history(
         if m.role == "assistant"
     ]
     assert texts == [ANSWER, "Тогда посмотрите наборы до 3000."]
+
+
+# --- DialogState (P2-09) ---
+
+
+async def _state(session: AsyncSession, tenant_id: TenantId, conversation_id: UUID) -> Any:
+    conversation = await ConversationRepository(session).find(tenant_id, conversation_id)
+    assert conversation is not None
+    return conversation.state
+
+
+async def test_agent_does_not_reask_known_slot(
+    db_client: AsyncClient, db_session: AsyncSession, use_agent: Any
+) -> None:
+    """DoD: слот, записанный на первом ходе, на втором ходе — в Runtime-слое промпта."""
+    config = _config("beauty")
+    config["prompt"]["scenarios"] = [
+        {
+            "key": "skincare",
+            "description": "Подбор ухода",
+            "instructions": "Выясни бюджет и тип кожи.",
+            "slots": {"budget": {"type": "number"}, "skin_type": {"type": "string"}},
+        }
+    ]
+    config["tools"] = {"builtin": ["update_dialog_state", "search_catalog"]}
+    beauty = await _tenant(db_session, "beauty", config)
+    created = await db_client.post(URL, json={"visitor_id": "v-1"}, headers=_key("beauty"))
+    conversation_id = UUID(created.json()["conversation_id"])
+    remember = ToolCall(
+        id="call_1",
+        name="update_dialog_state",
+        arguments={"slots": {"budget": 3000}},
+        raw_arguments='{"slots": {"budget": 3000}}',
+    )
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(remember,)),
+            FakeReply(text="Какой у вас тип кожи?"),
+            FakeReply(text="Подберу крем для сухой кожи до 3000."),
+        ]
+    )
+    use_agent(
+        LoopTurnAgent(
+            lambda _: llm,
+            lambda c: RegistryToolExecutor(ToolRegistry(builtin_tools(c))),
+        )
+    )
+
+    await _send(
+        db_client, conversation_id, {"type": "text", "text": "Крем, бюджет 3000"}, slug="beauty"
+    )
+    await _send(db_client, conversation_id, {"type": "text", "text": "Сухая"}, slug="beauty")
+
+    first, _, second = llm.requests
+    assert [t.name for t in first.tools] == ["update_dialog_state"]
+    assert "пока ничего не известно" in first.system
+    runtime = second.system.split("<runtime>")[1]
+    known = runtime.split("не переспрашивай):")[1]
+    assert '"budget": 3000' in known
+    assert await _state(db_session, beauty, conversation_id) == {"slots": {"budget": 3000}}
+
+
+class StateThenGateAgent(GatedAgent):
+    """Обновляет состояние и ждёт отмены."""
+
+    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
+        self.turn_id = request.turn_id
+        yield DialogStateUpdated(DialogState(slots={"budget": 3000}, facts=("спешит",)))
+        self.first_sent.set()
+        await anyio.sleep_forever()
+        yield AnswerDelta("не дойдёт")
+
+
+async def test_state_is_saved_when_turn_is_cancelled(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
+) -> None:
+    agent = StateThenGateAgent()
+    use_agent(agent)
+    stream = asyncio.create_task(_send(db_client, conversation_id))
+    await asyncio.wait_for(agent.first_sent.wait(), WAIT)
+
+    await _cancel(db_client, conversation_id, agent.turn_id)
+    events = _parse_sse((await asyncio.wait_for(stream, WAIT)).text)
+
+    assert events[-1][1].model_dump()["data"]["status"] == "interrupted"
+    # Состояние в клиент не уходит.
+    assert all("budget" not in e.model_dump_json() for _, e in events)
+    assert await _state(db_session, shop, conversation_id) == {
+        "slots": {"budget": 3000},
+        "facts": ["спешит"],
+    }
+
+
+async def test_state_is_passed_to_agent_and_unchanged_without_updates(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
+) -> None:
+    await ConversationRepository(db_session).update_state(
+        shop, conversation_id, {"slots": {"budget": 3000}}
+    )
+    agent = ScriptedAgent()
+    use_agent(agent)
+
+    await _send(db_client, conversation_id)
+
+    assert agent.requests[0].dialog_state == {"slots": {"budget": 3000}}
+    assert await _state(db_session, shop, conversation_id) == {"slots": {"budget": 3000}}

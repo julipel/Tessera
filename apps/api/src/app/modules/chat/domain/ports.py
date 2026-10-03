@@ -23,6 +23,10 @@ class ConversationStore(Protocol):
 
     async def find(self, tenant_id: TenantId, conversation_id: UUID) -> Conversation | None: ...
 
+    async def update_state(
+        self, tenant_id: TenantId, conversation_id: UUID, state: dict[str, Any]
+    ) -> None: ...
+
 
 class MessageStore(Protocol):
     async def list_for(self, tenant_id: TenantId, conversation_id: UUID) -> Sequence[ChatMessage]:

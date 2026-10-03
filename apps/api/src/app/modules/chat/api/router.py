@@ -33,18 +33,20 @@ from app.modules.chat.infrastructure.repositories import (
 )
 from app.modules.shared.public import ApiError, DbSession, StreamDbSession
 from app.modules.tenants.public import WidgetTenant
-from app.modules.tools.public import ToolRegistry
+from app.modules.tools.public import ToolRegistry, builtin_tools
 
 router = APIRouter(prefix="/v1/conversations", tags=["conversations"])
 logger = structlog.get_logger(__name__)
 
 
 def get_turn_agent(request: Request) -> TurnAgent:
-    """Агентный цикл с LLM-клиентами приложения; тесты подменяют через dependency_overrides.
-
-    Инструментов пока нет: встроенные инструменты из `tools.builtin` подключат задачи P3."""
+    """Агентный цикл с LLM-клиентами приложения и встроенными инструментами из
+    `tools.builtin` конфига; тесты подменяют через dependency_overrides."""
     llms: LLMClients = request.app.state.llm_clients
-    return LoopTurnAgent(llms.for_provider, RegistryToolExecutor(ToolRegistry([])))
+    return LoopTurnAgent(
+        llms.for_provider,
+        lambda config: RegistryToolExecutor(ToolRegistry(builtin_tools(config))),
+    )
 
 
 Agent = Annotated[TurnAgent, Depends(get_turn_agent)]

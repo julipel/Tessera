@@ -77,7 +77,9 @@ def config(primary: dict[str, Any], limits: dict[str, Any] | None = None) -> dic
 
 
 async def run(agent_config: dict[str, Any], llm: FakeLLM) -> None:
-    agent = LoopTurnAgent(lambda _: llm, RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW)
+    agent = LoopTurnAgent(
+        lambda _: llm, lambda _: RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW
+    )
     request = TurnRequest(
         tenant_id=TENANT,
         conversation_id=uuid4(),

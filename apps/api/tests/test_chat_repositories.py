@@ -242,3 +242,18 @@ async def test_tool_calls_are_stored_in_order_and_isolated_by_tenant(
 
     assert await tool_calls.list_for(a, answer.id) == calls
     assert await tool_calls.list_for(b, answer.id) == []
+
+
+async def test_state_update_is_isolated_by_tenant(
+    db_session: AsyncSession, conversations: ConversationRepository
+) -> None:
+    a, config_a = await _tenant_with_config(db_session, "tenant-a")
+    b, _ = await _tenant_with_config(db_session, "tenant-b")
+    conversation = await conversations.create(a, config_a, Channel.WEB, "v")
+
+    await conversations.update_state(b, conversation.id, {"slots": {"budget": 1}})
+    await conversations.update_state(a, conversation.id, {"slots": {"budget": 3000}})
+
+    found = await conversations.find(a, conversation.id)
+    assert found is not None and found.state == {"slots": {"budget": 3000}}
+    assert conversation.state == {}

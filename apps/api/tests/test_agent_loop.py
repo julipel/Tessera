@@ -14,6 +14,7 @@ from app.modules.agent.public import (
     AnswerDelta,
     AssistantMessage,
     ComponentEmitted,
+    DialogStateUpdated,
     FakeLLM,
     FakeReply,
     FinishReason,
@@ -30,6 +31,7 @@ from app.modules.agent.public import (
     Usage,
     UserMessage,
 )
+from app.modules.memory.public import DialogState
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.public import ToolError, ToolErrorCode, ToolResult
 
@@ -97,7 +99,9 @@ class FakeTools:
         return [c for batch in self.batches for c in batch]
 
 
-def context(*, max_steps: int = 6, max_tool_retries: int = 2) -> TurnContext:
+def context(
+    *, max_steps: int = 6, max_tool_retries: int = 2, state: DialogState | None = None
+) -> TurnContext:
     return TurnContext(
         tenant_id=TenantId(uuid4()),
         conversation_id=uuid4(),
@@ -108,6 +112,7 @@ def context(*, max_steps: int = 6, max_tool_retries: int = 2) -> TurnContext:
         limits=TurnLimits(max_steps=max_steps, max_tool_retries=max_tool_retries),
         fallback_message=FALLBACK,
         temperature=0.3,
+        state=state or DialogState(),
     )
 
 
@@ -363,3 +368,36 @@ async def test_cancel_during_llm_stream_stops_turn() -> None:
 
     assert tools.batches == []
     assert len(llm.requests) == 1
+
+
+async def test_state_patches_are_applied_in_call_order() -> None:
+    a, b, bad = call("call_a"), call("call_b"), call("call_bad")
+    llm = FakeLLM([FakeReply(tool_calls=(a, b, bad)), FakeReply(text="Учла.")])
+    tools = FakeTools(
+        {
+            "call_a": ToolResult(state_patch={"slots": {"budget": 3000, "skin": "сухая"}}),
+            "call_b": ToolResult(state_patch={"slots": {"skin": None}, "facts": ["аллергия"]}),
+            # Патч из неуспешного вызова не применяется.
+            "call_bad": ToolResult(
+                state_patch={"slots": {"budget": 1}},
+                error=ToolError(code="upstream_error", message="сбой", retryable=False),
+            ),
+        }
+    )
+    start = DialogState(slots={"recipient": "мама"})
+
+    events = await run(llm, tools, context(state=start))
+
+    [updated] = [e for e in events if isinstance(e, DialogStateUpdated)]
+    assert updated.state == DialogState(
+        slots={"recipient": "мама", "budget": 3000}, facts=("аллергия",)
+    )
+    assert events.index(updated) < events.index(AnswerDelta("Учла."))
+
+
+async def test_no_state_event_without_patches() -> None:
+    llm = FakeLLM([FakeReply(tool_calls=(call("call_1"),)), FakeReply(text="Готово.")])
+
+    events = await run(llm, FakeTools())
+
+    assert not any(isinstance(e, DialogStateUpdated) for e in events)

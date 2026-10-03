@@ -15,6 +15,7 @@ from app.modules.agent.kernel import (
     AgentEvent,
     AnswerDelta,
     ComponentEmitted,
+    DialogStateUpdated,
     LLMError,
     ToolFinished,
     ToolStarted,
@@ -78,8 +79,8 @@ class TurnStream:
 
     Блоки ответа — в порядке первого появления: текст до инструмента или компонента — один
     блок, текст после — новый. `tool_started` и `component` закрывают открытый текстовый блок.
-    Завершённые вызовы инструментов записываются вместе с ответом; аргументы и результаты
-    в клиент не уходят.
+    Завершённые вызовы инструментов и последнее состояние диалога записываются вместе
+    с ответом; аргументы, результаты инструментов и состояние в клиент не уходят.
     """
 
     def __init__(
@@ -87,12 +88,14 @@ class TurnStream:
         conversation: Conversation,
         request: TurnRequest,
         agent: TurnAgent,
+        conversations: ConversationStore,
         messages: MessageStore,
         tool_calls: ToolCallStore,
         commit: Commit,
         registry: "TurnRegistry",
     ) -> None:
         self.conversation = conversation
+        self.conversations = conversations
         self.request = request
         self.agent = agent
         self.messages = messages
@@ -106,6 +109,7 @@ class TurnStream:
         self._open_text: dict[str, Any] | None = None
         self._tools_started = 0
         self._finished_calls: list[ToolCallEntry] = []
+        self._dialog_state: dict[str, Any] | None = None  # None — состояние не менялось
         self._usage: dict[str, int] | None = None
         self._saved = False
         self._cancel_requested = False
@@ -173,6 +177,8 @@ class TurnStream:
                 yield self._event(
                     "component", {"block_id": block["block_id"], "component": component}
                 )
+            case DialogStateUpdated(state=state):
+                self._dialog_state = state.to_dict()
             case TurnCompleted(usage=usage):
                 self._usage = {
                     "input_tokens": usage.input_tokens,
@@ -247,6 +253,10 @@ class TurnStream:
             await self.tool_calls.add_many(
                 self.conversation.tenant_id, self.message_id, self._finished_calls
             )
+        if self._dialog_state is not None:
+            await self.conversations.update_state(
+                self.conversation.tenant_id, self.conversation.id, self._dialog_state
+            )
         await self.commit()
         logger.info("turn_finished", turn_id=str(self.turn_id), status=status)
 
@@ -302,8 +312,11 @@ async def start_turn(
         input=message.input or {},
         agent_config=config,
         history=tuple(await messages.list_for(tenant_id, conversation_id)),
+        dialog_state=conversation.state,
     )
-    return TurnStream(conversation, request, agent, messages, tool_calls, commit, registry)
+    return TurnStream(
+        conversation, request, agent, conversations, messages, tool_calls, commit, registry
+    )
 
 
 def _tool_call_entry(finished: ToolFinished) -> ToolCallEntry:

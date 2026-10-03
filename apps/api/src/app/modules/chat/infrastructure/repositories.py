@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +32,7 @@ def _conversation(record: ConversationRecord) -> Conversation:
         channel=record.channel,
         visitor_id=record.visitor_id,
         created_at=record.created_at,
+        state=record.state,
     )
 
 
@@ -68,6 +70,19 @@ class ConversationRepository(TenantRepository[ConversationRecord]):
     async def find(self, tenant_id: TenantId, conversation_id: UUID) -> Conversation | None:
         record = await self.get(tenant_id, conversation_id)
         return _conversation(record) if record else None
+
+    async def update_state(
+        self, tenant_id: TenantId, conversation_id: UUID, state: dict[str, Any]
+    ) -> None:
+        stmt = (
+            update(ConversationRecord)
+            .where(
+                ConversationRecord.tenant_id == tenant_id,
+                ConversationRecord.id == conversation_id,
+            )
+            .values(state=state)
+        )
+        await self.session.execute(stmt)
 
 
 class MessageRepository(TenantRepository[MessageRecord]):

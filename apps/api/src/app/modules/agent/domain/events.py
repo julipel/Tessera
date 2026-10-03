@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Any
 
 from app.modules.agent.domain.llm import Usage
+from app.modules.memory.kernel import DialogState
 from app.modules.tools.kernel import ToolErrorCode
 
 
@@ -50,6 +51,14 @@ class ComponentEmitted:
     component: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class DialogStateUpdated:
+    """Состояние диалога после шага, в котором инструменты вернули `state_patch`: полное,
+    а не патч, — chat сохраняет последнее, в том числе при прерванном ходе."""
+
+    state: DialogState
+
+
 class FinishReason(StrEnum):
     ANSWERED = "answered"
     STEP_LIMIT = "step_limit"
@@ -65,4 +74,6 @@ class TurnCompleted:
     steps: int
 
 
-type AgentEvent = AnswerDelta | ToolStarted | ToolFinished | ComponentEmitted | TurnCompleted
+type AgentEvent = (
+    AnswerDelta | ToolStarted | ToolFinished | ComponentEmitted | DialogStateUpdated | TurnCompleted
+)

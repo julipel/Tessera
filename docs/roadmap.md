@@ -72,7 +72,7 @@
   параллельное исполнение с таймаутами, ToolResult с components/state_patch. DoD: тесты.
 - [x] **P2-05 Сборка промпта.** Слои Platform/Tenant/Scenario/Runtime, Platform-промпт с политикой
   уточнений. DoD: snapshot-тест собранного промпта для демо-тенанта.
-- [ ] **P2-06 Адаптер OpenAI.** Streaming + tool calling (сверить с Context7). DoD: интеграционный
+- [x] **P2-06 Адаптер OpenAI.** Streaming + tool calling (сверить с Context7). DoD: интеграционный
   тест (маркер `live`, не в CI по умолчанию).
 - [ ] **P2-07 Адаптер Anthropic.** То же. DoD: оба адаптера проходят общий контрактный тест.
 - [ ] **P2-08 Подключение агента к chat.** Замена эхо-заглушки, маппинг AgentEvent → SSE,

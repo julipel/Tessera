@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # src/app/settings.py → корень репозитория на 4 уровня выше пакета.
@@ -29,6 +30,9 @@ class Settings(BaseSettings):
     seed_widget_key: str | None = None
     # Origin веб-чата для CORS (env — JSON-список). Origin виджетов тенантов — P5-06.
     cors_origins: list[str] = ["http://localhost:3000"]
+    # LLM-провайдеры; base_url — для OpenAI-совместимых API (пусто — api.openai.com).
+    openai_api_key: SecretStr | None = None
+    openai_base_url: str | None = None
 
     @property
     def is_local(self) -> bool:

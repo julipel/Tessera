@@ -70,7 +70,7 @@
 - [x] **P2-03 Агентный цикл.** Реализация по architecture.md §5 до зелёных тестов P2-02.
 - [x] **P2-04 Tool Registry.** ToolDefinition, валидация аргументов по JSON Schema,
   параллельное исполнение с таймаутами, ToolResult с components/state_patch. DoD: тесты.
-- [ ] **P2-05 Сборка промпта.** Слои Platform/Tenant/Scenario/Runtime, Platform-промпт с политикой
+- [x] **P2-05 Сборка промпта.** Слои Platform/Tenant/Scenario/Runtime, Platform-промпт с политикой
   уточнений. DoD: snapshot-тест собранного промпта для демо-тенанта.
 - [ ] **P2-06 Адаптер OpenAI.** Streaming + tool calling (сверить с Context7). DoD: интеграционный
   тест (маркер `live`, не в CI по умолчанию).

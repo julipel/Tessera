@@ -4,7 +4,11 @@
 только внутренности `generated`, точка входа остаётся стабильной.
 """
 
-from app.contracts.generated.agent_config_schema import AgentConfig
+from app.contracts.generated.agent_config_schema import (
+    AgentConfig,
+    ScenarioConfig,
+    SlotDefinition,
+)
 from app.contracts.generated.components_schema import Action, Component, FormField, Price
 from app.contracts.generated.conversations_schema import (
     ComponentBlock,
@@ -84,7 +88,9 @@ __all__ = [
     "Price",
     "PublicAssistant",
     "PublicConfig",
+    "ScenarioConfig",
     "SendMessageRequest",
+    "SlotDefinition",
     "StatusData",
     "StatusEvent",
     "SuggestionItem",

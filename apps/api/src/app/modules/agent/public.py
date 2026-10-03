@@ -1,6 +1,8 @@
 """Публичный интерфейс модуля agent — единственная точка входа для других модулей."""
 
 from app.modules.agent.application.loop import AgentLoop
+from app.modules.agent.application.platform_prompt import PLATFORM_PROMPT_VERSION
+from app.modules.agent.application.prompt import RuntimeContext, SystemPrompt, build_system_prompt
 from app.modules.agent.domain.events import (
     AgentEvent,
     AnswerDelta,
@@ -33,6 +35,7 @@ from app.modules.agent.infrastructure.fake_llm import FakeLLM, FakeLLMExhaustedE
 from app.modules.agent.infrastructure.tool_executor import RegistryToolExecutor
 
 __all__ = [
+    "PLATFORM_PROMPT_VERSION",
     "AgentEvent",
     "AgentLoop",
     "AnswerDelta",
@@ -50,7 +53,9 @@ __all__ = [
     "LLMResponse",
     "RegistryToolExecutor",
     "ResponseCompleted",
+    "RuntimeContext",
     "StopReason",
+    "SystemPrompt",
     "TextDelta",
     "ToolCall",
     "ToolCallStarted",
@@ -64,4 +69,5 @@ __all__ = [
     "TurnLimits",
     "Usage",
     "UserMessage",
+    "build_system_prompt",
 ]

@@ -37,6 +37,10 @@ from app.modules.agent.infrastructure.anthropic_llm import AnthropicLLM, create_
 from app.modules.agent.infrastructure.fake_llm import FakeLLM, FakeLLMExhaustedError, FakeReply
 from app.modules.agent.infrastructure.llm_clients import LLMClients, Provider
 from app.modules.agent.infrastructure.openai_llm import OpenAILLM, create_openai_llm
+from app.modules.agent.infrastructure.openai_responses_llm import (
+    OpenAIResponsesLLM,
+    create_openai_responses_llm,
+)
 from app.modules.agent.infrastructure.tool_executor import RegistryToolExecutor
 
 __all__ = [
@@ -60,6 +64,7 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "OpenAILLM",
+    "OpenAIResponsesLLM",
     "Provider",
     "ProviderItem",
     "RegistryToolExecutor",
@@ -83,4 +88,5 @@ __all__ = [
     "build_system_prompt",
     "create_anthropic_llm",
     "create_openai_llm",
+    "create_openai_responses_llm",
 ]

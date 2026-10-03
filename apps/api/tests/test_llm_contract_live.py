@@ -25,6 +25,7 @@ from app.modules.agent.public import (
     UserMessage,
     create_anthropic_llm,
     create_openai_llm,
+    create_openai_responses_llm,
 )
 from app.settings import Settings
 
@@ -42,7 +43,7 @@ def _openai(settings: Settings) -> LLMClient | None:
     key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else ""
     if not key:
         return None
-    return create_openai_llm(key, base_url=settings.openai_base_url)
+    return create_openai_responses_llm(key, base_url=settings.openai_base_url)
 
 
 def _openai_compatible(settings: Settings) -> LLMClient | None:
@@ -143,6 +144,11 @@ async def test_tool_call_round_trip(live: Live) -> None:
     assert call.name == "get_stock"
     assert call.arguments == {"sku": "A-17"}
     assert ToolCallStarted(id=call.id, name=call.name) in chunks
+    # Responses API: reasoning items несут encrypted_content (иначе их нельзя вернуть при
+    # store=false); второй запрос ниже проверяет, что провайдер принимает их обратно.
+    for item in response.provider_items:
+        if item.get("type") == "reasoning":
+            assert item.get("encrypted_content")
 
     second = LLMRequest(
         model=live.model,

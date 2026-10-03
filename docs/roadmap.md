@@ -104,7 +104,7 @@
   `OPENAI_COMPATIBLE_API_KEY`/`OPENAI_COMPATIBLE_BASE_URL`, `.env.example`.
   DoD: тест цикла — `provider_items` шага доходят до следующего запроса; контрактный тест
   `OpenAILLM` под `openai_compatible` проходит.
-- [ ] **P2-11b Адаптер OpenAI Responses API (ADR-0010).** `OpenAIResponsesLLM` для
+- [x] **P2-11b Адаптер OpenAI Responses API (ADR-0010).** `OpenAIResponsesLLM` для
   `provider: openai`: `store: false`, `include: ["reasoning.encrypted_content"]`, стрим
   (текст, ранний `ToolCallStarted`, аргументы, reasoning items из `output_item.done`, usage),
   ошибки → `LLMError`, temperature по ADR-0009. Вернуть `update_dialog_state` в demo-beauty.

@@ -1,4 +1,5 @@
-// Мок OpenAI-совместимого Chat Completions для e2e: API ходит сюда через OPENAI_BASE_URL.
+// Мок OpenAI для e2e: Responses API (provider openai, демо-тенант; API ходит сюда через
+// OPENAI_BASE_URL) и Chat Completions (provider openai_compatible).
 // Отвечает стримом «Вы написали: <последнее сообщение пользователя>» по словам — так e2e
 // детерминирован и проходит весь путь: агентный цикл, адаптер OpenAI, SSE, история.
 import { createServer } from "node:http";
@@ -13,11 +14,16 @@ function chunk(delta, finishReason = null, usage = undefined) {
   return `data: ${JSON.stringify(body)}\n\n`;
 }
 
-async function completions(req, res) {
+async function readJson(req) {
   let raw = "";
   for await (const part of req) raw += part;
-  const { messages } = JSON.parse(raw);
-  const last = messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
+  return JSON.parse(raw);
+}
+
+const lastUserText = (messages) => messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
+
+async function completions(req, res) {
+  const last = lastUserText((await readJson(req)).messages);
 
   res.writeHead(200, { "content-type": "text/event-stream" });
   res.write(chunk({ role: "assistant", content: "" }));
@@ -31,9 +37,30 @@ async function completions(req, res) {
   res.end("data: [DONE]\n\n");
 }
 
+function event(body) {
+  return `event: ${body.type}\ndata: ${JSON.stringify(body)}\n\n`;
+}
+
+async function responses(req, res) {
+  const last = lastUserText((await readJson(req)).input);
+  const response = { id: "resp_e2e", object: "response", model: "e2e", output: [] };
+
+  res.writeHead(200, { "content-type": "text/event-stream" });
+  res.write(event({ type: "response.created", response: { ...response, status: "in_progress" } }));
+  for (const word of `Вы написали: ${last}`.match(/\S+\s*/g)) {
+    await sleep(30);
+    res.write(event({ type: "response.output_text.delta", item_id: "msg_e2e", delta: word }));
+  }
+  const usage = { input_tokens: 10, output_tokens: 5, total_tokens: 15 };
+  res.end(event({ type: "response.completed", response: { ...response, status: "completed", usage } }));
+}
+
+const routes = { "/v1/chat/completions": completions, "/v1/responses": responses };
+
 createServer((req, res) => {
-  if (req.method === "POST" && req.url === "/v1/chat/completions") {
-    completions(req, res).catch((error) => {
+  const route = req.method === "POST" ? routes[req.url] : undefined;
+  if (route) {
+    route(req, res).catch((error) => {
       console.error(error);
       res.destroy();
     });

@@ -7,7 +7,7 @@ export const WEB_PORT = 3001;
 export const API_URL = `http://${HOST}:${API_PORT}`;
 export const WEB_URL = `http://${HOST}:${WEB_PORT}`;
 export const WIDGET_KEY = "wk_e2e_demo_beauty";
-// Мок OpenAI-совместимого API (e2e/mock-llm.mjs): демо-тенант настроен на provider openai.
+// Мок OpenAI (e2e/mock-llm.mjs): демо-тенант на provider openai — ходит в Responses API мока.
 export const MOCK_LLM_PORT = 8002;
 export const MOCK_LLM_URL = `http://${HOST}:${MOCK_LLM_PORT}`;
 

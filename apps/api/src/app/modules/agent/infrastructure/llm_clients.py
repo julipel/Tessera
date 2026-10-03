@@ -1,7 +1,7 @@
 """Выбор LLM-клиента по провайдеру из AgentConfig (`model.primary.provider`).
 
-Провайдер — протокол API, а не производитель модели (ADR-0010): `openai_compatible` — Chat
-Completions любого совместимого API (прокси, локальные серверы).
+Провайдер — протокол API, а не производитель модели (ADR-0010): `openai` — Responses API,
+`openai_compatible` — Chat Completions любого совместимого API (прокси, локальные серверы).
 
 Клиенты создаются при первом обращении и переиспользуются: у каждого свой пул HTTP-соединений.
 Ключи — из окружения (Settings); их передаёт тот, кто собирает приложение.
@@ -13,6 +13,7 @@ from typing import Literal
 from app.modules.agent.domain.llm import LLMClient, LLMError
 from app.modules.agent.infrastructure.anthropic_llm import create_anthropic_llm
 from app.modules.agent.infrastructure.openai_llm import create_openai_llm
+from app.modules.agent.infrastructure.openai_responses_llm import create_openai_responses_llm
 
 type Provider = Literal["openai", "openai_compatible", "anthropic"]
 
@@ -28,10 +29,9 @@ class LLMClients:
         anthropic_api_key: str | None = None,
         anthropic_base_url: str | None = None,
     ) -> None:
-        # TODO(P2-11b): `openai` — на OpenAIResponsesLLM; пока тот же Chat Completions.
         self._factories: dict[Provider, Callable[[], LLMClient] | None] = {
             "openai": (
-                (lambda: create_openai_llm(openai_api_key, base_url=openai_base_url))
+                (lambda: create_openai_responses_llm(openai_api_key, base_url=openai_base_url))
                 if openai_api_key
                 else None
             ),

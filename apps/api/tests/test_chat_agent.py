@@ -14,6 +14,7 @@ from app.modules.agent.public import (
     LLMClients,
     LLMError,
     OpenAILLM,
+    OpenAIResponsesLLM,
     Provider,
     RegistryToolExecutor,
     UserMessage,
@@ -148,11 +149,9 @@ def test_llm_clients_create_client_once_per_provider() -> None:
 
     openai = clients.for_provider("openai")
 
-    assert isinstance(openai, OpenAILLM)
+    assert isinstance(openai, OpenAIResponsesLLM)  # ADR-0010: openai — Responses API
     assert clients.for_provider("openai") is openai
-    compatible = clients.for_provider("openai_compatible")
-    assert isinstance(compatible, OpenAILLM)
-    assert compatible is not openai
+    assert isinstance(clients.for_provider("openai_compatible"), OpenAILLM)
     assert isinstance(clients.for_provider("anthropic"), AnthropicLLM)
 
 

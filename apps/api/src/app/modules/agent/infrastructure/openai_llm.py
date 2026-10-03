@@ -100,7 +100,7 @@ class OpenAILLM:
         try:
             return await self._create(request, temperature)
         except BadRequestError as error:
-            if temperature is None or not _rejects(error, "temperature"):
+            if temperature is None or not rejects_param(error, "temperature"):
                 raise
             self._no_temperature.add(request.model)
             log_dropped_param("openai", request.model, "temperature")
@@ -113,14 +113,15 @@ class OpenAILLM:
             model=request.model,
             messages=to_openai_messages(request),
             tools=[to_openai_tool(tool) for tool in request.tools] or omit,
-            temperature=_given(temperature),
-            max_completion_tokens=_given(request.max_output_tokens),
+            temperature=given(temperature),
+            max_completion_tokens=given(request.max_output_tokens),
             stream=True,
             stream_options={"include_usage": True},
         )
 
 
-def _rejects(error: BadRequestError, param: str) -> bool:
+def rejects_param(error: BadRequestError, param: str) -> bool:
+    """400 OpenAI: модель не принимает параметр (общее с адаптером Responses API)."""
     return error.param == param and error.code in _UNSUPPORTED_CODES
 
 
@@ -243,5 +244,6 @@ class _StreamAccumulator:
         )
 
 
-def _given[T](value: T | None) -> T | Omit:
+def given[T](value: T | None) -> T | Omit:
+    """None — не передавать параметр в запрос."""
     return omit if value is None else value

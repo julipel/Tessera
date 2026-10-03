@@ -146,8 +146,7 @@ agent_config:
       - search_knowledge
       - get_entity
       - show_entities
-      # update_dialog_state — вернуть в P2-11: gpt-6.1-sol не вызывает инструменты через
-      # Chat Completions (400 на запрос с tools), а builtin_tools отдаёт его модели.
+      - update_dialog_state
       - show_form
       - create_lead
 

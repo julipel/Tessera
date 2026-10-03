@@ -96,15 +96,22 @@
 
   DoD: в unit-тестах обоих адаптеров отброшенный параметр не попадает в тело запроса и
   логируется; конфиг без temperature проходит валидацию и не передаёт её провайдеру.
-- [ ] **P2-11 Вызов инструментов у моделей OpenAI.** По документации OpenAI GPT-6 Astra и
-  GPT-6.1 Sol вызывают инструменты только через Responses API, а GPT-6 Sol и Luna — через
-  Chat Completions лишь с `reasoning_effort: "none"`; адаптер OpenAI (P2-06) работает через
-  Chat Completions, а demo-beauty — на `gpt-6.1-sol`. Решить до инструментов P3 (`/adr`):
-  адаптер на Responses API или другая модель для demo-beauty. Проверено запросом (P2-09):
-  Chat Completions + tools для `gpt-6.1-sol` → 400 (`param: reasoning_effort`), поэтому
-  `update_dialog_state` временно убран из `tools.builtin` demo-beauty — вернуть.
-  DoD: принятое решение; `update_dialog_state` снова в demo-beauty и живой ход с вызовом
-  инструмента проходит; при адаптере — общий контрактный тест LLMClient с вызовом инструмента.
+- [ ] **P2-11a Порт LLMClient: `provider_items` и `openai_compatible` (ADR-0010).**
+  `provider_items` у `LLMResponse`/`AssistantMessage`, цикл возвращает их в следующий шаг
+  хода без изменений; `FakeLLM` умеет их отдавать. Chat Completions (`OpenAILLM`) —
+  провайдер `openai_compatible`: значение в `ModelConfig.provider` (схема, описание «протокол
+  API, а не производитель»; `make contracts`), `LLMClients`, env
+  `OPENAI_COMPATIBLE_API_KEY`/`OPENAI_COMPATIBLE_BASE_URL`, `.env.example`.
+  DoD: тест цикла — `provider_items` шага доходят до следующего запроса; контрактный тест
+  `OpenAILLM` под `openai_compatible` проходит.
+- [ ] **P2-11b Адаптер OpenAI Responses API (ADR-0010).** `OpenAIResponsesLLM` для
+  `provider: openai`: `store: false`, `include: ["reasoning.encrypted_content"]`, стрим
+  (текст, ранний `ToolCallStarted`, аргументы, reasoning items из `output_item.done`, usage),
+  ошибки → `LLMError`, temperature по ADR-0009. Вернуть `update_dialog_state` в demo-beauty.
+  Контекст: Chat Completions + tools для `gpt-6.1-sol` → 400 (`param: reasoning_effort`),
+  проверено в P2-09. DoD: общий контрактный тест LLMClient с вызовом инструмента проходит на
+  трёх адаптерах; live-тест Responses API с инструментом; живой ход demo-beauty с
+  `update_dialog_state` в web-чате.
 
 ## P3. Эвалы (рано!)
 

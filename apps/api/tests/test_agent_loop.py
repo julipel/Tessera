@@ -1,8 +1,4 @@
-"""Агентный цикл на FakeLLM (P2-02): спецификация до реализации.
-
-Пока цикл — заглушка (P2-03), тесты ожидаемо падают на NotImplementedError. `strict=True`:
-как только тест начнёт проходить, XPASS сломает прогон — маркер нужно снять в P2-03.
-"""
+"""Агентный цикл на FakeLLM: спецификация P2-02, реализация — P2-03."""
 
 import asyncio
 import json
@@ -36,10 +32,6 @@ from app.modules.agent.public import (
 )
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.public import ToolError, ToolErrorCode, ToolResult
-
-pytestmark = pytest.mark.xfail(
-    strict=True, raises=NotImplementedError, reason="P2-03: агентный цикл не реализован"
-)
 
 FALLBACK = "Извините, сейчас не получается ответить. Попробуйте ещё раз."
 HISTORY = (UserMessage("Подбери крем для сухой кожи"),)

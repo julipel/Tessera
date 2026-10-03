@@ -151,12 +151,23 @@ async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
 ### Коннекторы
 Общий интерфейс:
 ```python
-class SourceConnector(Protocol):
-    kind: str
-    async def discover(self, cfg) -> list[RawItemRef]: ...
-    async def fetch(self, ref) -> RawItem: ...
-    async def changed_since(self, cfg, cursor) -> list[RawItemRef]: ...  # инкрементально
+class SourceConnector(Protocol):  # knowledge/domain/ports.py
+    kind: SourceKind
+    async def discover(self, cfg) -> Listing: ...               # полный список + курсор
+    async def fetch(self, cfg, ref: RawItemRef) -> RawItem: ...  # DocumentItem | EntityItem
+    async def changed_since(self, cfg, cursor) -> Listing: ...  # инкрементально
 ```
+`Listing = (refs, cursor)`: курсор для следующего `changed_since`. Коннектор отдаёт уже
+нормализованный элемент (по маппингу своего конфига); остальное делает общий пайплайн
+`run_sync` (knowledge/application/ingestion.py):
+- `content_hash` — sha256 канонического JSON элемента, считает пайплайн, не коннектор.
+  Совпал с сохранённым — элемент не перезаписывается; иначе upsert по `external_id`,
+  чанки документа заменяются целиком.
+- Есть курсор последней успешной синхронизации — `changed_since`, иначе (или `full`) —
+  `discover`. Только полный discover удаляет элементы, пропавшие из источника (кроме тех,
+  что не удалось получить в этом прогоне).
+- Каждый элемент коммитится отдельно; ошибка элемента считается в `stats.failed`,
+  синхронизация продолжается. Ошибка листинга или нет коннектора — `SourceSync.failed`.
 Реализации: `website` (краулер + sitemap), `file` (PDF/DOCX/MD/TXT), `table` (CSV/XLSX),
 `http_api` (декларативный маппинг), `database` (SQL-запрос из конфига, read-only).
 

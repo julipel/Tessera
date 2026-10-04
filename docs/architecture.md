@@ -241,8 +241,16 @@ Entity хранится в Postgres: нормализованные поля (`t
 - Чанкинг по структуре документа (заголовки), 300–800 токенов, overlap, метаданные:
   tenant_id, source_id, url, title, section, updated_at. `MarkdownChunker`: коннекторы отдают
   markdown, чанк не пересекает секцию, `section` — путь заголовков («Доставка > Сроки»).
-- Qdrant: коллекция на окружение, изоляция по payload `tenant_id` (обязательный фильтр в
-  репозитории). Dense + sparse (BM25) векторы, гибридный поиск с RRF.
+- Qdrant: коллекция на окружение (`QDRANT_COLLECTION`), изоляция по payload `tenant_id`
+  (обязательный фильтр в каждой операции порта `ChunkIndex`, индекс `is_tenant`, HNSW по
+  тенантам: `payload_m`, без общего графа). Dense + sparse (BM25) векторы, гибридный поиск с RRF.
+  Точка = чанк (`id` = `Chunk.id`), payload: `tenant_id, source_id, document_id, external_id,
+  title, url, section, ord, text`. Dense — порт `Embedder` (OpenAI Embeddings,
+  `EMBEDDING_MODEL`/`EMBEDDING_DIMENSIONS`, батчами); sparse `bm25` считает сам Qdrant
+  (серверный `qdrant/bm25`, модификатор `idf`, русский snowball-стеммер и стоп-слова
+  ru+en — `BM25_OPTIONS`, одинаковые для записи и запроса). REST через httpx, без SDK (ADR-0014).
+  Замена документа: upsert новых точек, затем удаление прочих точек по
+  (`tenant_id`, `source_id`, `external_id`). Смена модели эмбеддингов — новая коллекция.
 - Реранкинг top-k (по конфигу; можно отключить).
 - `search_knowledge` возвращает фрагменты с источниками; `search_catalog` — Entity по
   фильтрам + опционально семантическому запросу по описанию.

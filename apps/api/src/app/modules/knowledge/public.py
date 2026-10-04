@@ -4,7 +4,8 @@ from app.modules.knowledge.application.chunking import MarkdownChunker
 from app.modules.knowledge.application.ingestion import run_sync
 from app.modules.knowledge.application.sync_requests import request_sync
 from app.modules.knowledge.domain.entities import SourceKind, SourceStatus, SyncStatus
-from app.modules.knowledge.domain.errors import NoConnectorError
+from app.modules.knowledge.domain.errors import EmbeddingError, NoConnectorError, VectorIndexError
+from app.modules.knowledge.domain.indexing import IndexedChunk, IndexedDocument
 from app.modules.knowledge.domain.ingestion import (
     ChunkDraft,
     DocumentItem,
@@ -15,7 +16,14 @@ from app.modules.knowledge.domain.ingestion import (
     SourceSpec,
     content_hash,
 )
-from app.modules.knowledge.domain.ports import Chunker, SourceConnector, SyncQueue, SyncStore
+from app.modules.knowledge.domain.ports import (
+    Chunker,
+    ChunkIndex,
+    Embedder,
+    SourceConnector,
+    SyncQueue,
+    SyncStore,
+)
 from app.modules.knowledge.infrastructure.file_connector import FileConnector
 from app.modules.knowledge.infrastructure.models import (
     ChunkRecord,
@@ -23,6 +31,14 @@ from app.modules.knowledge.infrastructure.models import (
     EntityRecord,
     SourceRecord,
     SourceSyncRecord,
+)
+from app.modules.knowledge.infrastructure.openai_embedder import (
+    OpenAIEmbedder,
+    create_openai_embedder,
+)
+from app.modules.knowledge.infrastructure.qdrant_index import (
+    QdrantChunkIndex,
+    create_qdrant_index,
 )
 from app.modules.knowledge.infrastructure.repositories import (
     ChunkRepository,
@@ -50,19 +66,26 @@ __all__ = [
     "SYNC_SOURCE_JOB",
     "ArqSyncQueue",
     "ChunkDraft",
+    "ChunkIndex",
     "ChunkRecord",
     "ChunkRepository",
     "Chunker",
     "DocumentItem",
     "DocumentRecord",
     "DocumentRepository",
+    "Embedder",
+    "EmbeddingError",
     "EntityItem",
     "EntityRecord",
     "EntityRepository",
     "FileConnector",
+    "IndexedChunk",
+    "IndexedDocument",
     "Listing",
     "MarkdownChunker",
     "NoConnectorError",
+    "OpenAIEmbedder",
+    "QdrantChunkIndex",
     "RawItem",
     "RawItemRef",
     "SourceConnector",
@@ -81,12 +104,15 @@ __all__ = [
     "TableConnector",
     "TableSourceConfig",
     "TableSourceError",
+    "VectorIndexError",
     "WebClient",
     "WebsiteConnector",
     "WebsiteSourceConfig",
     "WebsiteSourceError",
     "build_web_client",
     "content_hash",
+    "create_openai_embedder",
+    "create_qdrant_index",
     "request_sync",
     "run_sync",
 ]

@@ -1,10 +1,12 @@
-"""Порты ingestion: коннекторы источников, чанкер, хранилище (реализации — вне domain)."""
+"""Порты ingestion: коннекторы источников, чанкер, хранилище, эмбеддинги и векторный индекс
+(реализации — вне domain)."""
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from typing import Any, Protocol
 from uuid import UUID
 
 from app.modules.knowledge.domain.entities import SourceKind, SyncStatus
+from app.modules.knowledge.domain.indexing import IndexedDocument
 from app.modules.knowledge.domain.ingestion import (
     ChunkDraft,
     DocumentItem,
@@ -96,3 +98,33 @@ class SyncQueue(Protocol):
     """Очередь фоновых синхронизаций. Повторная постановка той же `sync_id` — без дубля."""
 
     async def enqueue(self, tenant_id: TenantId, sync_id: UUID, *, full: bool) -> None: ...
+
+
+class Embedder(Protocol):
+    """Dense-эмбеддинги текстов. Ошибки — `EmbeddingError`."""
+
+    dimensions: int
+
+    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        """Векторы в порядке `texts`, каждый длины `dimensions`."""
+        ...
+
+
+class ChunkIndex(Protocol):
+    """Векторный индекс чанков (dense + sparse BM25). Каждая операция ограничена тенантом
+    (ADR-0006): точки другого тенанта не видны и не изменяются. Ошибки — `VectorIndexError`.
+    """
+
+    async def ensure_collection(self) -> None:
+        """Создать коллекцию и индексы payload, если их нет; проверить размерность."""
+        ...
+
+    async def replace_document(
+        self, tenant_id: TenantId, source_id: UUID, document: IndexedDocument
+    ) -> None:
+        """Точки документа (`source_id`, `external_id`) становятся ровно `document.chunks`."""
+        ...
+
+    async def delete_documents(
+        self, tenant_id: TenantId, source_id: UUID, external_ids: Collection[str]
+    ) -> None: ...

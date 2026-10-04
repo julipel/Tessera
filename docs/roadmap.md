@@ -143,7 +143,12 @@
 - [x] **P4-05c Коннектор website: краулер.** `WebsiteConnector`: sitemap + обход ссылок,
   лимиты обхода (страницы, глубина, время, Crawl-delay), кэш discover → fetch, подключение
   в воркере, настройки User-Agent/таймаута.
-- [ ] **P4-06 Индексация в Qdrant.** Эмбеддинги (порт + реализация), dense+sparse, payload с tenant_id.
+- [x] **P4-06a Индексация в Qdrant: адаптеры.** Порты `Embedder`/`ChunkIndex`, `OpenAIEmbedder`
+  (батчи, проверка размерности), `QdrantChunkIndex` на httpx REST: dense + серверный BM25,
+  payload с tenant_id, замена/удаление точек документа. DoD: тесты на реальном Qdrant, изоляция.
+- [ ] **P4-06b Индексация в Qdrant: пайплайн.** Индексация чанков в `run_sync` (до commit,
+  сбой — ошибка элемента), удаление точек пропавших документов, `ensure_collection` и сборка
+  в воркере. DoD: тесты пайплайна на фейковых эмбеддере и индексе.
 - [ ] **P4-07 search_knowledge.** Гибридный поиск + RRF + опциональный реранкинг, компонент `sources`.
   DoD: тест изоляции тенантов в Qdrant, тест качества на мини-корпусе.
 - [ ] **P4-08 search_catalog / get_entity.** Фильтры по нормализованным полям и attributes,

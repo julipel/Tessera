@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     database_echo: bool = False
     redis_url: str = "redis://localhost:6379/0"
     qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: SecretStr | None = None
+    # Коллекция чанков знаний, одна на окружение (architecture.md §8).
+    qdrant_collection: str = "knowledge"
+    # Dense-эмбеддинги чанков: OpenAI Embeddings API (ключ и base_url — OPENAI_*).
+    # Смена модели или размерности требует новой коллекции и переиндексации.
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+    embedding_batch_size: int = 128
     # Файлы источников `file`: <dir>/<tenant_id>/<source_id>/ (ADR-0012).
     knowledge_files_dir: Path = _REPO_ROOT / "data" / "knowledge"
     # Краулер источников `website` (ADR-0013).

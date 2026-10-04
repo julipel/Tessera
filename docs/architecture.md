@@ -267,6 +267,11 @@ Entity хранится в Postgres: нормализованные поля (`t
   сбой реранкера — порядок RRF и предупреждение в лог, поиск не падает.
 - `search_knowledge` возвращает фрагменты с источниками; `search_catalog` — Entity по
   фильтрам + опционально семантическому запросу по описанию.
+  `search_knowledge` (tools) зависит от порта `KnowledgeSearcher` (tools.domain, типы из
+  `knowledge.kernel` — ADR-0008); `KnowledgeSearch` подставляет сборщик агента
+  (`app/knowledge_wiring.py` → API и раннер эвалов; без `OPENAI_API_KEY` инструмент не
+  подключается). Модели — фрагменты `{n, title, section, url, text}`, UI — `sources` из
+  фрагментов с url (без дублей, snippet ≤ 200 символов); сбой поиска — `upstream_error`.
 - Ingestion — фоновые задачи arq (`app/worker.py`, задача `sync_source`), статусы в `SourceSync`,
   повторная синхронизация по расписанию. Запуск — `request_sync` через порт `SyncQueue`.
   Параллельный запуск одного источника исключён: частичный уникальный индекс допускает одну

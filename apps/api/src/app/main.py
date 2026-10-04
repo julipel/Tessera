@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import SecretStr
 
 from app.api import health
+from app.knowledge_wiring import KnowledgeServices, build_knowledge_services
 from app.logs import TraceIdMiddleware, configure_logging
 from app.modules.agent.public import LLMClients
 from app.modules.chat.public import TurnRegistry
@@ -24,6 +25,9 @@ from app.settings import Settings
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
+    knowledge: KnowledgeServices | None = app.state.knowledge
+    if knowledge is not None:
+        await knowledge.aclose()
     await app.state.engine.dispose()
 
 
@@ -46,6 +50,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         anthropic_api_key=_secret(settings.anthropic_api_key),
         anthropic_base_url=settings.anthropic_base_url,
     )
+    # Поиск по знаниям для search_knowledge; None без OPENAI_API_KEY.
+    app.state.knowledge = build_knowledge_services(settings)
+    app.state.knowledge_search = app.state.knowledge.search if app.state.knowledge else None
     install_error_handlers(app)
     app.add_middleware(TraceIdMiddleware)  # после: снаружи обработчика 500
     # Последним — снаружи всех: preflight отвечается до остальной обработки.

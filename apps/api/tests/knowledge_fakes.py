@@ -42,6 +42,7 @@ class InMemoryChunkIndex:
     documents: dict[DocKey, IndexedDocument] = field(default_factory=dict)
     fail_replace: bool = False
     fail_delete: bool = False
+    fail_search: bool = False
     ensured: bool = False
     searches: list[tuple[TenantId, str, list[float], int]] = field(default_factory=list)
 
@@ -80,6 +81,8 @@ class InMemoryChunkIndex:
         self, tenant_id: TenantId, text: str, dense: Sequence[float], limit: int
     ) -> list[ChunkHit]:
         """Чанки тенанта, в которых есть слова запроса; больше общих слов — выше."""
+        if self.fail_search:
+            raise VectorIndexError("Qdrant недоступен")
         self.searches.append((tenant_id, text, list(dense), limit))
         words = set(text.lower().split())
         scored = [

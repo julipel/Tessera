@@ -12,6 +12,7 @@ from pathlib import Path
 
 from pydantic import SecretStr
 
+from app.knowledge_wiring import build_knowledge_services
 from app.logs import configure_logging
 from app.modules.agent.public import PLATFORM_PROMPT_VERSION, LLMClients
 from app.modules.chat.public import builtin_turn_agent
@@ -59,10 +60,16 @@ async def main_async(args: argparse.Namespace) -> int:
     judge = (
         None if args.no_judge else Judge(llms.for_provider, args.judge_provider, args.judge_model)
     )
-    runner = DialogRunner(builtin_turn_agent(llms.for_provider), configs, judge)
+    knowledge = build_knowledge_services(settings)
+    agent = builtin_turn_agent(llms.for_provider, knowledge.search if knowledge else None)
+    runner = DialogRunner(agent, configs, judge)
     started_at = datetime.now(UTC)
     print(f"Диалогов: {len(dialogs)}, параллельно: {args.concurrency}…", flush=True)
-    results = await run_dialogs(runner, dialogs, args.concurrency)
+    try:
+        results = await run_dialogs(runner, dialogs, args.concurrency)
+    finally:
+        if knowledge is not None:
+            await knowledge.aclose()
 
     models: dict[str, str] = {}
     judges: dict[str, str] = {}

@@ -153,7 +153,7 @@
   BM25, IDF по тенанту, RRF), порт `Reranker`, use case `KnowledgeSearch` (кандидаты под
   реранкинг, откат к RRF при сбое реранкера). DoD: тест изоляции тенантов в Qdrant, тест
   качества на мини-корпусе.
-- [ ] **P4-07b search_knowledge: инструмент.** Встроенный инструмент (`query`, `top_k`),
+- [x] **P4-07b search_knowledge: инструмент.** Встроенный инструмент (`query`, `top_k`),
   `content` для модели, компонент `sources` (фрагменты с url), ошибки → `upstream_error`;
   сборка `KnowledgeSearch` в API и раннере эвалов. DoD: тесты инструмента, тест цикла на
   FakeLLM с компонентом `sources`.

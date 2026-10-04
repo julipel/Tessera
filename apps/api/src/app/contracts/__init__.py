@@ -6,10 +6,18 @@
 
 from app.contracts.generated.agent_config_schema import (
     AgentConfig,
+    KnowledgeSearchConfig,
     ScenarioConfig,
     SlotDefinition,
 )
-from app.contracts.generated.components_schema import Action, Component, FormField, Price
+from app.contracts.generated.components_schema import (
+    Action,
+    Component,
+    FormField,
+    Price,
+    SourceItem,
+    Sources,
+)
 from app.contracts.generated.conversations_schema import (
     ComponentBlock,
     CreateConversationRequest,
@@ -83,6 +91,7 @@ __all__ = [
     "HttpError",
     "HttpErrorBody",
     "HttpToolDefinition",
+    "KnowledgeSearchConfig",
     "MessageBlock",
     "MessageHistory",
     "Price",
@@ -91,6 +100,8 @@ __all__ = [
     "ScenarioConfig",
     "SendMessageRequest",
     "SlotDefinition",
+    "SourceItem",
+    "Sources",
     "StatusData",
     "StatusEvent",
     "SuggestionItem",

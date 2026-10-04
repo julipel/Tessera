@@ -1,15 +1,22 @@
 """Встроенные инструменты ядра (contracts.md §4), включаемые тенанту через `tools.builtin`.
 
-Пока реализован только `update_dialog_state`; остальные имена из конфига пропускаются —
-их добавят задачи P3.
+Реализованы `update_dialog_state` и `search_knowledge`; остальные имена из конфига
+пропускаются — их добавят следующие задачи. `search_knowledge` подключается, только если
+окружение собрало поиск по знаниям (`knowledge`), иначе — предупреждение в лог.
 """
 
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+import structlog
+
 from app.contracts import AgentConfig, ScenarioConfig, SlotDefinition
+from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition
+from app.modules.tools.domain.ports import KnowledgeSearcher
 from app.modules.tools.domain.result import ToolResult
+
+logger = structlog.get_logger(__name__)
 
 UPDATE_DIALOG_STATE = "update_dialog_state"
 
@@ -20,12 +27,22 @@ _DESCRIPTION = (
 )
 
 
-def builtin_tools(config: AgentConfig) -> list[ToolDefinition]:
-    """Встроенные инструменты из `config.tools.builtin`, которые уже реализованы."""
+def builtin_tools(
+    config: AgentConfig, *, knowledge: KnowledgeSearcher | None = None
+) -> list[ToolDefinition]:
+    """Встроенные инструменты из `config.tools.builtin`, которые уже реализованы и для
+    которых есть зависимости."""
     factories: dict[str, Callable[[AgentConfig], ToolDefinition]] = {
         UPDATE_DIALOG_STATE: lambda c: update_dialog_state_tool(c.prompt.scenarios or []),
     }
-    return [factories[name](config) for name in config.tools.builtin or [] if name in factories]
+    if knowledge is not None:
+        factories[SEARCH_KNOWLEDGE] = lambda c: search_knowledge_tool(
+            knowledge, c.knowledge.search_knowledge if c.knowledge else None
+        )
+    enabled = config.tools.builtin or []
+    if knowledge is None and SEARCH_KNOWLEDGE in enabled:
+        logger.warning("tools.search_knowledge_unavailable", reason="поиск по знаниям не настроен")
+    return [factories[name](config) for name in enabled if name in factories]
 
 
 def update_dialog_state_tool(scenarios: Iterable[ScenarioConfig]) -> ToolDefinition:

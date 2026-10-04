@@ -5,6 +5,7 @@ from app.modules.tools.application.builtin import (
     builtin_tools,
     update_dialog_state_tool,
 )
+from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
 from app.modules.tools.application.registry import ToolRegistry
 from app.modules.tools.domain.definition import (
     InvalidToolDefinitionError,
@@ -13,11 +14,14 @@ from app.modules.tools.domain.definition import (
     ToolHandler,
     ToolInvocation,
 )
+from app.modules.tools.domain.ports import KnowledgeSearcher
 from app.modules.tools.domain.result import ToolError, ToolErrorCode, ToolResult
 
 __all__ = [
+    "SEARCH_KNOWLEDGE",
     "UPDATE_DIALOG_STATE",
     "InvalidToolDefinitionError",
+    "KnowledgeSearcher",
     "ToolContext",
     "ToolDefinition",
     "ToolError",
@@ -27,5 +31,6 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "builtin_tools",
+    "search_knowledge_tool",
     "update_dialog_state_tool",
 ]

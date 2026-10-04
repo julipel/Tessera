@@ -31,6 +31,7 @@ from app.modules.chat.infrastructure.repositories import (
     TenantsAgentConfigs,
     ToolCallRepository,
 )
+from app.modules.knowledge.public import KnowledgeSearch
 from app.modules.shared.public import ApiError, DbSession, StreamDbSession
 from app.modules.tenants.public import WidgetTenant
 
@@ -40,9 +41,11 @@ logger = structlog.get_logger(__name__)
 
 def get_turn_agent(request: Request) -> TurnAgent:
     """Агентный цикл с LLM-клиентами приложения и встроенными инструментами из
-    `tools.builtin` конфига; тесты подменяют через dependency_overrides."""
+    `tools.builtin` конфига (поиск по знаниям — если собран); тесты подменяют через
+    dependency_overrides."""
     llms: LLMClients = request.app.state.llm_clients
-    return builtin_turn_agent(llms.for_provider)
+    knowledge: KnowledgeSearch | None = request.app.state.knowledge_search
+    return builtin_turn_agent(llms.for_provider, knowledge)
 
 
 Agent = Annotated[TurnAgent, Depends(get_turn_agent)]

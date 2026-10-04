@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { ChatMessage } from "@/lib/chat/state";
+import { MessageBlocks } from "./MessageBlocks";
 
 const STATUS_NOTE: Partial<Record<ChatMessage["status"], string>> = {
   interrupted: "Ответ прерван",
@@ -28,20 +29,15 @@ export function MessageList({
             key={m.id}
             data-role={m.role}
             data-status={m.status}
-            className={m.role === "user" ? "self-end max-w-[85%]" : "self-start max-w-[85%]"}
+            className={m.role === "user" ? "self-end max-w-[85%]" : "flex w-full flex-col gap-2"}
           >
-            <div
-              className={
-                m.role === "user"
-                  ? "rounded-chat bg-chat-primary px-4 py-2 text-chat-on-primary whitespace-pre-wrap"
-                  : "rounded-chat border border-chat-border bg-chat-surface px-4 py-2 whitespace-pre-wrap"
-              }
-            >
-              {m.role === "user"
-                ? m.text
-                : // Компоненты (P5-02) пока не рендерятся; markdown — тоже с P5.
-                  m.blocks.map((b) => (b.type === "text" ? <p key={b.block_id}>{b.text}</p> : null))}
-            </div>
+            {m.role === "user" ? (
+              <div className="rounded-chat bg-chat-primary px-4 py-2 text-chat-on-primary whitespace-pre-wrap">
+                {m.text}
+              </div>
+            ) : (
+              <MessageBlocks blocks={m.blocks} />
+            )}
             {(m.error || STATUS_NOTE[m.status]) && (
               <p className="mt-1 text-sm text-chat-danger">{m.error ?? STATUS_NOTE[m.status]}</p>
             )}

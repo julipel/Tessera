@@ -434,8 +434,10 @@ AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSON
 
 - `apps/web`: Next.js. Страницы: чат (полноэкранный), демо-страница виджета, админка (позже).
 - Встраиваемый виджет: `widget.js` → iframe с чатом, конфиг по ключу виджета, тема из токенов.
-- Рендер сообщения — список блоков: текст (markdown, стримится) + компоненты из
-  discriminated union `type` (см. contracts). Неизвестный тип игнорируется.
+- Рендер сообщения — список блоков: текст (markdown через react-markdown, без сырого HTML и
+  картинок — их приносят только компоненты) + компоненты из discriminated union `type`
+  (см. contracts). Неизвестный тип игнорируется. Витрина всех вариантов — `/demo/components`
+  (только dev), скриншот-тесты — `e2e/components.spec.ts`.
 - Клиент SSE с переподключением, состояниями «печатает / ищет / ошибка / повторить».
 - Типы — только из `@/contracts` (`apps/web/src/contracts/generated`, см. contracts.md).
 

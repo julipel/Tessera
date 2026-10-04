@@ -40,6 +40,22 @@ test("ход: индикатор до первого текста, дельты 
   expect(done.messages.at(-1)?.status).toBe("completed");
 });
 
+test("component добавляет блок после текста; повтор block_id заменяет блок на месте", () => {
+  const card = (title: string) =>
+    ({ type: "product_card", entity_id: "e1", title }) as const;
+  const state = run(
+    sent,
+    ev({ type: "turn_started", data: {} }),
+    ev({ type: "text_delta", data: { block_id: "b1", delta: "Вот:" } }),
+    ev({ type: "component", data: { block_id: "b2", component: card("Крем") } }),
+    ev({ type: "component", data: { block_id: "b2", component: card("Крем SPF") } }),
+  );
+  expect(state.messages.at(-1)?.blocks).toEqual([
+    { type: "text", block_id: "b1", text: "Вот:" },
+    { type: "component", block_id: "b2", component: card("Крем SPF") },
+  ]);
+});
+
 test("status меняет подпись индикатора, error попадает в сообщение", () => {
   const state = run(
     sent,

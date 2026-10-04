@@ -92,6 +92,10 @@ function applyEvent(state: ChatState, event: Event): ChatState {
         messages: update((m) => ({ ...m, blocks: appendText(m.blocks, block_id, delta) })),
       };
     }
+    case "component": {
+      const block: MessageBlock = { type: "component", ...event.data };
+      return { ...state, messages: update((m) => ({ ...m, blocks: upsertBlock(m.blocks, block) })) };
+    }
     case "status":
       return { ...state, activity: event.data.label };
     case "error":
@@ -103,7 +107,7 @@ function applyEvent(state: ChatState, event: Event): ChatState {
         messages: update((m) => ({ ...m, status: event.data.status })),
       };
     default:
-      // text_done, инструменты, компоненты и подсказки — с P5.
+      // text_done, инструменты и подсказки — с P5-03/P5-07.
       return state;
   }
 }
@@ -112,6 +116,13 @@ function appendText(blocks: MessageBlock[], blockId: string, delta: string): Mes
   const index = blocks.findIndex((b) => b.block_id === blockId);
   if (index < 0) return [...blocks, { type: "text", block_id: blockId, text: delta }];
   return blocks.map((b, i) => (i === index && b.type === "text" ? { ...b, text: b.text + delta } : b));
+}
+
+/** Блоки упорядочены по первому появлению block_id; повтор заменяет блок на месте. */
+function upsertBlock(blocks: MessageBlock[], block: MessageBlock): MessageBlock[] {
+  const index = blocks.findIndex((b) => b.block_id === block.block_id);
+  if (index < 0) return [...blocks, block];
+  return blocks.map((b, i) => (i === index ? block : b));
 }
 
 function fromHistory(message: HistoryMessage): ChatMessage {

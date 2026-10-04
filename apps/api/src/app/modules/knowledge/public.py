@@ -16,7 +16,7 @@ from app.modules.knowledge.domain.ingestion import (
     content_hash,
 )
 from app.modules.knowledge.domain.ports import Chunker, SourceConnector, SyncQueue, SyncStore
-from app.modules.knowledge.infrastructure.file_connector import FileConnector, SourceFileError
+from app.modules.knowledge.infrastructure.file_connector import FileConnector
 from app.modules.knowledge.infrastructure.models import (
     ChunkRecord,
     DocumentRecord,
@@ -31,8 +31,14 @@ from app.modules.knowledge.infrastructure.repositories import (
     SourceRepository,
     SourceSyncRepository,
 )
+from app.modules.knowledge.infrastructure.source_files import SourceFileError
 from app.modules.knowledge.infrastructure.sync_queue import SYNC_SOURCE_JOB, ArqSyncQueue
 from app.modules.knowledge.infrastructure.sync_store import SqlSyncStore
+from app.modules.knowledge.infrastructure.table_connector import (
+    TableConnector,
+    TableSourceConfig,
+    TableSourceError,
+)
 
 __all__ = [
     "SYNC_SOURCE_JOB",
@@ -66,6 +72,9 @@ __all__ = [
     "SyncQueue",
     "SyncStatus",
     "SyncStore",
+    "TableConnector",
+    "TableSourceConfig",
+    "TableSourceError",
     "content_hash",
     "request_sync",
     "run_sync",

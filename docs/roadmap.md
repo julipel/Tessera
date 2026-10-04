@@ -135,7 +135,7 @@
 - [x] **P4-03a Коннектор file: MD/TXT.** Структурный чанкинг по заголовкам, каталог
   `<root>/<tenant_id>/<source_id>/`, `SourceSpec` в интерфейсе коннектора (ADR-0012).
 - [x] **P4-03b Коннектор file: PDF/DOCX.** Парсеры в markdown (pypdf, python-docx).
-- [ ] **P4-04 Коннектор table.** CSV/XLSX → Entity по маппингу колонок из конфига.
+- [x] **P4-04 Коннектор table.** CSV/XLSX → Entity по маппингу колонок из конфига.
 - [ ] **P4-05 Коннектор website.** Sitemap + краулер с лимитами, извлечение основного контента.
 - [ ] **P4-06 Индексация в Qdrant.** Эмбеддинги (порт + реализация), dense+sparse, payload с tenant_id.
 - [ ] **P4-07 search_knowledge.** Гибридный поиск + RRF + опциональный реранкинг, компонент `sources`.

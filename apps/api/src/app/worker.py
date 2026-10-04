@@ -21,6 +21,7 @@ from app.modules.knowledge.public import (
     SourceConnector,
     SourceKind,
     SqlSyncStore,
+    TableConnector,
     run_sync,
 )
 from app.modules.shared.public import TenantId, create_engine, create_session_factory
@@ -31,7 +32,10 @@ logger = structlog.get_logger(__name__)
 
 def build_connectors(settings: Settings) -> dict[SourceKind, SourceConnector]:
     """Коннекторы источников по виду."""
-    return {SourceKind.FILE: FileConnector(settings.knowledge_files_dir)}
+    return {
+        SourceKind.FILE: FileConnector(settings.knowledge_files_dir),
+        SourceKind.TABLE: TableConnector(settings.knowledge_files_dir),
+    }
 
 
 async def sync_source(ctx: dict[str, Any], tenant_id: str, sync_id: str, full: bool) -> None:

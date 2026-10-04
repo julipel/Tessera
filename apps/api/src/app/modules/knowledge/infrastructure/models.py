@@ -62,7 +62,16 @@ class SourceRecord(TenantScopedBase):
 
 class SourceSyncRecord(TenantScopedBase):
     __tablename__ = "source_syncs"
-    __table_args__ = (Index("ix_source_syncs_source_id_started_at", "source_id", "started_at"),)
+    __table_args__ = (
+        Index("ix_source_syncs_source_id_started_at", "source_id", "started_at"),
+        # Не больше одной активной синхронизации на источник — защита от параллельного запуска.
+        Index(
+            "uq_source_syncs_source_id_active",
+            "source_id",
+            unique=True,
+            postgresql_where=text("status IN ('pending', 'running')"),
+        ),
+    )
 
     tenant_id: Mapped[UUID] = _tenant_fk()
     source_id: Mapped[UUID] = _source_fk()

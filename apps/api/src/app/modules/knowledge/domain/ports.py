@@ -43,6 +43,10 @@ class SyncStore(Protocol):
 
     async def load_job(self, tenant_id: TenantId, sync_id: UUID) -> SyncJob | None: ...
 
+    async def open_sync(self, tenant_id: TenantId, source_id: UUID) -> UUID | None:
+        """Активная синхронизация источника или новая pending; None — источника у тенанта нет."""
+        ...
+
     async def last_cursor(self, tenant_id: TenantId, source_id: UUID) -> str | None:
         """Курсор последней успешной синхронизации источника."""
         ...
@@ -85,3 +89,9 @@ class SyncStore(Protocol):
     async def commit(self) -> None: ...
 
     async def rollback(self) -> None: ...
+
+
+class SyncQueue(Protocol):
+    """Очередь фоновых синхронизаций. Повторная постановка той же `sync_id` — без дубля."""
+
+    async def enqueue(self, tenant_id: TenantId, sync_id: UUID, *, full: bool) -> None: ...

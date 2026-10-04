@@ -2,6 +2,7 @@
 
 from app.modules.knowledge.application.chunking import ParagraphChunker
 from app.modules.knowledge.application.ingestion import run_sync
+from app.modules.knowledge.application.sync_requests import request_sync
 from app.modules.knowledge.domain.entities import SourceKind, SourceStatus, SyncStatus
 from app.modules.knowledge.domain.errors import NoConnectorError
 from app.modules.knowledge.domain.ingestion import (
@@ -13,7 +14,7 @@ from app.modules.knowledge.domain.ingestion import (
     RawItemRef,
     content_hash,
 )
-from app.modules.knowledge.domain.ports import Chunker, SourceConnector, SyncStore
+from app.modules.knowledge.domain.ports import Chunker, SourceConnector, SyncQueue, SyncStore
 from app.modules.knowledge.infrastructure.models import (
     ChunkRecord,
     DocumentRecord,
@@ -28,9 +29,12 @@ from app.modules.knowledge.infrastructure.repositories import (
     SourceRepository,
     SourceSyncRepository,
 )
+from app.modules.knowledge.infrastructure.sync_queue import SYNC_SOURCE_JOB, ArqSyncQueue
 from app.modules.knowledge.infrastructure.sync_store import SqlSyncStore
 
 __all__ = [
+    "SYNC_SOURCE_JOB",
+    "ArqSyncQueue",
     "ChunkDraft",
     "ChunkRecord",
     "ChunkRepository",
@@ -54,8 +58,10 @@ __all__ = [
     "SourceSyncRecord",
     "SourceSyncRepository",
     "SqlSyncStore",
+    "SyncQueue",
     "SyncStatus",
     "SyncStore",
     "content_hash",
+    "request_sync",
     "run_sync",
 ]

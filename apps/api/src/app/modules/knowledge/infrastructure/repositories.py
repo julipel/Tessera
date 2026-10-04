@@ -18,6 +18,8 @@ from app.modules.knowledge.infrastructure.models import (
 )
 from app.modules.shared.public import TenantId, TenantMismatchError, TenantRepository
 
+_ACTIVE = SourceSyncRecord.status.in_([SyncStatus.PENDING, SyncStatus.RUNNING])
+
 
 class SourceRepository(TenantRepository[SourceRecord]):
     model = SourceRecord
@@ -39,6 +41,35 @@ class SourceSyncRepository(TenantRepository[SourceSyncRecord]):
             .limit(1)
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def open_active(self, tenant_id: TenantId, source_id: UUID) -> UUID:
+        """Активная (pending/running) синхронизация источника или новая pending.
+
+        Гонку двух вызовов разрешает частичный уникальный индекс: проигравший INSERT
+        ничего не вставляет и читает синхронизацию победителя. Принадлежность источника
+        тенанту проверяет вызывающий код.
+        """
+        for _ in range(3):  # активная могла завершиться между INSERT и SELECT
+            inserted = await self.session.execute(
+                insert(SourceSyncRecord)
+                .values(tenant_id=tenant_id, source_id=source_id, status=SyncStatus.PENDING)
+                .on_conflict_do_nothing(
+                    index_elements=[SourceSyncRecord.source_id], index_where=_ACTIVE
+                )
+                .returning(SourceSyncRecord.id)
+            )
+            if (sync_id := inserted.scalar_one_or_none()) is not None:
+                return sync_id
+            active = await self.session.execute(
+                select(SourceSyncRecord.id).where(
+                    SourceSyncRecord.tenant_id == tenant_id,
+                    SourceSyncRecord.source_id == source_id,
+                    _ACTIVE,
+                )
+            )
+            if (sync_id := active.scalar_one_or_none()) is not None:
+                return sync_id
+        raise RuntimeError(f"не удалось открыть синхронизацию источника {source_id}")
 
     async def set_fields(self, tenant_id: TenantId, sync_id: UUID, **values: Any) -> None:
         stmt = (

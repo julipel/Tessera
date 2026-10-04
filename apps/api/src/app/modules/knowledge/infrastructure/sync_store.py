@@ -21,6 +21,7 @@ from app.modules.knowledge.infrastructure.repositories import (
     ChunkRepository,
     DocumentRepository,
     EntityRepository,
+    SourceRepository,
     SourceSyncRepository,
 )
 from app.modules.shared.public import TenantId
@@ -29,6 +30,7 @@ from app.modules.shared.public import TenantId
 class SqlSyncStore:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        self.sources = SourceRepository(session)
         self.syncs = SourceSyncRepository(session)
         self.documents = DocumentRepository(session)
         self.entities = EntityRepository(session)
@@ -55,6 +57,11 @@ class SqlSyncStore:
             kind=source.kind,
             config=source.config,
         )
+
+    async def open_sync(self, tenant_id: TenantId, source_id: UUID) -> UUID | None:
+        if await self.sources.get(tenant_id, source_id) is None:
+            return None
+        return await self.syncs.open_active(tenant_id, source_id)
 
     async def last_cursor(self, tenant_id: TenantId, source_id: UUID) -> str | None:
         return await self.syncs.last_cursor(tenant_id, source_id)

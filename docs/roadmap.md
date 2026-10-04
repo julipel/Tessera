@@ -136,7 +136,10 @@
   `<root>/<tenant_id>/<source_id>/`, `SourceSpec` в интерфейсе коннектора (ADR-0012).
 - [x] **P4-03b Коннектор file: PDF/DOCX.** Парсеры в markdown (pypdf, python-docx).
 - [x] **P4-04 Коннектор table.** CSV/XLSX → Entity по маппингу колонок из конфига.
-- [ ] **P4-05 Коннектор website.** Sitemap + краулер с лимитами, извлечение основного контента.
+- [x] **P4-05a Коннектор website: разбор.** HTML → markdown (основной контент, ссылки,
+  meta robots), sitemap (`urlset`/`sitemapindex`/текст/gzip), нормализация URL.
+- [ ] **P4-05b Коннектор website: краулер.** httpx, robots.txt, лимиты, защита от SSRF,
+  sitemap + обход ссылок, кэш discover → fetch, ADR-0013.
 - [ ] **P4-06 Индексация в Qdrant.** Эмбеддинги (порт + реализация), dense+sparse, payload с tenant_id.
 - [ ] **P4-07 search_knowledge.** Гибридный поиск + RRF + опциональный реранкинг, компонент `sources`.
   DoD: тест изоляции тенантов в Qdrant, тест качества на мини-корпусе.

@@ -134,10 +134,13 @@ def _is_list_item(paragraph: Paragraph) -> bool:
 
 
 def _docx_table(table: Table) -> str:
-    rows = [
-        [" ".join(cell.text.split()).replace("|", "\\|") for cell in row.cells]
-        for row in table.rows
-    ]
+    return markdown_table([[cell.text for cell in row.cells] for row in table.rows])
+
+
+def markdown_table(rows: list[list[str]]) -> str:
+    """Markdown-таблица: первая строка — заголовок, пустые строки выкидываются, ширина — по
+    самой длинной строке. Пробелы в ячейках схлопываются, `|` экранируется."""
+    rows = [[" ".join(cell.split()).replace("|", "\\|") for cell in row] for row in rows]
     rows = [r for r in rows if any(r)]
     if not rows:
         return ""

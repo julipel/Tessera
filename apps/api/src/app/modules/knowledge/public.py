@@ -42,6 +42,11 @@ from app.modules.knowledge.domain.ports import (
 )
 from app.modules.knowledge.infrastructure.catalog import SqlCatalog
 from app.modules.knowledge.infrastructure.file_connector import FileConnector
+from app.modules.knowledge.infrastructure.http_api_connector import (
+    HttpApiConnector,
+    HttpApiSourceConfig,
+    HttpApiSourceError,
+)
 from app.modules.knowledge.infrastructure.http_reranker import HttpReranker, create_http_reranker
 from app.modules.knowledge.infrastructure.models import (
     ChunkRecord,
@@ -66,6 +71,7 @@ from app.modules.knowledge.infrastructure.repositories import (
     SourceSyncRepository,
 )
 from app.modules.knowledge.infrastructure.source_files import SourceFileError
+from app.modules.knowledge.infrastructure.source_secrets import SourceSecretError, SourceSecrets
 from app.modules.knowledge.infrastructure.sync_queue import SYNC_SOURCE_JOB, ArqSyncQueue
 from app.modules.knowledge.infrastructure.sync_store import SqlSyncStore
 from app.modules.knowledge.infrastructure.table_connector import (
@@ -105,6 +111,9 @@ __all__ = [
     "EntityRecord",
     "EntityRepository",
     "FileConnector",
+    "HttpApiConnector",
+    "HttpApiSourceConfig",
+    "HttpApiSourceError",
     "HttpReranker",
     "IndexedChunk",
     "IndexedDocument",
@@ -123,6 +132,8 @@ __all__ = [
     "SourceKind",
     "SourceRecord",
     "SourceRepository",
+    "SourceSecretError",
+    "SourceSecrets",
     "SourceSpec",
     "SourceStatus",
     "SourceSyncRecord",

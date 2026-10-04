@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.settings import Settings
+from app.settings import Settings, source_secrets_env
 
 
 def test_defaults_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -41,3 +41,13 @@ def test_seed_widget_key_read_from_env_file(
     env_file.write_text("SEED_WIDGET_KEY=wk_from_file\n")
 
     assert Settings(_env_file=env_file).seed_widget_key == "wk_from_file"
+
+
+def test_source_secrets_from_env_file_and_environ(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("SOURCE_SECRET_A=file\nSOURCE_SECRET_B=file\nOPENAI_API_KEY=sk\n")
+    environ = {"SOURCE_SECRET_B": "env", "DATABASE_URL": "pg://"}
+
+    secrets = source_secrets_env([env_file], environ)
+
+    assert secrets == {"SOURCE_SECRET_A": "file", "SOURCE_SECRET_B": "env"}

@@ -173,7 +173,7 @@ class SourceConnector(Protocol):  # knowledge/domain/ports.py
 `<KNOWLEDGE_FILES_DIR>/<tenant_id>/<source_id>/`, приводятся к markdown: DOCX — заголовки
 по стилям `Heading N`/`Title`, списки, таблицы; PDF — текст постранично, без заголовков
 и OCR; битый/зашифрованный/пустой файл — ошибка элемента), `table` (CSV/XLSX → Entity, см. ниже),
-`http_api` (декларативный маппинг), `database` (SQL-запрос из конфига, read-only).
+`http_api` (JSON API, см. ниже), `database` (SQL-запрос из конфига, read-only, P4-09b).
 
 Коннектор `table`: все `*.csv`/`*.xlsx` каталога источника (как у `file`), первая строка —
 заголовок, строка — Entity, `external_id` — значение колонки id (уникально в источнике).
@@ -193,6 +193,31 @@ config:
 удалил бы сущности файла). Пустой или повторяющийся id, пустое название, неразбираемые
 цена/наличие/валюта — ошибка элемента. Курсор — `mtime_ns`, как у `file`; `changed_since`
 отдаёт строки изменённых файлов.
+
+Коннектор `http_api` (P4-09a): только GET через `WebClient` (SSRF-защита и лимиты ADR-0013),
+ответ — JSON, записи — массив по пути `records`, запись — Entity или Document по маппингу
+путей (`price.value`, `images.0.url`; разбор значений общий с `table` — `entity_mapping`).
+```yaml
+config:
+  url: https://api.example.ru/v1/products
+  params: { lang: ru }
+  headers: { Accept: application/json }        # Authorization/Cookie — только через auth
+  auth: { type: bearer, secret_env: SOURCE_SECRET_ACME_API }   # bearer | header (+header) | basic
+  records: data.items                           # пусто — корень ответа
+  pagination: { type: page, param: page, start: 1, size_param: limit, page_size: 100,
+                max_pages: 100 }                # none | page | offset | cursor (cursor_path) | next_url (next_url_path)
+  max_records: 10000                            # потолок 100 000
+  entity: { entity_type: product, currency: RUB,
+            fields: { external_id: id, title: name, price: price.value, ... },
+            attributes: { brand: brand.name, volume_ml: { path: volume, type: number } } }
+  # или document: { external_id: slug, title: q, text: a, url: link }
+```
+Секреты — ссылки на env `SOURCE_SECRET_*` (ADR-0017). Редиректы и `next_url` — только на хост
+`url`. Конец пагинации: пустая или неполная (`< page_size`) страница, нет курсора/адреса.
+Ошибка синхронизации: неверный конфиг или секрет, не-2xx или не-JSON ответ любой страницы,
+нет массива `records`, больше `max_pages` страниц или `max_records` записей, повтор курсора.
+Пустой/повторяющийся id, пустое название или текст, нескалярное значение поля, неразбираемая
+цена — ошибка элемента. Курсора нет — каждая синхронизация полная, записи кэшируются для `fetch`.
 
 Коннектор `website` (P4-05c — краулер; сеть — P4-05b; разбор — P4-05a): страница — документ, `external_id`
 и `url` — нормализованный URL (`web_urls`: схема и хост в нижнем регистре, IDN → punycode,

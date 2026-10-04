@@ -20,10 +20,12 @@ from app.modules.knowledge.public import (
     ChunkIndex,
     Embedder,
     FileConnector,
+    HttpApiConnector,
     MarkdownChunker,
     OpenAIEmbedder,
     SourceConnector,
     SourceKind,
+    SourceSecrets,
     SqlSyncStore,
     TableConnector,
     WebClient,
@@ -34,7 +36,7 @@ from app.modules.knowledge.public import (
     run_sync,
 )
 from app.modules.shared.public import TenantId, create_engine, create_session_factory
-from app.settings import Settings
+from app.settings import Settings, source_secrets_env
 
 logger = structlog.get_logger(__name__)
 
@@ -47,6 +49,7 @@ def build_connectors(
         SourceKind.FILE: FileConnector(settings.knowledge_files_dir),
         SourceKind.TABLE: TableConnector(settings.knowledge_files_dir),
         SourceKind.WEBSITE: WebsiteConnector(web_client),
+        SourceKind.HTTP_API: HttpApiConnector(web_client, SourceSecrets(source_secrets_env())),
     }
 
 

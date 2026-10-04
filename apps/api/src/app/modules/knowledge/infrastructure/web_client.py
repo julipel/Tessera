@@ -8,7 +8,7 @@
 
 import asyncio
 import zlib
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -70,13 +70,16 @@ class WebClient:
         accept: Collection[str] | None = None,
         allowed_hosts: Collection[str] | None = None,
         truncate: bool = False,
+        headers: Mapping[str, str] | None = None,
     ) -> WebResponse:
         """GET `url`. `accept` — допустимые MIME-типы 2xx-ответа; `allowed_hosts` — хосты,
         на которые можно перейти по редиректу. Тело больше `max_bytes` — ошибка, а с
-        `truncate` — обрезается (`truncated=True`)."""
+        `truncate` — обрезается (`truncated=True`). `headers` — дополнительные заголовки
+        (User-Agent и Accept-Encoding задаёт клиент); с секретами в заголовках ограничивайте
+        редиректы `allowed_hosts`."""
         try:
             async with asyncio.timeout(self.timeout_s):
-                return await self._get(url, max_bytes, accept, allowed_hosts, truncate)
+                return await self._get(url, max_bytes, accept, allowed_hosts, truncate, headers)
         except TimeoutError as e:
             raise WebFetchError(f"{url}: нет ответа за {self.timeout_s} с") from e
         except BlockedAddressError as e:
@@ -91,9 +94,14 @@ class WebClient:
         accept: Collection[str] | None,
         allowed_hosts: Collection[str] | None,
         truncate: bool,
+        extra_headers: Mapping[str, str] | None,
     ) -> WebResponse:
         current = _checked_url(url)
-        headers = {"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"}
+        headers = {
+            **(extra_headers or {}),
+            "User-Agent": self.user_agent,
+            "Accept-Encoding": "gzip, deflate",
+        }
         for _ in range(self.max_redirects + 1):
             request = self.http.build_request("GET", current, headers=headers)
             response = await self.http.send(request, stream=True)

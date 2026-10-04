@@ -1,13 +1,18 @@
 """Настройки приложения из переменных окружения (и `.env` в корне репозитория)."""
 
+import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
 
 # src/app/settings.py → корень репозитория на 4 уровня выше пакета.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
+
+ENV_FILES: tuple[Path | str, ...] = (_REPO_ROOT / ".env", ".env")
+SOURCE_SECRET_PREFIX = "SOURCE_SECRET_"
 
 AppEnv = Literal["local", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
@@ -15,7 +20,7 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(_REPO_ROOT / ".env", ".env"),
+        env_file=ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -62,3 +67,19 @@ class Settings(BaseSettings):
     @property
     def is_local(self) -> bool:
         return self.app_env in ("local", "test")
+
+
+def source_secrets_env(
+    env_files: Sequence[Path | str] | None = ENV_FILES,
+    environ: Mapping[str, str] = os.environ,
+) -> dict[str, str]:
+    """Секреты источников знаний `SOURCE_SECRET_*` (ADR-0017) из `.env` и окружения;
+    окружение важнее. Полей в Settings у них нет: имена задаёт конфиг источника."""
+    dotenv = DotEnvSettingsSource(Settings, env_file=env_files).env_vars if env_files else {}
+    secrets = {
+        name.upper(): value
+        for name, value in dotenv.items()
+        if value is not None and name.upper().startswith(SOURCE_SECRET_PREFIX)
+    }
+    secrets.update({k: v for k, v in environ.items() if k.startswith(SOURCE_SECRET_PREFIX)})
+    return secrets

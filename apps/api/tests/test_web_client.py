@@ -170,3 +170,16 @@ async def test_network_errors_and_timeout() -> None:
     client = WebClient(http, user_agent="TesseraBot/0.1", timeout_s=0.05)
     with pytest.raises(WebFetchError, match="нет ответа"):
         await client.get("http://example.ru/", max_bytes=100)
+
+
+async def test_extra_headers_sent_on_every_redirect_hop() -> None:
+    routes = {
+        "https://example.ru/a": httpx.Response(302, headers={"Location": "/b"}),
+        "https://example.ru/b": httpx.Response(200, content=b"ok"),
+    }
+    client, seen = _client(_routes(routes))
+    await client.get(
+        "https://example.ru/a", max_bytes=10, headers={"X-Api-Key": "k", "Accept": "*/*"}
+    )
+    assert [r.headers["X-Api-Key"] for r in seen] == ["k", "k"]
+    assert seen[0].headers["User-Agent"] == "TesseraBot/0.1"

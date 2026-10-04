@@ -1,11 +1,12 @@
 """Настройки приложения из переменных окружения (и `.env` в корне репозитория)."""
 
+import ipaddress
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
 
 # src/app/settings.py → корень репозитория на 4 уровня выше пакета.
@@ -51,6 +52,9 @@ class Settings(BaseSettings):
     # Краулер источников `website` (ADR-0013).
     crawler_user_agent: str = "TesseraBot/0.1"
     crawler_timeout_s: float = 15.0
+    # Приватные подсети, к которым можно подключать источники `database` (ADR-0018), JSON-список
+    # CIDR. Публичные адреса разрешены всегда; локально — ["127.0.0.0/8"].
+    source_db_allowed_networks: list[str] = []
     # Ключ виджета, который `make seed` выдаёт новому тенанту; пусто — сгенерировать.
     seed_widget_key: str | None = None
     # Origin веб-чата для CORS (env — JSON-список). Origin виджетов тенантов — P5-06.
@@ -63,6 +67,13 @@ class Settings(BaseSettings):
     openai_compatible_base_url: str | None = None
     anthropic_api_key: SecretStr | None = None
     anthropic_base_url: str | None = None
+
+    @field_validator("source_db_allowed_networks")
+    @classmethod
+    def _check_networks(cls, values: list[str]) -> list[str]:
+        for value in values:
+            ipaddress.ip_network(value, strict=False)
+        return values
 
     @property
     def is_local(self) -> bool:

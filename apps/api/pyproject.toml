@@ -49,6 +49,11 @@ mypy_path = "src"
 files = ["src", "tests", "migrations", "evals"]
 plugins = ["pydantic.mypy"]
 
+# asyncpg без py.typed; коннектор `database` оборачивает его в типизированный код.
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Раннер эвалов (`evals/`, ADR-0011) лежит рядом с src и импортируется тестами.

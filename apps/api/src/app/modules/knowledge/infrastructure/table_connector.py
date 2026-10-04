@@ -15,7 +15,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -29,6 +29,7 @@ from app.modules.knowledge.domain.ingestion import (
     SourceSpec,
 )
 from app.modules.knowledge.infrastructure.entity_mapping import (
+    AttributeColumn,
     AttributeSpec,
     EntityFields,
     map_entity,
@@ -64,14 +65,6 @@ class TableColumns(EntityFields):
     """Нормализованное поле Entity → заголовок колонки."""
 
 
-class AttributeColumn(_Config):
-    column: str
-    type: Literal["string", "number", "boolean"] = "string"
-
-    def pair(self) -> tuple[str, Literal["string", "number", "boolean"]]:
-        return self.column, self.type
-
-
 class TableSourceConfig(_Config):
     """`Source.config` источника `table` (architecture.md §8)."""
 
@@ -84,7 +77,7 @@ class TableSourceConfig(_Config):
 
     def attribute_columns(self) -> dict[str, AttributeSpec]:
         return {
-            name: AttributeSpec(spec) if isinstance(spec, str) else AttributeSpec(*spec.pair())
+            name: AttributeSpec(spec) if isinstance(spec, str) else spec.spec()
             for name, spec in self.attributes.items()
         }
 

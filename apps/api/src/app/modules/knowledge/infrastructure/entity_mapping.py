@@ -41,6 +41,18 @@ class AttributeSpec:
     type: AttributeType = "string"
 
 
+class AttributeColumn(BaseModel):
+    """Атрибут из колонки (`table`, `database`): `{column, type}`."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    column: str
+    type: AttributeType = "string"
+
+    def spec(self) -> AttributeSpec:
+        return AttributeSpec(self.column, self.type)
+
+
 def map_entity(
     value: Callable[[str], Value],
     *,

@@ -51,3 +51,12 @@ def test_source_secrets_from_env_file_and_environ(tmp_path: Path) -> None:
     secrets = source_secrets_env([env_file], environ)
 
     assert secrets == {"SOURCE_SECRET_A": "file", "SOURCE_SECRET_B": "env"}
+
+
+def test_source_db_allowed_networks_validated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SOURCE_DB_ALLOWED_NETWORKS", '["10.20.0.0/16", "127.0.0.1/8"]')
+    assert Settings(_env_file=None).source_db_allowed_networks == ["10.20.0.0/16", "127.0.0.1/8"]
+
+    monkeypatch.setenv("SOURCE_DB_ALLOWED_NETWORKS", '["not-a-network"]')
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)

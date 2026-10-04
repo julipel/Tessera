@@ -18,6 +18,7 @@ from app.logs import configure_logging
 from app.modules.knowledge.public import (
     Chunker,
     ChunkIndex,
+    DatabaseConnector,
     Embedder,
     FileConnector,
     HttpApiConnector,
@@ -33,6 +34,7 @@ from app.modules.knowledge.public import (
     build_web_client,
     create_openai_embedder,
     create_qdrant_index,
+    parse_networks,
     run_sync,
 )
 from app.modules.shared.public import TenantId, create_engine, create_session_factory
@@ -45,11 +47,15 @@ def build_connectors(
     settings: Settings, web_client: WebClient
 ) -> dict[SourceKind, SourceConnector]:
     """Коннекторы источников по виду."""
+    secrets = SourceSecrets(source_secrets_env())
     return {
         SourceKind.FILE: FileConnector(settings.knowledge_files_dir),
         SourceKind.TABLE: TableConnector(settings.knowledge_files_dir),
         SourceKind.WEBSITE: WebsiteConnector(web_client),
-        SourceKind.HTTP_API: HttpApiConnector(web_client, SourceSecrets(source_secrets_env())),
+        SourceKind.HTTP_API: HttpApiConnector(web_client, secrets),
+        SourceKind.DATABASE: DatabaseConnector(
+            secrets, allowed_networks=parse_networks(settings.source_db_allowed_networks)
+        ),
     }
 
 

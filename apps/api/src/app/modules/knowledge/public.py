@@ -41,6 +41,12 @@ from app.modules.knowledge.domain.ports import (
     SyncStore,
 )
 from app.modules.knowledge.infrastructure.catalog import SqlCatalog
+from app.modules.knowledge.infrastructure.database_connector import (
+    DatabaseConnector,
+    DatabaseSourceConfig,
+    DatabaseSourceError,
+    parse_networks,
+)
 from app.modules.knowledge.infrastructure.file_connector import FileConnector
 from app.modules.knowledge.infrastructure.http_api_connector import (
     HttpApiConnector,
@@ -102,6 +108,9 @@ __all__ = [
     "ChunkRecord",
     "ChunkRepository",
     "Chunker",
+    "DatabaseConnector",
+    "DatabaseSourceConfig",
+    "DatabaseSourceError",
     "DocumentItem",
     "DocumentRecord",
     "DocumentRepository",
@@ -156,6 +165,7 @@ __all__ = [
     "create_http_reranker",
     "create_openai_embedder",
     "create_qdrant_index",
+    "parse_networks",
     "request_sync",
     "run_sync",
 ]

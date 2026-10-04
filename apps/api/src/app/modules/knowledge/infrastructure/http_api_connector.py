@@ -17,7 +17,6 @@
 import base64
 import json
 from collections import OrderedDict
-from dataclasses import dataclass
 from typing import Any, Literal, Self, cast
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -27,7 +26,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from app.modules.knowledge.domain.entities import SourceKind
 from app.modules.knowledge.domain.ingestion import (
-    DocumentItem,
     Listing,
     RawItem,
     RawItemRef,
@@ -38,8 +36,15 @@ from app.modules.knowledge.infrastructure.entity_mapping import (
     AttributeType,
     EntityFields,
     Value,
-    map_entity,
     text,
+)
+from app.modules.knowledge.infrastructure.record_mapping import (
+    DocumentFields,
+    EntityMapping,
+    ItemMapping,
+    MappedRecord,
+    Record,
+    map_records,
 )
 from app.modules.knowledge.infrastructure.source_secrets import SourceSecretError, SourceSecrets
 from app.modules.knowledge.infrastructure.web_client import WebClient, WebFetchError
@@ -124,20 +129,14 @@ class HttpEntityMapping(_Config):
     attributes: dict[str, str | HttpAttribute] = Field(default_factory=dict)
     currency: str | None = None  # если поля валюты нет или оно пустое
 
-    def attribute_specs(self) -> dict[str, AttributeSpec]:
-        return {
+    def to_mapping(self) -> EntityMapping:
+        attributes = {
             name: AttributeSpec(spec)
             if isinstance(spec, str)
             else AttributeSpec(spec.path, spec.type)
             for name, spec in self.attributes.items()
         }
-
-
-class HttpDocumentMapping(_Config):
-    external_id: str
-    title: str
-    text: str
-    url: str | None = None
+        return EntityMapping(self.entity_type, self.fields, attributes, self.currency)
 
 
 class HttpApiSourceConfig(_Config):
@@ -150,7 +149,7 @@ class HttpApiSourceConfig(_Config):
     records: str = ""
     pagination: HttpPagination = HttpPagination()
     entity: HttpEntityMapping | None = None
-    document: HttpDocumentMapping | None = None
+    document: DocumentFields | None = None
     max_records: int = Field(default=10_000, ge=1, le=MAX_RECORDS_CAP)
 
     @model_validator(mode="after")
@@ -162,20 +161,11 @@ class HttpApiSourceConfig(_Config):
             raise ValueError(f"заголовки {reserved} нельзя задавать (секреты — через auth)")
         return self
 
-    @property
-    def id_path(self) -> str:
+    def mapping(self) -> ItemMapping:
         if self.entity is not None:
-            return self.entity.fields.external_id
+            return self.entity.to_mapping()
         assert self.document is not None
-        return self.document.external_id
-
-
-@dataclass(frozen=True, slots=True)
-class _Record:
-    """Элемент записи или ошибка, которую `fetch` отдаст как ошибку элемента."""
-
-    item: RawItem | None
-    error: str | None = None
+        return self.document
 
 
 class HttpApiConnector:
@@ -192,7 +182,7 @@ class HttpApiConnector:
         self.secrets = secrets
         self.cache_size = cache_size
         # Записи последнего discover источника: fetch берёт их, не запрашивая API заново.
-        self._cache: OrderedDict[tuple[TenantId, UUID], dict[str, _Record]] = OrderedDict()
+        self._cache: OrderedDict[tuple[TenantId, UUID], dict[str, MappedRecord]] = OrderedDict()
 
     async def discover(self, source: SourceSpec) -> Listing:
         records = await self._load(source)
@@ -217,7 +207,7 @@ class HttpApiConnector:
             raise HttpApiSourceError(record.error)
         return record.item
 
-    async def _load(self, source: SourceSpec) -> dict[str, _Record]:
+    async def _load(self, source: SourceSpec) -> dict[str, MappedRecord]:
         config = _parse_config(source.config)
         start = normalize_url(config.url)
         if start is None:
@@ -244,7 +234,7 @@ class HttpApiConnector:
             raise HttpApiSourceError(
                 f"больше max_pages={config.pagination.max_pages} страниц: листинг неполный"
             )
-        return _map_records(config, records)
+        return map_records((_json_record(r) for r in records), config.mapping())
 
     def _auth_headers(self, auth: HttpAuth | None) -> dict[str, str]:
         if auth is None:
@@ -376,53 +366,10 @@ def _scalar_text(data: Any, path: str) -> str | None:
         raise HttpApiSourceError(str(e)) from e
 
 
-def _map_records(config: HttpApiSourceConfig, records: list[Any]) -> dict[str, _Record]:
-    id_path = config.id_path
-    result: dict[str, _Record] = {}
-    first: dict[str, int] = {}
-    for number, record in enumerate(records, start=1):
-        where = f"запись {number}"
-        try:
-            if not isinstance(record, dict):
-                raise ValueError("не объект")
-            external_id = text(_scalar(record, id_path))
-            if external_id is None:
-                raise ValueError(f"пустой id («{id_path}»)")
-        except ValueError as e:
-            result[f"#{number}"] = _Record(None, f"{where}: {e}")
-            continue
-        try:
-            item = _map_record(config, record, external_id)
-            entry = _Record(item)
-        except ValueError as e:
-            entry = _Record(None, f"{where}: {e}")
-        if external_id in result:
-            # Какая из записей с одним id верная, неизвестно: ошибка элемента для обеих.
-            error = f"id «{external_id}» повторяется: записи {first[external_id]}, {number}"
-            result[external_id] = _Record(None, error)
-            continue
-        result[external_id] = entry
-        first[external_id] = number
-    return result
+def _json_record(data: Any) -> Record:
+    def value(path: str) -> Value:
+        if not isinstance(data, dict):
+            raise ValueError("не объект")
+        return _scalar(data, path)
 
-
-def _map_record(config: HttpApiSourceConfig, record: dict[str, Any], external_id: str) -> RawItem:
-    if config.entity is not None:
-        return map_entity(
-            lambda path: _scalar(record, path),
-            entity_type=config.entity.entity_type,
-            external_id=external_id,
-            fields=config.entity.fields,
-            attributes=config.entity.attribute_specs(),
-            currency=config.entity.currency,
-        )
-    mapping = config.document
-    assert mapping is not None
-    title = text(_scalar(record, mapping.title))
-    if title is None:
-        raise ValueError(f"пустое название («{mapping.title}»)")
-    body = text(_scalar(record, mapping.text))
-    if body is None:
-        raise ValueError(f"пустой текст («{mapping.text}»)")
-    url = text(_scalar(record, mapping.url)) if mapping.url else None
-    return DocumentItem(external_id=external_id, title=title, text=body, url=url)
+    return value

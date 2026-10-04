@@ -173,7 +173,7 @@ class SourceConnector(Protocol):  # knowledge/domain/ports.py
 `<KNOWLEDGE_FILES_DIR>/<tenant_id>/<source_id>/`, приводятся к markdown: DOCX — заголовки
 по стилям `Heading N`/`Title`, списки, таблицы; PDF — текст постранично, без заголовков
 и OCR; битый/зашифрованный/пустой файл — ошибка элемента), `table` (CSV/XLSX → Entity, см. ниже),
-`http_api` (JSON API, см. ниже), `database` (SQL-запрос из конфига, read-only, P4-09b).
+`http_api` (JSON API, см. ниже), `database` (SQL-запрос к PostgreSQL, read-only, см. ниже).
 
 Коннектор `table`: все `*.csv`/`*.xlsx` каталога источника (как у `file`), первая строка —
 заголовок, строка — Entity, `external_id` — значение колонки id (уникально в источнике).
@@ -218,6 +218,27 @@ config:
 нет массива `records`, больше `max_pages` страниц или `max_records` записей, повтор курсора.
 Пустой/повторяющийся id, пустое название или текст, нескалярное значение поля, неразбираемая
 цена — ошибка элемента. Курсора нет — каждая синхронизация полная, записи кэшируются для `fetch`.
+
+Коннектор `database` (P4-09b, ADR-0018): PostgreSQL клиента через asyncpg, строка результата
+запроса — Entity или Document по маппингу колонок (общий разбор с `http_api` — `record_mapping`).
+```yaml
+config:
+  dsn_env: SOURCE_SECRET_ACME_DB   # postgresql://user:password@host:port/db, без параметров
+  query: "SELECT sku, name, price, qty FROM shop.products WHERE active"
+  sslmode: require                 # disable | require | verify-ca (имя хоста не сверяется)
+  timeout_s: 60                    # statement_timeout, ≤ 600
+  max_rows: 50000                  # потолок 200 000
+  entity: { entity_type: product, currency: RUB, fields: { external_id: sku, title: name, ... },
+            attributes: { brand: brand, volume_ml: { column: volume, type: number } } }
+  # или document: { external_id, title, text, url }
+```
+Адрес хоста резолвится коннектором: все адреса — публичные или из `SOURCE_DB_ALLOWED_NETWORKS`
+(env платформы, CIDR), подключение — к проверенному IP. Read-only: транзакция READ ONLY,
+`default_transaction_read_only`, запрос — подготовленный оператор (одна команда). Колонки
+маппинга проверяются по описанию результата до выполнения. Ошибка синхронизации: неверный
+конфиг, секрет, DSN или адрес, ошибка подключения/запроса, таймаут, больше `max_rows` строк,
+нет колонки. Пустой/повторяющийся id, нескалярное значение (массив, JSON-объект, bytea) —
+ошибка элемента. Курсора нет — каждая синхронизация полная, записи кэшируются для `fetch`.
 
 Коннектор `website` (P4-05c — краулер; сеть — P4-05b; разбор — P4-05a): страница — документ, `external_id`
 и `url` — нормализованный URL (`web_urls`: схема и хост в нижнем регистре, IDN → punycode,

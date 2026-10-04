@@ -171,7 +171,7 @@
   `table` на нём же), секреты источников — ссылки на env `SOURCE_SECRET_*` (ADR-0017),
   GET через `WebClient` (ADR-0013), путь к записям, пагинация page/offset/cursor/next_url.
   DoD: тесты на `httpx.MockTransport`, `run_sync` на Postgres.
-- [ ] **P4-09b Коннектор database.** PostgreSQL (asyncpg), SQL-запрос из конфига в READ ONLY
+- [x] **P4-09b Коннектор database.** PostgreSQL (asyncpg), SQL-запрос из конфига в READ ONLY
   транзакции, `statement_timeout`, лимит строк; адрес — публичный или из allowlist подсетей
   платформы (`SOURCE_DB_ALLOWED_NETWORKS`), ADR-0018. DoD: тесты на Postgres.
 - [ ] **P4-10 Загрузка данных пилота.** Все источники пилота проиндексированы. DoD: `make eval` —

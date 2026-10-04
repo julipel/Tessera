@@ -28,6 +28,11 @@ class WebFetchError(Exception):
     """Запрос не выполнен: сеть, запрещённый адрес, редиректы, тип или размер ответа."""
 
 
+class WebRejectedError(WebFetchError):
+    """Адрес или ответ не подходят по правилам клиента (запрещённый адрес, редирект за пределы
+    сайта, Content-Type, размер). В отличие от сбоев сети, повтор запроса не поможет."""
+
+
 @dataclass(frozen=True, slots=True)
 class WebResponse:
     """Ответ после редиректов. `url` — нормализованный адрес ответа; тело читается только
@@ -75,7 +80,7 @@ class WebClient:
         except TimeoutError as e:
             raise WebFetchError(f"{url}: нет ответа за {self.timeout_s} с") from e
         except BlockedAddressError as e:
-            raise WebFetchError(f"{url}: {e}") from e
+            raise WebRejectedError(f"{url}: {e}") from e
         except httpx.HTTPError as e:
             raise WebFetchError(f"{url}: {type(e).__name__}: {e}") from e
 
@@ -97,18 +102,18 @@ class WebClient:
                 if response.status_code in _REDIRECTS and location:
                     target = normalize_url(location, current)
                     if target is None:
-                        raise WebFetchError(f"{current}: редирект на {location!r}")
+                        raise WebRejectedError(f"{current}: редирект на {location!r}")
                     current = _checked_url(target)
                     if (
                         allowed_hosts is not None
                         and urlsplit(current).hostname not in allowed_hosts
                     ):
-                        raise WebFetchError(f"{url}: редирект за пределы сайта: {current}")
+                        raise WebRejectedError(f"{url}: редирект за пределы сайта: {current}")
                     continue
                 return await _read(response, current, max_bytes, accept, truncate)
             finally:
                 await response.aclose()
-        raise WebFetchError(f"{url}: больше {self.max_redirects} редиректов")
+        raise WebRejectedError(f"{url}: больше {self.max_redirects} редиректов")
 
 
 def build_web_client(*, user_agent: str, timeout_s: float = DEFAULT_TIMEOUT_S) -> WebClient:
@@ -120,9 +125,9 @@ def build_web_client(*, user_agent: str, timeout_s: float = DEFAULT_TIMEOUT_S) -
 def _checked_url(url: str) -> str:
     normalized = normalize_url(url)
     if normalized is None:
-        raise WebFetchError(f"{url!r}: не http(s)-URL")
+        raise WebRejectedError(f"{url!r}: не http(s)-URL")
     if urlsplit(normalized).port is not None:
-        raise WebFetchError(f"{url}: разрешены только порты 80 и 443")
+        raise WebRejectedError(f"{url}: разрешены только порты 80 и 443")
     return normalized
 
 
@@ -136,7 +141,7 @@ async def _read(
     content_type, charset = _content_type(response.headers.get("content-type"))
     ok = response.is_success
     if ok and accept is not None and content_type not in accept:
-        raise WebFetchError(f"{url}: неподходящий Content-Type {content_type!r}")
+        raise WebRejectedError(f"{url}: неподходящий Content-Type {content_type!r}")
     body, truncated = await _body(response, url, max_bytes, truncate) if ok else (b"", False)
     return WebResponse(
         url=url,
@@ -155,7 +160,7 @@ async def _body(
 ) -> tuple[bytes, bool]:
     encoding = response.headers.get("content-encoding", "identity").strip().lower()
     if encoding not in ("identity", "", *_DECODERS):
-        raise WebFetchError(f"{url}: неподдерживаемый Content-Encoding {encoding!r}")
+        raise WebRejectedError(f"{url}: неподдерживаемый Content-Encoding {encoding!r}")
     decoder = zlib.decompressobj(wbits=_DECODERS[encoding]) if encoding in _DECODERS else None
     body = bytearray()
     try:
@@ -173,7 +178,7 @@ async def _body(
         return bytes(body), False
     if truncate:
         return bytes(body[:max_bytes]), True
-    raise WebFetchError(f"{url}: ответ больше {max_bytes} байт")
+    raise WebRejectedError(f"{url}: ответ больше {max_bytes} байт")
 
 
 def _content_type(header: str | None) -> tuple[str | None, str | None]:

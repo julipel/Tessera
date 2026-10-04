@@ -140,7 +140,7 @@
   meta robots), sitemap (`urlset`/`sitemapindex`/текст/gzip), нормализация URL.
 - [x] **P4-05b Коннектор website: сеть.** HTTP-клиент на httpx с защитой от SSRF в сетевом
   бэкенде (DNS rebinding, редиректы), лимиты ответа, robots.txt (RFC 9309), ADR-0013.
-- [ ] **P4-05c Коннектор website: краулер.** `WebsiteConnector`: sitemap + обход ссылок,
+- [x] **P4-05c Коннектор website: краулер.** `WebsiteConnector`: sitemap + обход ссылок,
   лимиты обхода (страницы, глубина, время, Crawl-delay), кэш discover → fetch, подключение
   в воркере, настройки User-Agent/таймаута.
 - [ ] **P4-06 Индексация в Qdrant.** Эмбеддинги (порт + реализация), dense+sparse, payload с tenant_id.

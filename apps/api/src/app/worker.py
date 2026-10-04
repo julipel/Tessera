@@ -22,6 +22,9 @@ from app.modules.knowledge.public import (
     SourceKind,
     SqlSyncStore,
     TableConnector,
+    WebClient,
+    WebsiteConnector,
+    build_web_client,
     run_sync,
 )
 from app.modules.shared.public import TenantId, create_engine, create_session_factory
@@ -30,11 +33,14 @@ from app.settings import Settings
 logger = structlog.get_logger(__name__)
 
 
-def build_connectors(settings: Settings) -> dict[SourceKind, SourceConnector]:
+def build_connectors(
+    settings: Settings, web_client: WebClient
+) -> dict[SourceKind, SourceConnector]:
     """Коннекторы источников по виду."""
     return {
         SourceKind.FILE: FileConnector(settings.knowledge_files_dir),
         SourceKind.TABLE: TableConnector(settings.knowledge_files_dir),
+        SourceKind.WEBSITE: WebsiteConnector(web_client),
     }
 
 
@@ -68,12 +74,17 @@ async def startup(ctx: dict[str, Any]) -> None:
     engine = create_engine(settings.database_url, echo=settings.database_echo)
     ctx["engine"] = engine
     ctx["session_factory"] = create_session_factory(engine)
-    ctx["connectors"] = build_connectors(settings)
+    web_client = build_web_client(
+        user_agent=settings.crawler_user_agent, timeout_s=settings.crawler_timeout_s
+    )
+    ctx["web_client"] = web_client
+    ctx["connectors"] = build_connectors(settings, web_client)
     ctx["chunker"] = MarkdownChunker()
     logger.info("worker.started")
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
+    await ctx["web_client"].http.aclose()
     await ctx["engine"].dispose()
 
 

@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     # Файлы источников `file`: <dir>/<tenant_id>/<source_id>/ (ADR-0012).
     knowledge_files_dir: Path = _REPO_ROOT / "data" / "knowledge"
+    # Краулер источников `website` (ADR-0013).
+    crawler_user_agent: str = "TesseraBot/0.1"
+    crawler_timeout_s: float = 15.0
     # Ключ виджета, который `make seed` выдаёт новому тенанту; пусто — сгенерировать.
     seed_widget_key: str | None = None
     # Origin веб-чата для CORS (env — JSON-список). Origin виджетов тенантов — P5-06.

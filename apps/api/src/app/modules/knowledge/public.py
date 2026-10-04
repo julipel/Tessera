@@ -39,6 +39,12 @@ from app.modules.knowledge.infrastructure.table_connector import (
     TableSourceConfig,
     TableSourceError,
 )
+from app.modules.knowledge.infrastructure.web_client import WebClient, build_web_client
+from app.modules.knowledge.infrastructure.website_connector import (
+    WebsiteConnector,
+    WebsiteSourceConfig,
+    WebsiteSourceError,
+)
 
 __all__ = [
     "SYNC_SOURCE_JOB",
@@ -75,6 +81,11 @@ __all__ = [
     "TableConnector",
     "TableSourceConfig",
     "TableSourceError",
+    "WebClient",
+    "WebsiteConnector",
+    "WebsiteSourceConfig",
+    "WebsiteSourceError",
+    "build_web_client",
     "content_hash",
     "request_sync",
     "run_sync",

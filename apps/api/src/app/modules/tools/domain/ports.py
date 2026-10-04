@@ -1,6 +1,7 @@
 """Порты зависимостей встроенных инструментов (реализации — в других модулях, подключает
 тот, кто собирает агент)."""
 
+from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
@@ -24,3 +25,9 @@ class Catalog(Protocol):
     async def search(self, tenant_id: TenantId, query: CatalogQuery) -> CatalogPage: ...
 
     async def get(self, tenant_id: TenantId, entity_id: UUID) -> CatalogEntity | None: ...
+
+    async def get_many(
+        self, tenant_id: TenantId, entity_ids: Sequence[UUID]
+    ) -> list[CatalogEntity]:
+        """Найденные сущности тенанта в любом порядке; чужих и несуществующих нет."""
+        ...

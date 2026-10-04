@@ -404,6 +404,11 @@ async def test_search_and_get_isolate_tenants(
     assert await repo.get_catalog_entity(tenant_a, rows_b["b-cream"].id) is None
     got = await repo.get_catalog_entity(tenant_a, rows_a["cream-dry"].id)
     assert got is not None and got.title == "Крем для сухой кожи"
+    many = await repo.list_catalog_entities(
+        tenant_a, [rows_a["cream-dry"].id, rows_b["b-cream"].id, uuid4()]
+    )
+    assert [e.title for e in many] == ["Крем для сухой кожи"]
+    assert await repo.list_catalog_entities(tenant_a, []) == []
 
 
 async def test_sql_catalog_uses_own_sessions(

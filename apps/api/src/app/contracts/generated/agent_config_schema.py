@@ -121,6 +121,11 @@ EntityTypesAdditionalProperty = TypeAliasType(
 )
 
 
+AttributeLabelsAdditionalProperty = TypeAliasType(
+    "AttributeLabelsAdditionalProperty", Annotated[str, Field(min_length=1)]
+)
+
+
 class CatalogConfig(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -132,6 +137,10 @@ class CatalogConfig(BaseModel):
     filterable_attributes: list[str] | None = []
     """
     Имена полей Entity.attributes, по которым search_catalog принимает фильтры.
+    """
+    attribute_labels: dict[str, AttributeLabelsAdditionalProperty] | None = {}
+    """
+    Подписи атрибутов Entity.attributes для пользователя; show_entities(layout=comparison) выводит строки только для них, в этом порядке.
     """
 
 

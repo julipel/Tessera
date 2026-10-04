@@ -203,6 +203,12 @@
           "items": { "type": "string" },
           "description": "Имена полей Entity.attributes, по которым search_catalog принимает фильтры.",
           "default": []
+        },
+        "attribute_labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 },
+          "description": "Подписи атрибутов Entity.attributes для пользователя; show_entities(layout=comparison) выводит строки только для них, в этом порядке.",
+          "default": {}
         }
       },
       "additionalProperties": false

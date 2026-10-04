@@ -411,6 +411,12 @@ export interface CatalogConfig {
    * Имена полей Entity.attributes, по которым search_catalog принимает фильтры.
    */
   filterable_attributes?: string[];
+  /**
+   * Подписи атрибутов Entity.attributes для пользователя; show_entities(layout=comparison) выводит строки только для них, в этом порядке.
+   */
+  attribute_labels?: {
+    [k: string]: string;
+  };
 }
 /**
  * This interface was referenced by `AgentConfig`'s JSON-Schema
@@ -446,7 +452,10 @@ export interface ProductCard {
   title: string;
   subtitle?: string | null;
   image_url?: string | null;
-  price: Price;
+  /**
+   * Нет у позиции цены (услуга, «цена по запросу») — null.
+   */
+  price?: Price | null;
   badges?: string[];
   url?: string | null;
   actions?: Action[];

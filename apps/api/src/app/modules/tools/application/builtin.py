@@ -1,6 +1,7 @@
 """Встроенные инструменты ядра (contracts.md §4), включаемые тенанту через `tools.builtin`.
 
-Реализованы `update_dialog_state`, `search_knowledge`, `search_catalog` и `get_entity`;
+Реализованы `update_dialog_state`, `search_knowledge`, `search_catalog`, `get_entity` и
+`show_entities`;
 остальные имена из конфига пропускаются — их добавят следующие задачи. Инструменты с
 зависимостями подключаются, только если окружение их собрало: `search_knowledge` — поиск
 по знаниям (`knowledge`), каталог — `catalog`; иначе — предупреждение в лог.
@@ -19,6 +20,7 @@ from app.modules.tools.application.catalog import (
     search_catalog_tool,
 )
 from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
+from app.modules.tools.application.show_entities import SHOW_ENTITIES, show_entities_tool
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition
 from app.modules.tools.domain.ports import Catalog, KnowledgeSearcher
 from app.modules.tools.domain.result import ToolResult
@@ -54,10 +56,13 @@ def builtin_tools(
             catalog, c.knowledge.catalog if c.knowledge else None
         )
         factories[GET_ENTITY] = lambda c: get_entity_tool(catalog)
+        factories[SHOW_ENTITIES] = lambda c: show_entities_tool(
+            catalog, c.knowledge.catalog if c.knowledge else None
+        )
     enabled = config.tools.builtin or []
     if knowledge is None and SEARCH_KNOWLEDGE in enabled:
         logger.warning("tools.search_knowledge_unavailable", reason="поиск по знаниям не настроен")
-    if catalog is None and {SEARCH_CATALOG, GET_ENTITY} & set(enabled):
+    if catalog is None and {SEARCH_CATALOG, GET_ENTITY, SHOW_ENTITIES} & set(enabled):
         logger.warning("tools.catalog_unavailable", reason="каталог не подключён")
     return [factories[name](config) for name in enabled if name in factories]
 

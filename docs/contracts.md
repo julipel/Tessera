@@ -112,6 +112,7 @@ Discriminated union по полю `type`. Все URL и цены — из дан
   "badges": ["В наличии"], "url": "...",
   "actions": [ Action ] }
 ```
+`price` необязателен: у позиции без цены или валюты — `null`.
 ```json
 { "type": "product_carousel", "title": "Подходящие варианты", "items": [ ProductCard ] }
 ```
@@ -191,7 +192,7 @@ AgentConfig (лишний слот или неверный тип — `validatio
 | `search_knowledge(query, filters?, top_k?)` | гибридный поиск по документам, возвращает фрагменты + sources |
 | `search_catalog(query?, filters?, sort?, limit?)` | структурный поиск Entity: фильтры по полям и `filterable_attributes`, `query` — полнотекстовый (ADR-0016) |
 | `get_entity(entity_id)` | детали сущности; неизвестный id — `not_found` |
-| `show_entities(entity_ids, layout: "cards" \| "carousel" \| "comparison")` | UI-компоненты по id |
+| `show_entities(entity_ids, layout: "cards" \| "carousel" \| "comparison", title?)` | UI-компоненты по id из БД (ADR-0004) |
 | `update_dialog_state(slots?, facts?)` | запись собранной информации |
 | `show_form(form_key)` | форма из конфига тенанта |
 | `create_lead(fields)` | заявка (side_effect, requires_confirmation) |
@@ -256,6 +257,7 @@ knowledge:
   catalog:
     entity_types: { product: "товары", service: "услуги" }   # filters.type search_catalog — только эти
     filterable_attributes: [color, size, material]
+    attribute_labels: { color: "Цвет", size: "Размер" }   # строки comparison в show_entities
 branding:
   tokens: { primary: "#1F4FFF", radius: "12px", font: "Inter" }
   logo_url: "..."

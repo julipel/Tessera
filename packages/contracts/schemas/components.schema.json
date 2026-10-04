@@ -56,7 +56,11 @@
         "title": { "type": "string" },
         "subtitle": { "type": ["string", "null"], "default": null },
         "image_url": { "type": ["string", "null"], "default": null },
-        "price": { "$ref": "#/$defs/Price" },
+        "price": {
+          "description": "Нет у позиции цены (услуга, «цена по запросу») — null.",
+          "oneOf": [{ "$ref": "#/$defs/Price" }, { "type": "null" }],
+          "default": null
+        },
         "badges": {
           "type": "array",
           "items": { "type": "string" },
@@ -69,7 +73,7 @@
           "default": []
         }
       },
-      "required": ["type", "entity_id", "title", "price"],
+      "required": ["type", "entity_id", "title"],
       "additionalProperties": false
     },
     "ProductCarousel": {

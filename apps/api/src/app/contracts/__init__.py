@@ -13,9 +13,13 @@ from app.contracts.generated.agent_config_schema import (
 )
 from app.contracts.generated.components_schema import (
     Action,
+    ComparisonTable,
+    ComparisonTableRow,
     Component,
     FormField,
     Price,
+    ProductCard,
+    ProductCarousel,
     SourceItem,
     Sources,
 )
@@ -74,6 +78,8 @@ __all__ = [
     "ActionInput",
     "AgentConfig",
     "CatalogConfig",
+    "ComparisonTable",
+    "ComparisonTableRow",
     "Component",
     "ComponentBlock",
     "ComponentData",
@@ -97,6 +103,8 @@ __all__ = [
     "MessageBlock",
     "MessageHistory",
     "Price",
+    "ProductCard",
+    "ProductCarousel",
     "PublicAssistant",
     "PublicConfig",
     "ScenarioConfig",

@@ -3,6 +3,7 @@
 builtin_tools, агентный цикл на FakeLLM и сквозной вызов на Postgres."""
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -42,6 +43,7 @@ from app.modules.tenants.public import SqlTenantDirectory
 from app.modules.tools.public import (
     GET_ENTITY,
     SEARCH_CATALOG,
+    SHOW_ENTITIES,
     UPDATE_DIALOG_STATE,
     ToolContext,
     ToolDefinition,
@@ -51,6 +53,7 @@ from app.modules.tools.public import (
     builtin_tools,
     get_entity_tool,
     search_catalog_tool,
+    show_entities_tool,
 )
 
 TENANT = TenantId(uuid.uuid4())
@@ -82,6 +85,7 @@ class FakeCatalog:
     fail: bool = False
     searches: list[tuple[TenantId, CatalogQuery]] = field(default_factory=list)
     gets: list[tuple[TenantId, UUID]] = field(default_factory=list)
+    batches: list[tuple[TenantId, list[UUID]]] = field(default_factory=list)
 
     async def search(self, tenant_id: TenantId, query: CatalogQuery) -> CatalogPage:
         self.searches.append((tenant_id, query))
@@ -97,6 +101,15 @@ class FakeCatalog:
         if self.fail:
             raise CatalogError("connection refused")
         return next((e for e in self.entities if e.id == entity_id), None)
+
+    async def get_many(
+        self, tenant_id: TenantId, entity_ids: Sequence[UUID]
+    ) -> list[CatalogEntity]:
+        self.batches.append((tenant_id, list(entity_ids)))
+        if self.fail:
+            raise CatalogError("connection refused")
+        # Порядок каталога, а не запроса: инструмент сам расставляет позиции.
+        return [e for e in self.entities if e.id in entity_ids]
 
 
 def ctx(tenant_id: TenantId = TENANT) -> ToolContext:
@@ -327,7 +340,7 @@ def agent_config(builtin: list[str], knowledge: dict[str, Any] | None = None) ->
 def test_builtin_tools_need_catalog() -> None:
     config = AgentConfig.model_validate(
         agent_config(
-            [SEARCH_CATALOG, GET_ENTITY, UPDATE_DIALOG_STATE],
+            [SEARCH_CATALOG, GET_ENTITY, SHOW_ENTITIES, UPDATE_DIALOG_STATE],
             {"catalog": {"filterable_attributes": ["skin_type"]}},
         )
     )
@@ -335,7 +348,12 @@ def test_builtin_tools_need_catalog() -> None:
     with_catalog = builtin_tools(config, catalog=FakeCatalog())
     without = builtin_tools(config)
 
-    assert [t.name for t in with_catalog] == [SEARCH_CATALOG, GET_ENTITY, UPDATE_DIALOG_STATE]
+    assert [t.name for t in with_catalog] == [
+        SEARCH_CATALOG,
+        GET_ENTITY,
+        SHOW_ENTITIES,
+        UPDATE_DIALOG_STATE,
+    ]
     filters = with_catalog[0].parameters["properties"]["filters"]["properties"]
     assert list(filters["attributes"]["properties"]) == ["skin_type"]
     assert [t.name for t in without] == [UPDATE_DIALOG_STATE]
@@ -437,3 +455,18 @@ async def test_tools_over_sql_catalog(
     }
     assert isinstance(entity.content, dict) and entity.content["title"] == "Гель для жирной кожи"
     assert foreign.error is not None and foreign.error.code == "not_found"
+
+    shown = await call(
+        show_entities_tool(catalog),
+        {
+            "entity_ids": [str(rows["gel"].id), str(rows["foreign"].id), str(rows["cream"].id)],
+            "layout": "carousel",
+        },
+        tenant_id,
+    )
+    assert isinstance(shown.content, dict)
+    assert [item["title"] for item in shown.content["shown"]] == [
+        "Гель для жирной кожи",
+        "Крем для сухой кожи",
+    ]
+    assert shown.content["not_found"] == [str(rows["foreign"].id)]

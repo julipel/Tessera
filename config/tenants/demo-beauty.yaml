@@ -179,6 +179,23 @@ agent_config:
         - seasons
         - intensity
         - concentration
+      # Строки таблицы сравнения show_entities (layout=comparison), в этом порядке
+      attribute_labels:
+        brand: "Бренд"
+        product_type: "Тип средства"
+        skin_types: "Тип кожи"
+        concerns: "Проблемы"
+        key_ingredients: "Ключевые компоненты"
+        texture: "Текстура"
+        spf: "SPF"
+        fragrance_free: "Без отдушек"
+        contains_retinoids: "С ретиноидами"
+        families: "Семейства"
+        concentration: "Концентрация"
+        intensity: "Интенсивность"
+        longevity: "Стойкость"
+        seasons: "Сезоны"
+        volume_ml: "Объём, мл"
 
   branding:
     tokens: { primary: "#8C5A6B", radius: "12px", font: "Inter" }

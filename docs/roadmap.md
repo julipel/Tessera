@@ -188,7 +188,7 @@
 
 ## P5. Rich UI
 
-- [ ] **P5-01 show_entities.** Инструмент → product_card / product_carousel / comparison_table.
+- [x] **P5-01 show_entities.** Инструмент → product_card / product_carousel / comparison_table.
 - [ ] **P5-02 Рендер компонентов.** React-компоненты по сгенерированным типам, Storybook или
   демо-страница со всеми вариантами. DoD: Playwright-скриншоты.
 - [ ] **P5-03 Действия и быстрые ответы.** Action → `input.type=action`, suggestions,

@@ -13,6 +13,7 @@ from app.modules.tools.application.catalog import (
 )
 from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
 from app.modules.tools.application.registry import ToolRegistry
+from app.modules.tools.application.show_entities import SHOW_ENTITIES, show_entities_tool
 from app.modules.tools.domain.definition import (
     InvalidToolDefinitionError,
     ToolContext,
@@ -27,6 +28,7 @@ __all__ = [
     "GET_ENTITY",
     "SEARCH_CATALOG",
     "SEARCH_KNOWLEDGE",
+    "SHOW_ENTITIES",
     "UPDATE_DIALOG_STATE",
     "Catalog",
     "InvalidToolDefinitionError",
@@ -43,5 +45,6 @@ __all__ = [
     "get_entity_tool",
     "search_catalog_tool",
     "search_knowledge_tool",
+    "show_entities_tool",
     "update_dialog_state_tool",
 ]

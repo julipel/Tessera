@@ -235,6 +235,16 @@ class EntityRepository(_SourceItemRepository[EntityRecord]):
         record = await self.get(tenant_id, id)
         return to_catalog_entity(record) if record is not None else None
 
+    async def list_catalog_entities(
+        self, tenant_id: TenantId, ids: Sequence[UUID]
+    ) -> list[CatalogEntity]:
+        """Сущности тенанта по id, одним запросом; чужие и несуществующие пропускаются,
+        порядок не гарантирован."""
+        if not ids:
+            return []
+        records = await self.list(tenant_id, EntityRecord.id.in_(ids))
+        return [to_catalog_entity(record) for record in records]
+
 
 class ChunkRepository(TenantRepository[ChunkRecord]):
     model = ChunkRecord

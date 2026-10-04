@@ -42,7 +42,10 @@ class ProductCard(BaseModel):
     title: str
     subtitle: str | None = None
     image_url: str | None = None
-    price: Price
+    price: Price | None = None
+    """
+    Нет у позиции цены (услуга, «цена по запросу») — null.
+    """
     badges: list[str] | None = []
     url: str | None = None
     actions: Annotated[list[Action] | None, Field(validate_default=True)] = []

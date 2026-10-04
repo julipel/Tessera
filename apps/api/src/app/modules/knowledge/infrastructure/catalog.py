@@ -1,10 +1,11 @@
-"""Каталог тенанта для инструментов `search_catalog`/`get_entity` (порт tools `Catalog`).
+"""Каталог тенанта для инструментов `search_catalog`/`get_entity`/`show_entities` (порт tools
+`Catalog`).
 
 Каждый вызов — своя короткая сессия из фабрики: инструменты хода не делят `AsyncSession`
 стрима, где пишутся сообщения, и могут выполняться параллельно. Только чтение, commit нет.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -35,3 +36,12 @@ class SqlCatalog:
                 return await EntityRepository(session).get_catalog_entity(tenant_id, entity_id)
         except SQLAlchemyError as error:
             raise CatalogError(f"сущность каталога: {error}") from error
+
+    async def get_many(
+        self, tenant_id: TenantId, entity_ids: Sequence[UUID]
+    ) -> list[CatalogEntity]:
+        try:
+            async with self._session_factory() as session:
+                return await EntityRepository(session).list_catalog_entities(tenant_id, entity_ids)
+        except SQLAlchemyError as error:
+            raise CatalogError(f"сущности каталога: {error}") from error

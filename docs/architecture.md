@@ -343,7 +343,18 @@ Entity хранится в Postgres: нормализованные поля (`t
   category, url, attributes}]}` без пустых полей, пустая выдача — `note`, не ошибка.
   `get_entity(entity_id)` — то же плюс `type`, `image_url`; чужой/неизвестный/не-UUID id —
   `not_found`. `CatalogError` — `upstream_error` (retryable). UI-компонентов нет — их
-  отдаёт `show_entities` по id. `SqlCatalog` собирает `main.py` (`app.state.catalog`);
+  отдаёт `show_entities` по id.
+  `show_entities` (P5-01, tools `application/show_entities.py`, ADR-0004): `entity_ids`
+  (1–10, порядок показа), `layout` `cards` → по `product_card` на позицию, `carousel` → один
+  `product_carousel` (`title` — от модели), `comparison` → `comparison_table` для 2–5 позиций.
+  Сущности берутся одним запросом `Catalog.get_many` (`EntityRepository.list_catalog_entities`,
+  фильтр по тенанту). Карточка: `subtitle` — категория, бейдж наличия, `price` — только при
+  цене и валюте, иначе `null`; `actions` пусты (P5-03). Строки сравнения — цена, наличие,
+  категория и атрибуты из `knowledge.catalog.attribute_labels` в порядке конфига; строка,
+  пустая у всех, не выводится, пропуск — «—», списки — через запятую, boolean — да/нет.
+  Не найденные/чужие id — `not_found` в content модели; ни одного найденного — ошибка
+  `not_found`, для сравнения меньше двух — `validation_error`. Модели — `{layout, shown:[{id,
+  title}], not_found?}`, `state_patch.shown_entities` — показанные id. `SqlCatalog` собирает `main.py` (`app.state.catalog`);
   в раннере эвалов БД нет — инструменты каталога не подключаются (предупреждение в лог).
   `search_knowledge` (tools) зависит от порта `KnowledgeSearcher` (tools.domain, типы из
   `knowledge.kernel` — ADR-0008); `KnowledgeSearch` подставляет сборщик агента

@@ -129,6 +129,19 @@ def test_attributes_schema_lists_only_filterable_attributes() -> None:
     assert "attributes" not in without.parameters["properties"]["filters"]["properties"]
 
 
+async def test_type_enum_from_entity_types() -> None:
+    types = {"skincare": "уход за лицом", "fragrance": "парфюмерия"}
+    with_types = search_catalog_tool(FakeCatalog(), CatalogConfig(entity_types=types))
+    without = search_tool(FakeCatalog())
+
+    type_schema = with_types.parameters["properties"]["filters"]["properties"]["type"]
+    assert type_schema["enum"] == ["skincare", "fragrance"]
+    assert "skincare — уход за лицом" in type_schema["description"]
+    assert "enum" not in without.parameters["properties"]["filters"]["properties"]["type"]
+    result = await call(with_types, {"filters": {"type": "product"}})
+    assert result.error is not None and result.error.code == "validation_error"
+
+
 async def test_arguments_become_catalog_query() -> None:
     catalog = FakeCatalog()
     arguments = {

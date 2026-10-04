@@ -192,6 +192,12 @@
     "CatalogConfig": {
       "type": "object",
       "properties": {
+        "entity_types": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 },
+          "description": "Типы позиций каталога (Entity.type) → описание для модели; search_catalog принимает filters.type только из них.",
+          "default": {}
+        },
         "filterable_attributes": {
           "type": "array",
           "items": { "type": "string" },

@@ -402,6 +402,12 @@ export interface KnowledgeSearchConfig {
  */
 export interface CatalogConfig {
   /**
+   * Типы позиций каталога (Entity.type) → описание для модели; search_catalog принимает filters.type только из них.
+   */
+  entity_types?: {
+    [k: string]: string;
+  };
+  /**
    * Имена полей Entity.attributes, по которым search_catalog принимает фильтры.
    */
   filterable_attributes?: string[];

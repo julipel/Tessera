@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import TypeAliasType
 
 from . import components_schema, tools_schema
 
@@ -115,10 +116,19 @@ class KnowledgeSearchConfig(BaseModel):
     rerank: bool | None = True
 
 
+EntityTypesAdditionalProperty = TypeAliasType(
+    "EntityTypesAdditionalProperty", Annotated[str, Field(min_length=1)]
+)
+
+
 class CatalogConfig(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
+    entity_types: dict[str, EntityTypesAdditionalProperty] | None = {}
+    """
+    Типы позиций каталога (Entity.type) → описание для модели; search_catalog принимает filters.type только из них.
+    """
     filterable_attributes: list[str] | None = []
     """
     Имена полей Entity.attributes, по которым search_catalog принимает фильтры.

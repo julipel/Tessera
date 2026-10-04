@@ -51,6 +51,7 @@ _SCALAR: dict[str, Any] = {"type": ["string", "number", "boolean"]}
 
 def search_catalog_tool(catalog: Catalog, settings: CatalogConfig | None = None) -> ToolDefinition:
     attributes = (settings.filterable_attributes if settings else None) or []
+    entity_types = (settings.entity_types if settings else None) or {}
     return ToolDefinition(
         name=SEARCH_CATALOG,
         description=_SEARCH_DESCRIPTION,
@@ -62,7 +63,7 @@ def search_catalog_tool(catalog: Catalog, settings: CatalogConfig | None = None)
                     "minLength": 1,
                     "description": "Слова для поиска по названию, категории и характеристикам.",
                 },
-                "filters": _filters_schema(attributes),
+                "filters": _filters_schema(attributes, entity_types),
                 "sort": {
                     "type": "string",
                     "enum": [s.value for s in CatalogSort],
@@ -99,9 +100,19 @@ def get_entity_tool(catalog: Catalog) -> ToolDefinition:
     )
 
 
-def _filters_schema(attributes: Iterable[str]) -> dict[str, Any]:
+def _filters_schema(
+    attributes: Iterable[str], entity_types: Mapping[str, str] | None = None
+) -> dict[str, Any]:
+    """`type` — enum из `knowledge.catalog.entity_types`: иначе модель угадывает тип позиции
+    и с несуществующим получает пустую выдачу."""
+    type_schema: dict[str, Any] = {"type": "string", "description": "Тип позиции каталога."}
+    if entity_types:
+        type_schema["enum"] = list(entity_types)
+        type_schema["description"] = "Тип позиции: " + "; ".join(
+            f"{key} — {description}" for key, description in entity_types.items()
+        )
     properties: dict[str, Any] = {
-        "type": {"type": "string", "description": "Тип позиции, например product или service."},
+        "type": type_schema,
         "category": {
             "type": "array",
             "items": {"type": "string", "minLength": 1},

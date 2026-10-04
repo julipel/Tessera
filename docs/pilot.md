@@ -175,6 +175,11 @@ fragrance_free, contains_retinoids, gender, families, seasons, intensity, concen
 
 Маппинг колонок CSV → Entity задаётся в конфиге источника (P4-04).
 
+Сейчас (P4-10c) — вариант Б: `data/pilot/demo-beauty/kb/*.md` (15 страниц из §4) и каталог
+из 99 вымышленных позиций в трёх таблицах `data/pilot/demo-beauty/catalog/{skincare,fragrance,
+gift_sets}` — у источника `table` один `entity_type`. Источники и маппинг — секция `sources` в
+`config/tenants/demo-beauty.yaml` (ADR-0019); загрузка — `make up && make pilot`.
+
 ## 9. Критерии успеха пилота
 
 | Метрика | Цель |

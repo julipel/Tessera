@@ -253,7 +253,9 @@ forms:
   contact: { title: "...", fields: [...] }
 knowledge:
   search_knowledge: { top_k: 6, rerank: true }
-  catalog: { filterable_attributes: [color, size, material] }
+  catalog:
+    entity_types: { product: "товары", service: "услуги" }   # filters.type search_catalog — только эти
+    filterable_attributes: [color, size, material]
 branding:
   tokens: { primary: "#1F4FFF", radius: "12px", font: "Inter" }
   logo_url: "..."

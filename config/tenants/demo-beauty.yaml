@@ -162,7 +162,11 @@ agent_config:
   knowledge:
     search_knowledge: { top_k: 6, rerank: true }
     catalog:
-      # docs/pilot.md §3
+      # docs/pilot.md §3; типы — entity_type источников каталога ниже
+      entity_types:
+        skincare: "уход за лицом: очищение, тонеры, сыворотки, кремы, SPF, маски, уход за кожей вокруг глаз"
+        fragrance: "парфюмерия и миниатюры ароматов"
+        gift_set: "подарочные наборы"
       filterable_attributes:
         - skin_types
         - concerns
@@ -179,3 +183,93 @@ agent_config:
   branding:
     tokens: { primary: "#8C5A6B", radius: "12px", font: "Inter" }
     logo_url: null
+
+# Источники пилота (ADR-0019): `make pilot` — seed и индексация. Данные демо — data/pilot/demo-beauty.
+# Каталог — три таблицы: у источника table один entity_type, набор атрибутов у типов разный.
+sources:
+  - name: kb
+    kind: file
+    files: ../../data/pilot/demo-beauty/kb
+
+  - name: catalog-skincare
+    kind: table
+    files: ../../data/pilot/demo-beauty/catalog/skincare
+    config:
+      entity_type: skincare
+      currency: RUB
+      delimiter: ","
+      columns:
+        external_id: "Артикул"
+        title: "Название"
+        price: "Цена"
+        in_stock: "В наличии"
+        category: "Категория"
+        url: "Ссылка"
+      attributes:
+        brand: "Бренд"
+        description: "Описание"
+        product_type: "Тип средства"
+        skin_types: { column: "Тип кожи", type: list }
+        concerns: { column: "Проблемы", type: list }
+        key_ingredients: { column: "Ключевые компоненты", type: list }
+        routine_time: "Время применения"
+        texture: "Текстура"
+        volume_ml: { column: "Объём, мл", type: number }
+        spf: { column: "SPF", type: number }
+        fragrance_free: { column: "Без отдушек", type: boolean }
+        contains_retinoids: { column: "С ретиноидами", type: boolean }
+        contains_acids: { column: "С кислотами", type: boolean }
+        alcohol_free: { column: "Без спирта", type: boolean }
+        inci: "Состав (INCI)"
+        usage: "Способ применения"
+
+  - name: catalog-fragrance
+    kind: table
+    files: ../../data/pilot/demo-beauty/catalog/fragrance
+    config:
+      entity_type: fragrance
+      currency: RUB
+      delimiter: ","
+      columns:
+        external_id: "Артикул"
+        title: "Название"
+        price: "Цена"
+        in_stock: "В наличии"
+        category: "Категория"
+        url: "Ссылка"
+      attributes:
+        brand: "Бренд"
+        description: "Описание"
+        gender: "Пол"
+        families: { column: "Семейства", type: list }
+        notes_top: { column: "Верхние ноты", type: list }
+        notes_heart: { column: "Ноты сердца", type: list }
+        notes_base: { column: "Базовые ноты", type: list }
+        concentration: "Концентрация"
+        volume_ml: { column: "Объём, мл", type: number }
+        seasons: { column: "Сезоны", type: list }
+        occasions: { column: "Поводы", type: list }
+        intensity: "Интенсивность"
+        longevity: "Стойкость"
+        sample_available: { column: "Есть пробник", type: boolean }
+
+  - name: catalog-gift-sets
+    kind: table
+    files: ../../data/pilot/demo-beauty/catalog/gift_sets
+    config:
+      entity_type: gift_set
+      currency: RUB
+      delimiter: ","
+      columns:
+        external_id: "Артикул"
+        title: "Название"
+        price: "Цена"
+        in_stock: "В наличии"
+        category: "Категория"
+        url: "Ссылка"
+      attributes:
+        brand: "Бренд"
+        description: "Описание"
+        for: "Для кого"
+        includes: "Состав набора"
+        gift_wrap: { column: "Подарочная упаковка", type: boolean }

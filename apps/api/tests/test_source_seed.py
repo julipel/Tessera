@@ -114,6 +114,16 @@ sources:
     assert "sources" not in spec.config_json()
 
 
+TENANTS_DIR = Path(__file__).resolve().parents[3] / "config" / "tenants"
+
+
+@pytest.mark.parametrize("path", sorted(TENANTS_DIR.glob("*.yaml")), ids=lambda p: p.stem)
+def test_tenant_file_sources_are_valid(path: Path) -> None:
+    spec = load_tenant_spec(path.read_text(encoding="utf-8"))
+    for declaration in parse_source_declarations(spec.sources, path.parent):
+        validate_source_config(declaration.kind, declaration.config)
+
+
 @pytest.mark.parametrize(
     ("kind", "config", "message"),
     [

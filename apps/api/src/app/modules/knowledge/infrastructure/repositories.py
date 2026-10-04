@@ -173,25 +173,32 @@ class ChunkRepository(TenantRepository[ChunkRecord]):
 
     async def replace_for_document(
         self, tenant_id: TenantId, document_id: UUID, chunks: Sequence[ChunkDraft]
-    ) -> None:
+    ) -> list[UUID]:
+        """Заменить чанки документа; id новых чанков в порядке `chunks`."""
         await self.session.execute(
             delete(ChunkRecord).where(
                 ChunkRecord.tenant_id == tenant_id, ChunkRecord.document_id == document_id
             )
         )
-        if chunks:
-            await self.session.execute(
-                insert(ChunkRecord).values(
-                    [
-                        {
-                            "tenant_id": tenant_id,
-                            "document_id": document_id,
-                            "ord": c.ord,
-                            "section": c.section,
-                            "text": c.text,
-                            "token_count": c.token_count,
-                        }
-                        for c in chunks
-                    ]
-                )
+        if not chunks:
+            return []
+        rows = await self.session.execute(
+            insert(ChunkRecord)
+            .values(
+                [
+                    {
+                        "tenant_id": tenant_id,
+                        "document_id": document_id,
+                        "ord": c.ord,
+                        "section": c.section,
+                        "text": c.text,
+                        "token_count": c.token_count,
+                    }
+                    for c in chunks
+                ]
             )
+            .returning(ChunkRecord.ord, ChunkRecord.id)
+        )
+        # Порядок строк RETURNING в многострочном INSERT не гарантирован — сопоставляем по ord.
+        ids_by_ord: dict[int, UUID] = {ord_: id_ for ord_, id_ in rows}
+        return [ids_by_ord[c.ord] for c in chunks]

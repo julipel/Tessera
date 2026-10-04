@@ -103,6 +103,14 @@ class ChunkDraft:
 
 
 @dataclass(frozen=True, slots=True)
+class SavedDocument:
+    """Сохранённый документ: id записи и id его чанков в порядке `ord`."""
+
+    document_id: UUID
+    chunk_ids: list[UUID]
+
+
+@dataclass(frozen=True, slots=True)
 class SyncJob:
     """Синхронизация вместе с конфигом её источника."""
 

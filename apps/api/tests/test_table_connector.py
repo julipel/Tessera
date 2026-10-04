@@ -32,6 +32,7 @@ from app.modules.knowledge.public import (
 )
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import SqlTenantDirectory
+from knowledge_fakes import FakeEmbedder, InMemoryChunkIndex
 
 CONFIG: dict[str, Any] = {
     "entity_type": "product",
@@ -275,6 +276,8 @@ async def test_sync_stores_entities(tmp_path: Path, db_session: AsyncSession) ->
             SqlSyncStore(db_session),
             {SourceKind.TABLE: connector},
             MarkdownChunker(),
+            embedder=FakeEmbedder(),
+            index=InMemoryChunkIndex(),
             full=full,
         )
         record = await SourceSyncRepository(db_session).get_or_raise(tenant_id, sync_id)

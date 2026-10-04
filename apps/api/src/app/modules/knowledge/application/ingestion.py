@@ -1,27 +1,43 @@
-"""Пайплайн синхронизации источника: коннектор → нормализованные элементы → Postgres.
+"""Пайплайн синхронизации источника: коннектор → нормализованные элементы → Postgres + Qdrant.
 
 Статусы `SourceSync`: pending → running → succeeded | failed. Каждый элемент коммитится
 отдельно: сбой одного элемента не откатывает остальные и не валит синхронизацию.
 Элемент с тем же content_hash не перезаписывается (дедупликация).
+
+Документ: чанки → эмбеддинги (до записи в БД, чтобы не держать транзакцию на сетевом
+вызове) → Postgres → точки в индексе → commit. Сбой эмбеддера или индекса — ошибка элемента
+с откатом Postgres: content_hash не сохранён, следующая синхронизация повторит. Точки,
+записанные до отката, заменит следующая запись документа (ключ — external_id, ADR-0014).
+Пропавшие документы удаляются сначала из индекса, затем из Postgres: иначе сбой оставил бы
+в поиске точки без записей.
 """
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from uuid import UUID
 
 import structlog
 
 from app.modules.knowledge.domain.entities import SourceKind, SyncStatus
 from app.modules.knowledge.domain.errors import NoConnectorError
+from app.modules.knowledge.domain.indexing import IndexedChunk, IndexedDocument
 from app.modules.knowledge.domain.ingestion import (
     DocumentItem,
     ItemKey,
+    ItemKind,
     SourceSpec,
     SyncJob,
     SyncStats,
     content_hash,
     item_key,
 )
-from app.modules.knowledge.domain.ports import Chunker, SourceConnector, SyncStore
+from app.modules.knowledge.domain.ports import (
+    Chunker,
+    ChunkIndex,
+    Embedder,
+    SourceConnector,
+    SyncStore,
+)
 from app.modules.shared.kernel import NotFoundError, TenantId
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +52,8 @@ async def run_sync(
     connectors: Mapping[SourceKind, SourceConnector],
     chunker: Chunker,
     *,
+    embedder: Embedder,
+    index: ChunkIndex,
     full: bool = False,
 ) -> None:
     """Выполнить синхронизацию `sync_id`. Без `full` при наличии курсора последней успешной
@@ -59,7 +77,9 @@ async def run_sync(
 
     stats = SyncStats()
     try:
-        cursor = await _ingest(tenant_id, job, store, connectors, chunker, stats, full=full)
+        cursor = await _ingest(
+            tenant_id, job, store, connectors, _Indexing(chunker, embedder, index), stats, full=full
+        )
     except Exception as e:
         await store.rollback()
         await store.finish(
@@ -79,7 +99,7 @@ async def _ingest(
     job: SyncJob,
     store: SyncStore,
     connectors: Mapping[SourceKind, SourceConnector],
-    chunker: Chunker,
+    indexing: "_Indexing",
     stats: SyncStats,
     *,
     full: bool,
@@ -111,8 +131,7 @@ async def _ingest(
                 stats.unchanged += 1
                 continue
             if isinstance(item, DocumentItem):
-                chunks = chunker.chunk(item.text)
-                await store.save_document(tenant_id, job.source_id, item, digest, chunks)
+                await indexing.save_document(tenant_id, job.source_id, store, item, digest)
             else:
                 await store.save_entity(tenant_id, job.source_id, item, digest)
             await store.commit()
@@ -131,7 +150,41 @@ async def _ingest(
         # неизвестен, а сам он в источнике есть.
         stale = [k for k in known if k not in seen and k.external_id not in failed_ids]
         if stale:
+            documents = [k.external_id for k in stale if k.kind is ItemKind.DOCUMENT]
+            if documents:
+                await indexing.index.delete_documents(tenant_id, job.source_id, documents)
             stats.deleted = await store.delete_items(tenant_id, job.source_id, stale)
             await store.commit()
 
     return listing.cursor if listing.cursor is not None else previous
+
+
+@dataclass(frozen=True, slots=True)
+class _Indexing:
+    chunker: Chunker
+    embedder: Embedder
+    index: ChunkIndex
+
+    async def save_document(
+        self,
+        tenant_id: TenantId,
+        source_id: UUID,
+        store: SyncStore,
+        item: DocumentItem,
+        digest: str,
+    ) -> None:
+        """Записать документ в Postgres и его чанки в индекс (без commit)."""
+        chunks = self.chunker.chunk(item.text)
+        vectors = await self.embedder.embed([c.text for c in chunks])
+        saved = await store.save_document(tenant_id, source_id, item, digest, chunks)
+        indexed = IndexedDocument(
+            document_id=saved.document_id,
+            external_id=item.external_id,
+            title=item.title,
+            url=item.url,
+            chunks=[
+                IndexedChunk(chunk_id, c.ord, c.text, vector, c.section)
+                for chunk_id, c, vector in zip(saved.chunk_ids, chunks, vectors, strict=True)
+            ],
+        )
+        await self.index.replace_document(tenant_id, source_id, indexed)

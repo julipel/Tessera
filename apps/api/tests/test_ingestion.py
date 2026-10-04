@@ -1,4 +1,5 @@
-"""Ingestion-пайплайн на фейковом коннекторе: статусы, дедупликация, удаления, изоляция."""
+"""Ingestion-пайплайн на фейковом коннекторе: статусы, дедупликация, удаления, изоляция,
+индексация чанков (фейковые эмбеддер и индекс)."""
 
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
@@ -9,9 +10,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.knowledge.public import (
+    ChunkIndex,
     ChunkRepository,
     DocumentItem,
     DocumentRepository,
+    Embedder,
     EntityItem,
     EntityRepository,
     Listing,
@@ -32,6 +35,7 @@ from app.modules.knowledge.public import (
 )
 from app.modules.shared.public import NotFoundError, TenantId, TenantMismatchError
 from app.modules.tenants.public import SqlTenantDirectory
+from knowledge_fakes import FakeEmbedder, InMemoryChunkIndex
 
 
 class FetchError(Exception):
@@ -92,21 +96,35 @@ class Env:
     tenant_id: TenantId
     source_id: UUID
     connector: FakeConnector
+    embedder: FakeEmbedder
+    index: InMemoryChunkIndex
 
-    async def sync(self, *, full: bool = False, connector: SourceConnector | None = None) -> UUID:
+    async def sync(self, *, full: bool = False) -> UUID:
         sync = await SourceSyncRepository(self.session).add(
             self.tenant_id, SourceSyncRecord(tenant_id=self.tenant_id, source_id=self.source_id)
         )
         sync_id = sync.id  # rollback внутри run_sync протухает ORM-объекты сессии
+        await self.run(sync_id, {SourceKind.FILE: self.connector}, full=full)
+        return sync_id
+
+    async def run(
+        self,
+        sync_id: UUID,
+        connectors: dict[SourceKind, SourceConnector],
+        *,
+        tenant_id: TenantId | None = None,
+        full: bool = False,
+    ) -> None:
         await run_sync(
-            self.tenant_id,
+            tenant_id or self.tenant_id,
             sync_id,
             SqlSyncStore(self.session),
-            {SourceKind.FILE: connector or self.connector},
+            connectors,
             MarkdownChunker(max_tokens=2, overlap_tokens=0),
+            embedder=self.embedder,
+            index=self.index,
             full=full,
         )
-        return sync_id
 
     async def sync_record(self, sync_id: UUID) -> SourceSyncRecord:
         record = await SourceSyncRepository(self.session).get_or_raise(self.tenant_id, sync_id)
@@ -127,12 +145,21 @@ class Env:
         return [c.text for c in chunks]
 
 
-async def _env(session: AsyncSession, slug: str = "tenant-a") -> Env:
+async def _env(
+    session: AsyncSession, slug: str = "tenant-a", index: InMemoryChunkIndex | None = None
+) -> Env:
     tenant_id = (await SqlTenantDirectory(session).create(slug, slug)).id
     source = await SourceRepository(session).add(
         tenant_id, SourceRecord(tenant_id=tenant_id, kind=SourceKind.FILE, config={"path": slug})
     )
-    return Env(session, tenant_id, source.id, FakeConnector())
+    return Env(
+        session,
+        tenant_id,
+        source.id,
+        FakeConnector(),
+        FakeEmbedder(),
+        index or InMemoryChunkIndex(),
+    )
 
 
 @pytest.fixture
@@ -247,7 +274,7 @@ async def test_unknown_source_kind_marks_sync_failed(env: Env) -> None:
     sync = await SourceSyncRepository(env.session).add(
         env.tenant_id, SourceSyncRecord(tenant_id=env.tenant_id, source_id=env.source_id)
     )
-    await run_sync(env.tenant_id, sync.id, SqlSyncStore(env.session), {}, MarkdownChunker())
+    await env.run(sync.id, {})
 
     record = await env.sync_record(sync.id)
     assert record.status is SyncStatus.FAILED
@@ -307,13 +334,7 @@ async def test_finished_sync_is_not_rerun(env: Env) -> None:
     sync_id = await env.sync()
     env.connector.calls.clear()
 
-    await run_sync(
-        env.tenant_id,
-        sync_id,
-        SqlSyncStore(env.session),
-        {SourceKind.FILE: env.connector},
-        MarkdownChunker(),
-    )
+    await env.run(sync_id, {SourceKind.FILE: env.connector})
 
     assert env.connector.calls == []
 
@@ -326,18 +347,13 @@ async def test_sync_of_other_tenant_is_not_found(db_session: AsyncSession) -> No
     )
 
     with pytest.raises(NotFoundError):
-        await run_sync(
-            a.tenant_id,
-            b_sync.id,
-            SqlSyncStore(db_session),
-            {SourceKind.FILE: a.connector},
-            MarkdownChunker(),
-        )
+        await a.run(b_sync.id, {SourceKind.FILE: a.connector})
 
 
 async def test_sync_does_not_touch_other_tenant(db_session: AsyncSession) -> None:
-    a = await _env(db_session, "tenant-a")
-    b = await _env(db_session, "tenant-b")
+    index = InMemoryChunkIndex()
+    a = await _env(db_session, "tenant-a", index)
+    b = await _env(db_session, "tenant-b", index)
     b.connector.put(doc("faq"))
     await b.sync()
     # Тот же external_id у тенанта A — отдельная запись; пустой листинг A не удаляет данные B.
@@ -349,6 +365,8 @@ async def test_sync_does_not_touch_other_tenant(db_session: AsyncSession) -> Non
     assert set(await a.documents()) == set()
     assert set(await b.documents()) == {"faq"}
     assert await b.chunk_texts("faq") == ["Первый абзац.", "Второй абзац."]
+    assert index.external_ids(a.tenant_id) == set()
+    assert index.external_ids(b.tenant_id) == {"faq"}
 
 
 async def test_upsert_into_foreign_source_is_rejected(db_session: AsyncSession) -> None:
@@ -359,6 +377,119 @@ async def test_upsert_into_foreign_source_is_rejected(db_session: AsyncSession) 
 
     with pytest.raises(TenantMismatchError):
         await store.save_document(a.tenant_id, b.source_id, doc("faq"), "2" * 64, [])
+
+
+# --- индексация чанков ---
+
+
+async def chunk_ids(env: Env, external_id: str) -> list[UUID]:
+    document = (await env.documents())[external_id]
+    return [c.id for c in await ChunkRepository(env.session).list_for(env.tenant_id, document.id)]
+
+
+async def test_document_chunks_are_indexed(env: Env) -> None:
+    env.connector.put(doc("faq"), entity("sku-1"))
+
+    await env.sync()
+
+    assert env.index.external_ids(env.tenant_id) == {"faq"}  # сущности не индексируются
+    indexed = env.index.documents[(env.tenant_id, env.source_id, "faq")]
+    assert indexed.document_id == (await env.documents())["faq"].id
+    assert (indexed.title, indexed.url) == ("Документ faq", "/faq")
+    assert [c.chunk_id for c in indexed.chunks] == await chunk_ids(env, "faq")
+    assert [(c.ord, c.text, list(c.dense)) for c in indexed.chunks] == [
+        (0, "Первый абзац.", [13.0, 1.0]),
+        (1, "Второй абзац.", [13.0, 1.0]),
+    ]
+    assert env.embedder.calls == [["Первый абзац.", "Второй абзац."]]
+
+
+async def test_unchanged_document_is_not_embedded_again(env: Env) -> None:
+    env.connector.put(doc("faq"))
+    await env.sync()
+    env.embedder.calls.clear()
+
+    await env.sync()
+
+    assert env.embedder.calls == []
+    assert env.index.chunk_ids(env.tenant_id, "faq") == await chunk_ids(env, "faq")
+
+
+async def test_changed_document_points_are_replaced(env: Env) -> None:
+    env.connector.put(doc("faq"))
+    await env.sync()
+    env.connector.put(doc("faq", text="Новый текст."))
+
+    await env.sync()
+
+    [chunk] = env.index.documents[(env.tenant_id, env.source_id, "faq")].chunks
+    assert chunk.text == "Новый текст."
+    assert [chunk.chunk_id] == await chunk_ids(env, "faq")
+
+
+async def test_full_sync_deletes_points_of_missing_documents(env: Env) -> None:
+    env.connector.put(doc("faq"), doc("old"), entity("sku-gone"))
+    await env.sync()
+    del env.connector.items["old"], env.connector.items["sku-gone"]
+
+    await env.sync()
+
+    assert env.index.external_ids(env.tenant_id) == {"faq"}
+
+
+@pytest.mark.parametrize("failure", ["embedder", "index"])
+async def test_indexing_failure_is_item_error_and_retried(env: Env, failure: str) -> None:
+    env.connector.put(doc("faq"), doc("delivery"))
+    await env.sync()
+    env.connector.put(doc("faq", text="Обновлено."), doc("delivery", text="Завтра."))
+    if failure == "embedder":
+        env.embedder.fail = True
+    else:
+        env.index.fail_replace = True
+
+    record = await env.sync_record(await env.sync())
+
+    assert record.status is SyncStatus.SUCCEEDED
+    assert stats_counts(record)["failed"] == 2
+    assert record.stats["errors"][0].startswith(
+        "faq: EmbeddingError" if failure == "embedder" else "faq: VectorIndexError"
+    )
+    # Postgres откатился: старые текст, хэш и чанки — следующая синхронизация повторит.
+    assert await env.chunk_texts("faq") == ["Первый абзац.", "Второй абзац."]
+    assert (await env.documents())["faq"].content_hash == content_hash(doc("faq"))
+
+    env.embedder.fail = env.index.fail_replace = False
+    retry = await env.sync_record(await env.sync())
+
+    assert stats_counts(retry)["updated"] == 2
+    [chunk] = env.index.documents[(env.tenant_id, env.source_id, "faq")].chunks
+    assert chunk.text == "Обновлено."
+    assert [chunk.chunk_id] == await chunk_ids(env, "faq")
+
+
+async def test_new_document_is_not_saved_when_indexing_fails(env: Env) -> None:
+    env.connector.put(doc("faq"))
+    env.index.fail_replace = True
+
+    record = await env.sync_record(await env.sync())
+
+    assert stats_counts(record)["failed"] == 1
+    assert await env.documents() == {}
+
+
+async def test_index_delete_failure_fails_sync_and_keeps_documents(env: Env) -> None:
+    env.connector.put(doc("faq"), doc("old"))
+    await env.sync()
+    del env.connector.items["old"]
+    env.index.fail_delete = True
+
+    record = await env.sync_record(await env.sync())
+
+    assert record.status is SyncStatus.FAILED
+    assert record.error is not None
+    assert record.error.startswith("VectorIndexError")
+    assert set(await env.documents()) == {"faq", "old"}
+    assert env.index.external_ids(env.tenant_id) == {"faq", "old"}
 
 
 # --- чистые функции ---
@@ -372,6 +503,10 @@ def test_content_hash_ignores_attribute_order() -> None:
     assert content_hash(a) != content_hash(replace(a, price=Decimal("1.00")))
 
 
-def test_fake_connector_satisfies_protocol() -> None:
+def test_fakes_satisfy_protocols() -> None:
     connector: SourceConnector = FakeConnector()
+    embedder: Embedder = FakeEmbedder()
+    index: ChunkIndex = InMemoryChunkIndex()
     assert connector.kind is SourceKind.FILE
+    assert embedder.dimensions == 2
+    assert index is not None

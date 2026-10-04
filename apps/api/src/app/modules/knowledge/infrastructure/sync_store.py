@@ -14,6 +14,7 @@ from app.modules.knowledge.domain.ingestion import (
     EntityItem,
     ItemKey,
     ItemKind,
+    SavedDocument,
     SyncJob,
 )
 from app.modules.knowledge.infrastructure.models import SourceRecord, SourceSyncRecord
@@ -105,9 +106,10 @@ class SqlSyncStore:
         item: DocumentItem,
         content_hash: str,
         chunks: list[ChunkDraft],
-    ) -> None:
+    ) -> SavedDocument:
         document_id = await self.documents.upsert(tenant_id, source_id, item, content_hash)
-        await self.chunks.replace_for_document(tenant_id, document_id, chunks)
+        chunk_ids = await self.chunks.replace_for_document(tenant_id, document_id, chunks)
+        return SavedDocument(document_id, chunk_ids)
 
     async def save_entity(
         self, tenant_id: TenantId, source_id: UUID, item: EntityItem, content_hash: str

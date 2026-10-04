@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import exc
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
@@ -30,7 +31,9 @@ from app.modules.knowledge.public import (
 )
 from app.modules.shared.public import NotFoundError, TenantId
 from app.modules.tenants.public import SqlTenantDirectory
-from app.worker import WorkerSettings, sync_source
+from app.settings import Settings
+from app.worker import WorkerSettings, build_embedder, sync_source
+from knowledge_fakes import FakeEmbedder, InMemoryChunkIndex
 
 
 @dataclass
@@ -85,6 +88,7 @@ async def test_worker_task_runs_sync(
     queue = FakeSyncQueue()
     sync_id = await request_sync(tenant_id, source_id, SqlSyncStore(db_session), queue)
     [(_, queued_id, full)] = queue.jobs
+    index = InMemoryChunkIndex()
 
     ctx: dict[str, Any] = {
         "job_id": "sync:test",
@@ -93,6 +97,8 @@ async def test_worker_task_runs_sync(
         ),
         "connectors": {SourceKind.FILE: OneDocConnector()},
         "chunker": MarkdownChunker(),
+        "embedder": FakeEmbedder(),
+        "index": index,
     }
     await sync_source(ctx, str(tenant_id), str(queued_id), full)
 
@@ -100,6 +106,7 @@ async def test_worker_task_runs_sync(
     assert await _status(db_session, tenant_id, sync_id) == SyncStatus.SUCCEEDED
     [document] = await DocumentRepository(db_session).list(tenant_id)
     assert document.external_id == "faq"
+    assert index.external_ids(tenant_id) == {"faq"}
 
 
 async def test_request_sync_creates_pending_and_enqueues(db_session: AsyncSession) -> None:
@@ -203,3 +210,21 @@ def test_worker_registers_sync_job_under_queue_name() -> None:
 def test_fakes_satisfy_protocols() -> None:
     _queue: SyncQueue = FakeSyncQueue()
     _redis = ArqSyncQueue(FakeRedis())
+
+
+def test_worker_requires_openai_key_for_embeddings() -> None:
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        build_embedder(Settings(_env_file=None, openai_api_key=None))
+
+
+def test_worker_builds_embedder_from_settings() -> None:
+    embedder = build_embedder(
+        Settings(
+            _env_file=None,
+            openai_api_key=SecretStr("sk-test"),
+            embedding_model="emb-test",
+            embedding_dimensions=8,
+            embedding_batch_size=16,
+        )
+    )
+    assert (embedder.model, embedder.dimensions, embedder.batch_size) == ("emb-test", 8, 16)

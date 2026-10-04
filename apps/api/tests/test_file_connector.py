@@ -28,6 +28,7 @@ from app.modules.knowledge.public import (
 )
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import SqlTenantDirectory
+from knowledge_fakes import FakeEmbedder, InMemoryChunkIndex
 
 
 def spec() -> SourceSpec:
@@ -186,6 +187,8 @@ async def test_sync_stores_documents_with_structural_chunks(
         SqlSyncStore(db_session),
         {SourceKind.FILE: connector},
         MarkdownChunker(),
+        embedder=FakeEmbedder(),
+        index=InMemoryChunkIndex(),
     )
 
     record = await SourceSyncRepository(db_session).get_or_raise(tenant_id, sync_id)

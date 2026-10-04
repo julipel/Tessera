@@ -15,6 +15,7 @@ from app.modules.knowledge.domain.ingestion import (
     Listing,
     RawItem,
     RawItemRef,
+    SavedDocument,
     SourceSpec,
     SyncJob,
 )
@@ -77,7 +78,7 @@ class SyncStore(Protocol):
         item: DocumentItem,
         content_hash: str,
         chunks: list[ChunkDraft],
-    ) -> None:
+    ) -> SavedDocument:
         """Upsert по external_id; чанки документа заменяются целиком."""
         ...
 

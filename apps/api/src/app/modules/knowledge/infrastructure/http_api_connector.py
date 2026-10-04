@@ -32,6 +32,7 @@ from app.modules.knowledge.domain.ingestion import (
     SourceSpec,
 )
 from app.modules.knowledge.infrastructure.entity_mapping import (
+    DEFAULT_LIST_SEPARATOR,
     AttributeSpec,
     AttributeType,
     EntityFields,
@@ -121,6 +122,7 @@ class HttpPagination(_Config):
 class HttpAttribute(_Config):
     path: str
     type: AttributeType = "string"
+    separator: str = Field(default=DEFAULT_LIST_SEPARATOR, min_length=1)  # `list` из строки
 
 
 class HttpEntityMapping(_Config):
@@ -133,7 +135,7 @@ class HttpEntityMapping(_Config):
         attributes = {
             name: AttributeSpec(spec)
             if isinstance(spec, str)
-            else AttributeSpec(spec.path, spec.type)
+            else AttributeSpec(spec.path, spec.type, spec.separator)
             for name, spec in self.attributes.items()
         }
         return EntityMapping(self.entity_type, self.fields, attributes, self.currency)
@@ -370,6 +372,10 @@ def _json_record(data: Any) -> Record:
     def value(path: str) -> Value:
         if not isinstance(data, dict):
             raise ValueError("не объект")
+        found = _lookup(data, path)
+        # Массив скаляров — для атрибутов `list`; скалярные поля его отклонят.
+        if isinstance(found, list) and not any(isinstance(v, dict | list) for v in found):
+            return cast(Value, found)
         return _scalar(data, path)
 
     return value

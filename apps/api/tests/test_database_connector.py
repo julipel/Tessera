@@ -137,7 +137,23 @@ async def test_maps_rows_to_documents_and_row_errors(client_db: tuple[str, str])
 
     entity = {"entity_type": "p", "fields": {"external_id": "sku", "title": "tags"}}
     errors = await items(connector(dsn), spec(schema, query, entity=entity))
-    assert "«tags»: не скалярное значение (list)" in errors["A-1"]
+    assert "список, а нужно одно значение" in errors["A-1"]
+
+
+async def test_array_column_maps_to_list_attribute(client_db: tuple[str, str]) -> None:
+    dsn, schema = client_db
+    entity = {
+        "entity_type": "product",
+        "fields": {"external_id": "sku", "title": "name"},
+        "attributes": {"tags": {"column": "tags", "type": "list"}},
+    }
+
+    result = await items(connector(dsn), spec(schema, entity=entity))
+
+    assert result["A-1"] == EntityItem(
+        external_id="A-1", type="product", title="Крем", attributes={"tags": ["new"]}
+    )
+    assert result["A-2"] == EntityItem(external_id="A-2", type="product", title="Тоник")
 
 
 @pytest.mark.parametrize(

@@ -5,7 +5,21 @@
 
 from typing import Any
 
-from sqlalchemy import ColumnElement, Numeric, Text, and_, case, cast, func, literal_column, or_
+from sqlalchemy import (
+    ColumnElement,
+    Numeric,
+    Text,
+    and_,
+    case,
+    cast,
+    exists,
+    false,
+    func,
+    literal,
+    literal_column,
+    or_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import TSQUERY
 
 from app.modules.knowledge.domain.catalog import (
@@ -112,8 +126,31 @@ def _attribute_number(element: ColumnElement[Any], kind: ColumnElement[Any]) -> 
 def _attribute_equals(
     element: ColumnElement[Any], kind: ColumnElement[Any], value: AttributeValue
 ) -> ColumnElement[bool]:
+    """Скаляр равен значению или массив (атрибут `list`) содержит его."""
+    if isinstance(value, str):
+        scalar = and_(kind == "string", func.lower(element.astext) == value.lower())
+        return or_(scalar, _array_has_string(element, kind, value))
     if isinstance(value, bool):
-        return and_(kind == "boolean", element.astext == ("true" if value else "false"))
-    if isinstance(value, int | float):
-        return _attribute_number(element, kind) == value
-    return and_(kind == "string", func.lower(element.astext) == value.lower())
+        scalar = and_(kind == "boolean", element.astext == ("true" if value else "false"))
+    else:
+        scalar = _attribute_number(element, kind) == value
+    # jsonb @> безопасен для любого типа: скаляр не содержит массив; числа — по значению.
+    contains = element.op("@>")(func.jsonb_build_array(value))
+    return or_(scalar, contains)
+
+
+def _array_has_string(
+    element: ColumnElement[Any], kind: ColumnElement[Any], value: str
+) -> ColumnElement[bool]:
+    """Строковый элемент массива без учёта регистра, как у скаляра. CASE: разворачивать
+    не-массив `jsonb_array_elements` нельзя — ошибка."""
+    items = func.jsonb_array_elements(element).table_valued("value").alias("item")
+    match = exists(
+        select(literal(1))
+        .select_from(items)
+        .where(
+            func.jsonb_typeof(items.c.value) == "string",
+            func.lower(items.c.value.op("#>>")(literal_column("'{}'"))) == value.lower(),
+        )
+    )
+    return case((kind == "array", match), else_=false())

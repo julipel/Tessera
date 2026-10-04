@@ -185,8 +185,13 @@ config:
   currency: RUB               # если колонки валюты нет или ячейка пустая
   columns: { external_id: "Артикул", title: "Название", price: "Цена", in_stock: "Наличие",
              currency: ..., category: ..., url: ..., image_url: ... }   # обязательны первые два
-  attributes: { color: "Цвет", volume_ml: { column: "Объём, мл", type: number } }  # string|number|boolean
+  attributes: { color: "Цвет", volume_ml: { column: "Объём, мл", type: number },
+                skin_types: { column: "Тип кожи", type: list, separator: "," } }  # string|number|boolean|list
 ```
+Атрибут `list` (P4-10a, все коннекторы с маппингом): строка через `separator` (по умолчанию
+`,`) или массив источника (JSON-массив скаляров, массив Postgres) → JSON-массив без пустых
+элементов и повторов; пустой — атрибута нет. Скалярные поля и атрибуты массив отклоняют —
+ошибка элемента.
 Цена: `1 990,50 р.`/`1,990.50` → Decimal, текст без цифр («по запросу») — нет цены.
 Наличие: да/нет, true/false, +/-, «в наличии»…, число — остаток (> 0). Неверный конфиг,
 нечитаемый файл или нет колонки из маппинга — ошибка синхронизации (иначе полный discover
@@ -317,8 +322,8 @@ Entity хранится в Postgres: нормализованные поля (`t
   фильтрам + опционально текстовому запросу.
   Каталог (P4-08a, ADR-0016) — `EntityRepository.search(tenant_id, CatalogQuery)`, один SQL-запрос:
   фильтры `types`, `categories` (без учёта регистра), `price_min/max`, `in_stock`,
-  `attributes` (`any_of`: строка — без учёта регистра, число, boolean — по типу JSON; `min/max` —
-  только числовые значения). `query` — полнотекстовый поиск Postgres (`russian`) по
+  `attributes` (`any_of`: строка — без учёта регистра, число, boolean — по типу JSON; у
+  массива — вхождение элемента по тем же правилам; `min/max` — только числовые скаляры). `query` — полнотекстовый поиск Postgres (`russian`) по
   названию, категории и строковым атрибутам: подходит любое из слов, ранг — `ts_rank`.
   Порядок: в наличии выше, затем `sort` (`relevance`/`price_asc`/`price_desc`/`title`; без
   цены — в конце), затем название и id; `total` — до limit/offset. Для инструментов — порт

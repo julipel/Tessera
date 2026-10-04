@@ -3,6 +3,9 @@
 Коннектор отдаёт функцию «ключ маппинга → значение» (колонка таблицы, путь в JSON), здесь —
 разбор значений: цена, валюта, наличие, типизированные атрибуты. Неразбираемое значение —
 `ValueError` с понятным текстом; коннектор превращает его в ошибку элемента.
+
+Атрибут `list` — строка с разделителем («dry, oily») или массив источника (JSON, массив
+Postgres); остальные поля и атрибуты принимают только скаляры.
 """
 
 import re
@@ -12,12 +15,16 @@ from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.knowledge.domain.ingestion import EntityItem
 
-type Value = str | int | float | bool | Decimal | datetime | date | time | None
-type AttributeType = Literal["string", "number", "boolean"]
+type Scalar = str | int | float | bool | Decimal | datetime | date | time
+type Value = Scalar | list[Scalar] | None
+type AttributeType = Literal["string", "number", "boolean", "list"]
+type AttributeResult = str | int | float | bool | list[str | int | float | bool]
+
+DEFAULT_LIST_SEPARATOR = ","
 
 
 class EntityFields(BaseModel):
@@ -39,18 +46,20 @@ class EntityFields(BaseModel):
 class AttributeSpec:
     key: str
     type: AttributeType = "string"
+    separator: str = DEFAULT_LIST_SEPARATOR  # только для `list` из строки
 
 
 class AttributeColumn(BaseModel):
-    """Атрибут из колонки (`table`, `database`): `{column, type}`."""
+    """Атрибут из колонки (`table`, `database`): `{column, type, separator}`."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     column: str
     type: AttributeType = "string"
+    separator: str = Field(default=DEFAULT_LIST_SEPARATOR, min_length=1)
 
     def spec(self) -> AttributeSpec:
-        return AttributeSpec(self.column, self.type)
+        return AttributeSpec(self.column, self.type, self.separator)
 
 
 def map_entity(
@@ -83,7 +92,7 @@ def map_entity(
         attributes={
             name: parsed
             for name, spec in attributes.items()
-            if (parsed := attribute(get(spec.key), spec.type)) is not None
+            if (parsed := attribute(get(spec.key), spec.type, spec.separator)) is not None
         },
     )
 
@@ -97,6 +106,8 @@ _NOT_NUMBER = re.compile(r"[^\d.,\-]")
 def text(value: Value) -> str | None:
     if value is None:
         return None
+    if isinstance(value, list):
+        raise ValueError("список, а нужно одно значение")
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, float) and value.is_integer():
@@ -110,7 +121,7 @@ def text(value: Value) -> str | None:
 def decimal(value: Value) -> Decimal | None:
     """`1 990,50 ₽`, `1,990.50`, `1990.5` → Decimal. Одиночная запятая — десятичная.
     Текст без цифр («по запросу», «договорная») — значение неизвестно (None)."""
-    if isinstance(value, bool | datetime | date | time):
+    if isinstance(value, bool | datetime | date | time | list):
         raise ValueError(f"не число: {value}")
     if isinstance(value, int | float | Decimal):
         number = Decimal(str(value))
@@ -175,12 +186,50 @@ def boolean(value: Value) -> bool | None:
     return number > 0
 
 
-def attribute(value: Value, kind: AttributeType) -> str | int | float | bool | None:
+def attribute(
+    value: Value, kind: AttributeType, separator: str = DEFAULT_LIST_SEPARATOR
+) -> AttributeResult | None:
     if kind == "boolean":
         return boolean(value)
     if kind == "number":
         number = decimal(value)
-        if number is None:
-            return None
-        return int(number) if number == number.to_integral_value() else float(number)
+        return None if number is None else _number(number)
+    if kind == "list":
+        return value_list(value, separator)
     return text(value)
+
+
+def value_list(
+    value: Value, separator: str = DEFAULT_LIST_SEPARATOR
+) -> list[str | int | float | bool] | None:
+    """Массив источника или строка через `separator` → список без пустых элементов и
+    повторов (порядок сохраняется); пустой список — значения нет (None)."""
+    if isinstance(value, list):
+        elements: list[Scalar] = value
+    else:
+        raw = text(value)
+        if raw is None:
+            return None
+        elements = list(raw.split(separator))
+    result: list[str | int | float | bool] = []
+    seen: set[tuple[type, object]] = set()
+    for element in elements:
+        item = _list_element(element)
+        # По типу и значению: True и 1 — разные элементы.
+        if item is not None and (type(item), item) not in seen:
+            seen.add((type(item), item))
+            result.append(item)
+    return result or None
+
+
+def _list_element(element: Scalar | None) -> str | int | float | bool | None:
+    if element is None or isinstance(element, bool):
+        return element
+    if isinstance(element, int | float | Decimal):
+        number = decimal(element)
+        return None if number is None else _number(number)
+    return text(element)
+
+
+def _number(number: Decimal) -> int | float:
+    return int(number) if number == number.to_integral_value() else float(number)

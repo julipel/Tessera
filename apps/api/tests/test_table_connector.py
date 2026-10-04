@@ -162,6 +162,29 @@ async def test_price_formats(
     assert item.price == (Decimal(price) if price else None)
 
 
+async def test_list_attributes(tmp_path: Path) -> None:
+    connector = TableConnector(tmp_path)
+    attributes = {
+        "skin_types": {"column": "Тип кожи", "type": "list"},
+        "ingredients": {"column": "Компоненты", "type": "list", "separator": "|"},
+    }
+    source = spec({**CONFIG, "attributes": attributes, "delimiter": ","})
+    write(
+        connector.source_dir(source) / "t.csv",
+        "Артикул,Название,Цена,Наличие,Категория,Тип кожи,Компоненты\n"
+        'A,Крем,100,да,,"dry, oily",ниацинамид | цинк\n'
+        "B,Тоник,100,да,,,\n",
+    )
+
+    items = await fetch_all(connector, source)
+
+    assert items["A"].attributes == {
+        "skin_types": ["dry", "oily"],
+        "ingredients": ["ниацинамид", "цинк"],
+    }
+    assert items["B"].attributes == {}
+
+
 async def test_bad_rows_are_item_errors(
     connector: TableConnector, source: SourceSpec, base: Path
 ) -> None:

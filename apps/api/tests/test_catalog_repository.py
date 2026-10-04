@@ -194,6 +194,62 @@ async def test_attribute_filters(
     assert await _ids(db_session, tenant_id, _filters(attributes=attributes)) == expected
 
 
+LIST_PRODUCTS: list[dict[str, Any]] = [
+    {
+        "external_id": "cream",
+        "title": "Крем",
+        "attributes": {"skin_types": ["dry", "Sensitive"], "volumes": [30, 50], "flags": [True]},
+    },
+    {
+        "external_id": "gel",
+        "title": "Гель",
+        "attributes": {"skin_types": ["oily"], "volumes": [50.5], "flags": [False]},
+    },
+    # Скаляр там, где у других массив, — по-прежнему совпадает по равенству.
+    {"external_id": "toner", "title": "Тоник", "attributes": {"skin_types": "dry"}},
+    # Число в массиве строкой не считается, и наоборот.
+    {"external_id": "mask", "title": "Маска", "attributes": {"skin_types": [1], "volumes": ["30"]}},
+]
+
+
+@pytest.mark.parametrize(
+    ("attributes", "expected"),
+    [
+        # Вхождение элемента; строки — без учёта регистра.
+        ({"skin_types": AttributeFilter(any_of=["dry"])}, ["cream", "toner"]),
+        ({"skin_types": AttributeFilter(any_of=["SENSITIVE"])}, ["cream"]),
+        ({"skin_types": AttributeFilter(any_of=["sensitive", "oily"])}, ["gel", "cream"]),
+        ({"skin_types": AttributeFilter(any_of=["normal"])}, []),
+        ({"skin_types": AttributeFilter(any_of=["1"])}, []),
+        ({"skin_types": AttributeFilter(any_of=[1])}, ["mask"]),
+        # Числа: 50 == 50.0, строка "30" в массиве — не число.
+        ({"volumes": AttributeFilter(any_of=[50.0])}, ["cream"]),
+        ({"volumes": AttributeFilter(any_of=[30])}, ["cream"]),
+        ({"volumes": AttributeFilter(any_of=[50.5])}, ["gel"]),
+        ({"flags": AttributeFilter(any_of=[False])}, ["gel"]),
+        # Диапазон к массиву не применяется.
+        ({"volumes": AttributeFilter(min=Decimal(0))}, []),
+    ],
+)
+async def test_list_attribute_filters(
+    db_session: AsyncSession, attributes: dict[str, AttributeFilter], expected: list[str]
+) -> None:
+    tenant_id = await _tenant(db_session, "catalog-lists")
+    await _seed(db_session, tenant_id, LIST_PRODUCTS)
+    other = await _tenant(db_session, "catalog-lists-other")
+    await _seed(db_session, other, LIST_PRODUCTS[:1])
+
+    assert await _ids(db_session, tenant_id, _filters(attributes=attributes)) == expected
+
+
+async def test_query_matches_list_attribute_strings(db_session: AsyncSession) -> None:
+    tenant_id = await _tenant(db_session, "catalog-lists")
+    await _seed(db_session, tenant_id, LIST_PRODUCTS)
+
+    query = CatalogQuery(query="sensitive", sort=CatalogSort.TITLE)
+    assert await _ids(db_session, tenant_id, query) == ["cream"]
+
+
 async def test_attribute_key_is_not_sql(
     db_session: AsyncSession, catalog: tuple[TenantId, Any]
 ) -> None:

@@ -39,6 +39,7 @@ from app.modules.knowledge.infrastructure.entity_mapping import (
     AttributeColumn,
     AttributeSpec,
     EntityFields,
+    Scalar,
     Value,
 )
 from app.modules.knowledge.infrastructure.record_mapping import (
@@ -314,10 +315,19 @@ def _columns(mapping: ItemMapping) -> list[str]:
 def _row_record(row: Mapping[str, Any]) -> Record:
     def value(column: str) -> Value:
         raw = row[column]
-        if raw is None or isinstance(raw, str | int | float | Decimal | datetime | date | time):
-            return raw  # bool — подкласс int
-        if isinstance(raw, UUID):
-            return str(raw)
-        raise ValueError(f"«{column}»: не скалярное значение ({type(raw).__name__})")
+        if raw is None:
+            return None
+        if isinstance(raw, list) and all(v is not None for v in raw):
+            # Массив Postgres (text[], int[]) — для атрибутов `list`; поля его отклонят.
+            return [_scalar(column, v) for v in raw]
+        return _scalar(column, raw)
 
     return value
+
+
+def _scalar(column: str, raw: Any) -> Scalar:
+    if isinstance(raw, str | int | float | Decimal | datetime | date | time):
+        return raw  # bool — подкласс int
+    if isinstance(raw, UUID):
+        return str(raw)
+    raise ValueError(f"«{column}»: не скалярное значение ({type(raw).__name__})")

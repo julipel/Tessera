@@ -141,6 +141,29 @@ async def test_maps_records_by_paths() -> None:
     assert api.requests[0].url.params == httpx.QueryParams({"lang": "ru", "active": "true"})
 
 
+async def test_list_attributes_from_arrays_and_strings() -> None:
+    entity = {
+        **ENTITY,
+        "attributes": {
+            "skin_types": {"path": "skin", "type": "list"},
+            "notes": {"path": "notes", "type": "list", "separator": "/"},
+            "brand": "brand",
+        },
+    }
+    body = [
+        product("A", skin=["dry", "oily"], notes="роза / мускус"),
+        product("B", skin=[{"type": "dry"}]),
+        product("C", brand=["Acme"]),
+    ]
+
+    result = await items(Api(static(body)), entity=entity)
+
+    assert isinstance(result["A"], EntityItem)
+    assert result["A"].attributes == {"skin_types": ["dry", "oily"], "notes": ["роза", "мускус"]}
+    assert "«skin»: не скалярное значение" in str(result["B"])
+    assert "список, а нужно одно значение" in str(result["C"])
+
+
 async def test_maps_documents() -> None:
     body = [
         {"slug": "faq-1", "q": "Доставка", "a": "Курьером за 2 дня.", "link": "https://x.ru/1"},

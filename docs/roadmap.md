@@ -163,7 +163,7 @@
   нормализованным полям и attributes, сортировка, `query` — полнотекстовый поиск Postgres
   (ADR-0016); `SqlCatalog` (своя сессия на вызов) и порт tools `Catalog`.
   DoD: тесты фильтров на Postgres, изоляция тенантов.
-- [ ] **P4-08b search_catalog / get_entity: инструменты.** Схема аргументов по
+- [x] **P4-08b search_catalog / get_entity: инструменты.** Схема аргументов по
   `knowledge.catalog.filterable_attributes`, `content` для модели, `not_found`/`upstream_error`,
   сборка `SqlCatalog` в API (в эвалах без БД — не подключается). DoD: тесты инструментов,
   тест цикла на FakeLLM.

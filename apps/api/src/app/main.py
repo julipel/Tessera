@@ -13,6 +13,7 @@ from app.logs import TraceIdMiddleware, configure_logging
 from app.modules.agent.public import LLMClients
 from app.modules.chat.public import TurnRegistry
 from app.modules.chat.public import router as chat_router
+from app.modules.knowledge.public import SqlCatalog
 from app.modules.shared.public import (
     create_engine,
     create_session_factory,
@@ -53,6 +54,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Поиск по знаниям для search_knowledge; None без OPENAI_API_KEY.
     app.state.knowledge = build_knowledge_services(settings)
     app.state.knowledge_search = app.state.knowledge.search if app.state.knowledge else None
+    # Каталог для search_catalog/get_entity: своя сессия на вызов инструмента (ADR-0016).
+    app.state.catalog = SqlCatalog(app.state.session_factory)
     install_error_handlers(app)
     app.add_middleware(TraceIdMiddleware)  # после: снаружи обработчика 500
     # Последним — снаружи всех: preflight отвечается до остальной обработки.

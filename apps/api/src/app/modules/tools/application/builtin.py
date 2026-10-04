@@ -1,8 +1,9 @@
 """Встроенные инструменты ядра (contracts.md §4), включаемые тенанту через `tools.builtin`.
 
-Реализованы `update_dialog_state` и `search_knowledge`; остальные имена из конфига
-пропускаются — их добавят следующие задачи. `search_knowledge` подключается, только если
-окружение собрало поиск по знаниям (`knowledge`), иначе — предупреждение в лог.
+Реализованы `update_dialog_state`, `search_knowledge`, `search_catalog` и `get_entity`;
+остальные имена из конфига пропускаются — их добавят следующие задачи. Инструменты с
+зависимостями подключаются, только если окружение их собрало: `search_knowledge` — поиск
+по знаниям (`knowledge`), каталог — `catalog`; иначе — предупреждение в лог.
 """
 
 from collections.abc import Callable, Iterable, Mapping
@@ -11,9 +12,15 @@ from typing import Any
 import structlog
 
 from app.contracts import AgentConfig, ScenarioConfig, SlotDefinition
+from app.modules.tools.application.catalog import (
+    GET_ENTITY,
+    SEARCH_CATALOG,
+    get_entity_tool,
+    search_catalog_tool,
+)
 from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition
-from app.modules.tools.domain.ports import KnowledgeSearcher
+from app.modules.tools.domain.ports import Catalog, KnowledgeSearcher
 from app.modules.tools.domain.result import ToolResult
 
 logger = structlog.get_logger(__name__)
@@ -28,7 +35,10 @@ _DESCRIPTION = (
 
 
 def builtin_tools(
-    config: AgentConfig, *, knowledge: KnowledgeSearcher | None = None
+    config: AgentConfig,
+    *,
+    knowledge: KnowledgeSearcher | None = None,
+    catalog: Catalog | None = None,
 ) -> list[ToolDefinition]:
     """Встроенные инструменты из `config.tools.builtin`, которые уже реализованы и для
     которых есть зависимости."""
@@ -39,9 +49,16 @@ def builtin_tools(
         factories[SEARCH_KNOWLEDGE] = lambda c: search_knowledge_tool(
             knowledge, c.knowledge.search_knowledge if c.knowledge else None
         )
+    if catalog is not None:
+        factories[SEARCH_CATALOG] = lambda c: search_catalog_tool(
+            catalog, c.knowledge.catalog if c.knowledge else None
+        )
+        factories[GET_ENTITY] = lambda c: get_entity_tool(catalog)
     enabled = config.tools.builtin or []
     if knowledge is None and SEARCH_KNOWLEDGE in enabled:
         logger.warning("tools.search_knowledge_unavailable", reason="поиск по знаниям не настроен")
+    if catalog is None and {SEARCH_CATALOG, GET_ENTITY} & set(enabled):
+        logger.warning("tools.catalog_unavailable", reason="каталог не подключён")
     return [factories[name](config) for name in enabled if name in factories]
 
 

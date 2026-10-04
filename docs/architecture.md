@@ -278,6 +278,16 @@ Entity хранится в Postgres: нормализованные поля (`t
   цены — в конце), затем название и id; `total` — до limit/offset. Для инструментов — порт
   tools `Catalog`, реализация `SqlCatalog`: своя короткая сессия на вызов, сбой БД —
   `CatalogError`. Векторного поиска по сущностям пока нет.
+  Инструменты (P4-08b, tools `application/catalog.py`): `search_catalog` — аргументы
+  `query`, `filters{type, category[], price_min, price_max, in_stock, attributes}`, `sort`,
+  `limit` (1–20, по умолчанию 10); `attributes` — только из
+  `knowledge.catalog.filterable_attributes` (значение, список или `{min, max}`), прочее —
+  `validation_error`. Модели — `{total, items:[{id, title, price, currency, in_stock,
+  category, url, attributes}]}` без пустых полей, пустая выдача — `note`, не ошибка.
+  `get_entity(entity_id)` — то же плюс `type`, `image_url`; чужой/неизвестный/не-UUID id —
+  `not_found`. `CatalogError` — `upstream_error` (retryable). UI-компонентов нет — их
+  отдаёт `show_entities` по id. `SqlCatalog` собирает `main.py` (`app.state.catalog`);
+  в раннере эвалов БД нет — инструменты каталога не подключаются (предупреждение в лог).
   `search_knowledge` (tools) зависит от порта `KnowledgeSearcher` (tools.domain, типы из
   `knowledge.kernel` — ADR-0008); `KnowledgeSearch` подставляет сборщик агента
   (`app/knowledge_wiring.py` → API и раннер эвалов; без `OPENAI_API_KEY` инструмент не

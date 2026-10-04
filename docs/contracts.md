@@ -189,8 +189,8 @@ AgentConfig (лишний слот или неверный тип — `validatio
 | Имя | Назначение |
 |---|---|
 | `search_knowledge(query, filters?, top_k?)` | гибридный поиск по документам, возвращает фрагменты + sources |
-| `search_catalog(query?, filters?, sort?, limit?)` | структурный поиск Entity |
-| `get_entity(entity_id)` | детали сущности |
+| `search_catalog(query?, filters?, sort?, limit?)` | структурный поиск Entity: фильтры по полям и `filterable_attributes`, `query` — полнотекстовый (ADR-0016) |
+| `get_entity(entity_id)` | детали сущности; неизвестный id — `not_found` |
 | `show_entities(entity_ids, layout: "cards" \| "carousel" \| "comparison")` | UI-компоненты по id |
 | `update_dialog_state(slots?, facts?)` | запись собранной информации |
 | `show_form(form_key)` | форма из конфига тенанта |

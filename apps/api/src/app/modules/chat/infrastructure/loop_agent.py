@@ -27,7 +27,7 @@ from app.modules.agent.public import (
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, TurnRequest
 from app.modules.memory.public import DialogState
-from app.modules.tools.public import KnowledgeSearcher, ToolRegistry, builtin_tools
+from app.modules.tools.public import Catalog, KnowledgeSearcher, ToolRegistry, builtin_tools
 
 type LLMForProvider = Callable[[Provider], LLMClient]
 type ToolsForConfig = Callable[[AgentConfig], ToolExecutor]
@@ -81,15 +81,17 @@ class LoopTurnAgent:
 
 
 def builtin_turn_agent(
-    llm_for: LLMForProvider, knowledge: KnowledgeSearcher | None = None
+    llm_for: LLMForProvider,
+    knowledge: KnowledgeSearcher | None = None,
+    catalog: Catalog | None = None,
 ) -> LoopTurnAgent:
     """Агентный цикл со встроенными инструментами из `tools.builtin` конфига — так ход
-    собирают chat API и раннер эвалов (ADR-0011). Без `knowledge` `search_knowledge`
-    не подключается."""
+    собирают chat API и раннер эвалов (ADR-0011). Без `knowledge` не подключается
+    `search_knowledge`, без `catalog` — `search_catalog` и `get_entity`."""
     return LoopTurnAgent(
         llm_for,
         lambda config: RegistryToolExecutor(
-            ToolRegistry(builtin_tools(config, knowledge=knowledge))
+            ToolRegistry(builtin_tools(config, knowledge=knowledge, catalog=catalog))
         ),
     )
 

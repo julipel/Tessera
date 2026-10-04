@@ -6,6 +6,7 @@
 
 from app.contracts.generated.agent_config_schema import (
     AgentConfig,
+    CatalogConfig,
     KnowledgeSearchConfig,
     ScenarioConfig,
     SlotDefinition,
@@ -72,6 +73,7 @@ __all__ = [
     "Action",
     "ActionInput",
     "AgentConfig",
+    "CatalogConfig",
     "Component",
     "ComponentBlock",
     "ComponentData",

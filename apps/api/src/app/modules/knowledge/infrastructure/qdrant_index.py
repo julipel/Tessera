@@ -6,8 +6,12 @@
 тенанту не поддерживается.
 
 Векторы точки: `dense` (cosine, размерность эмбеддера) и `bm25` — sparse, который Qdrant
-считает сам (серверный инференс `qdrant/bm25`, модификатор `idf`). При поиске (P4-07)
-нужны те же `BM25_OPTIONS`, иначе термы запроса и документов не совпадут.
+считает сам (серверный инференс `qdrant/bm25`, модификатор `idf`). Поиск передаёт те же
+`BM25_OPTIONS`, иначе термы запроса и документов не совпадут.
+
+Поиск — один запрос Query API: prefetch dense и BM25 (IDF по чанкам тенанта,
+`params.idf.corpus`), слияние RRF на стороне Qdrant. Фильтр тенанта — в каждом prefetch
+и на верхнем уровне.
 
 Замена документа: сначала upsert новых точек, затем удаление прочих точек документа —
 документ не пропадает из поиска на время замены. Точки документа ищутся по
@@ -21,7 +25,7 @@ from uuid import UUID
 import httpx
 
 from app.modules.knowledge.domain.errors import VectorIndexError
-from app.modules.knowledge.domain.indexing import IndexedDocument
+from app.modules.knowledge.domain.indexing import ChunkHit, IndexedDocument
 from app.modules.shared.kernel import TenantId
 
 DENSE_VECTOR = "dense"
@@ -42,6 +46,7 @@ _PAYLOAD_INDEXES: dict[str, dict[str, Any]] = {
 }
 _UPSERT_BATCH = 64
 _DELETE_BATCH = 512
+_PREFETCH_MIN = 20
 
 
 def create_qdrant_index(
@@ -143,6 +148,38 @@ class QdrantChunkIndex:
                 }
             )
 
+    async def search(
+        self, tenant_id: TenantId, text: str, dense: Sequence[float], limit: int
+    ) -> list[ChunkHit]:
+        tenant = {"must": [_tenant_condition(tenant_id)]}
+        # Каждый ретривер отдаёт кандидатов с запасом: RRF выигрывает от глубины списков.
+        depth = max(limit, _PREFETCH_MIN)
+        result = await self._request(
+            "POST",
+            "/points/query",
+            json={
+                "prefetch": [
+                    {"query": list(dense), "using": DENSE_VECTOR, "filter": tenant, "limit": depth},
+                    {
+                        "query": {"text": text, "model": BM25_MODEL, "options": BM25_OPTIONS},
+                        "using": SPARSE_VECTOR,
+                        "filter": tenant,
+                        # IDF — по чанкам тенанта, а не всей коллекции (Qdrant ≥ 1.19).
+                        "params": {"idf": {"corpus": tenant}},
+                        "limit": depth,
+                    },
+                ],
+                "query": {"fusion": "rrf"},
+                "filter": tenant,
+                "limit": limit,
+                "with_payload": True,
+            },
+        )
+        try:
+            return [_hit(point) for point in result["points"]]
+        except (KeyError, TypeError, ValueError) as error:
+            raise VectorIndexError(f"Qdrant query: неожиданный ответ: {error!r}") from error
+
     async def aclose(self) -> None:
         await self.http.aclose()
 
@@ -197,8 +234,26 @@ class QdrantChunkIndex:
         return response.json().get("result")
 
 
+def _tenant_condition(tenant_id: TenantId) -> dict[str, Any]:
+    return {"key": "tenant_id", "match": {"value": str(tenant_id)}}
+
+
 def _source_conditions(tenant_id: TenantId, source_id: UUID) -> list[dict[str, Any]]:
     return [
-        {"key": "tenant_id", "match": {"value": str(tenant_id)}},
+        _tenant_condition(tenant_id),
         {"key": "source_id", "match": {"value": str(source_id)}},
     ]
+
+
+def _hit(point: dict[str, Any]) -> ChunkHit:
+    payload = point["payload"]
+    return ChunkHit(
+        chunk_id=UUID(point["id"]),
+        document_id=UUID(payload["document_id"]),
+        source_id=UUID(payload["source_id"]),
+        title=payload["title"],
+        text=payload["text"],
+        score=float(point["score"]),
+        url=payload.get("url"),
+        section=payload.get("section"),
+    )

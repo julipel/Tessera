@@ -258,7 +258,13 @@ Entity хранится в Postgres: нормализованные поля (`t
   сначала из Qdrant, затем из Postgres; сбой удаления в Qdrant — `SourceSync.failed`.
   Сущности в Qdrant не индексируются. Воркер на старте вызывает `ensure_collection` и
   не стартует без `OPENAI_API_KEY`.
-- Реранкинг top-k (по конфигу; можно отключить).
+- Поиск — `KnowledgeSearch` (application): эмбеддинг запроса → `ChunkIndex.search` — один
+  запрос Query API Qdrant: prefetch `dense` и `bm25` (те же `BM25_OPTIONS`, IDF по чанкам
+  тенанта — `params.idf.corpus`), слияние RRF на стороне Qdrant; фильтр `tenant_id` в каждом
+  prefetch и на верхнем уровне.
+- Реранкинг top-k (по конфигу; можно отключить): порт `Reranker`, из индекса берётся
+  `max(3·top_k, 20)` кандидатов. Без настроенного реранкера `rerank: true` игнорируется;
+  сбой реранкера — порядок RRF и предупреждение в лог, поиск не падает.
 - `search_knowledge` возвращает фрагменты с источниками; `search_catalog` — Entity по
   фильтрам + опционально семантическому запросу по описанию.
 - Ingestion — фоновые задачи arq (`app/worker.py`, задача `sync_source`), статусы в `SourceSync`,

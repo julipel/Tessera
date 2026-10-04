@@ -1,12 +1,12 @@
-"""Порты ingestion: коннекторы источников, чанкер, хранилище, эмбеддинги и векторный индекс
-(реализации — вне domain)."""
+"""Порты ingestion и поиска: коннекторы источников, чанкер, хранилище, эмбеддинги, векторный
+индекс и реранкер (реализации — вне domain)."""
 
 from collections.abc import Collection, Sequence
 from typing import Any, Protocol
 from uuid import UUID
 
 from app.modules.knowledge.domain.entities import SourceKind, SyncStatus
-from app.modules.knowledge.domain.indexing import IndexedDocument
+from app.modules.knowledge.domain.indexing import ChunkHit, IndexedDocument
 from app.modules.knowledge.domain.ingestion import (
     ChunkDraft,
     DocumentItem,
@@ -129,3 +129,18 @@ class ChunkIndex(Protocol):
     async def delete_documents(
         self, tenant_id: TenantId, source_id: UUID, external_ids: Collection[str]
     ) -> None: ...
+
+    async def search(
+        self, tenant_id: TenantId, text: str, dense: Sequence[float], limit: int
+    ) -> list[ChunkHit]:
+        """Гибридный поиск: dense по `dense` и BM25 по `text`, слияние RRF. Не больше
+        `limit` чанков тенанта, лучшие первыми."""
+        ...
+
+
+class Reranker(Protocol):
+    """Переранжирование кандидатов поиска по запросу. Ошибки — `RerankError`."""
+
+    async def rerank(self, query: str, texts: Sequence[str], top_n: int) -> list[int]:
+        """Индексы `texts`, самые релевантные первыми; не больше `top_n`."""
+        ...

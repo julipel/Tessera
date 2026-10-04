@@ -2,10 +2,16 @@
 
 from app.modules.knowledge.application.chunking import MarkdownChunker
 from app.modules.knowledge.application.ingestion import run_sync
+from app.modules.knowledge.application.search import KnowledgeSearch
 from app.modules.knowledge.application.sync_requests import request_sync
 from app.modules.knowledge.domain.entities import SourceKind, SourceStatus, SyncStatus
-from app.modules.knowledge.domain.errors import EmbeddingError, NoConnectorError, VectorIndexError
-from app.modules.knowledge.domain.indexing import IndexedChunk, IndexedDocument
+from app.modules.knowledge.domain.errors import (
+    EmbeddingError,
+    NoConnectorError,
+    RerankError,
+    VectorIndexError,
+)
+from app.modules.knowledge.domain.indexing import ChunkHit, IndexedChunk, IndexedDocument
 from app.modules.knowledge.domain.ingestion import (
     ChunkDraft,
     DocumentItem,
@@ -20,6 +26,7 @@ from app.modules.knowledge.domain.ports import (
     Chunker,
     ChunkIndex,
     Embedder,
+    Reranker,
     SourceConnector,
     SyncQueue,
     SyncStore,
@@ -66,6 +73,7 @@ __all__ = [
     "SYNC_SOURCE_JOB",
     "ArqSyncQueue",
     "ChunkDraft",
+    "ChunkHit",
     "ChunkIndex",
     "ChunkRecord",
     "ChunkRepository",
@@ -81,6 +89,7 @@ __all__ = [
     "FileConnector",
     "IndexedChunk",
     "IndexedDocument",
+    "KnowledgeSearch",
     "Listing",
     "MarkdownChunker",
     "NoConnectorError",
@@ -88,6 +97,8 @@ __all__ = [
     "QdrantChunkIndex",
     "RawItem",
     "RawItemRef",
+    "RerankError",
+    "Reranker",
     "SourceConnector",
     "SourceFileError",
     "SourceKind",

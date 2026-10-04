@@ -1,12 +1,14 @@
-"""Фейки индексации знаний для тестов пайплайна: эмбеддер и векторный индекс в памяти."""
+"""Фейки индексации и поиска знаний: эмбеддер, векторный индекс и реранкер в памяти."""
 
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
 from app.modules.knowledge.public import (
+    ChunkHit,
     EmbeddingError,
     IndexedDocument,
+    RerankError,
     VectorIndexError,
 )
 from app.modules.shared.public import TenantId
@@ -41,6 +43,7 @@ class InMemoryChunkIndex:
     fail_replace: bool = False
     fail_delete: bool = False
     ensured: bool = False
+    searches: list[tuple[TenantId, str, list[float], int]] = field(default_factory=list)
 
     async def ensure_collection(self) -> None:
         self.ensured = True
@@ -72,3 +75,47 @@ class InMemoryChunkIndex:
             d for (t, _, ext), d in self.documents.items() if (t, ext) == (tenant_id, external_id)
         ]
         return [c.chunk_id for c in document.chunks]
+
+    async def search(
+        self, tenant_id: TenantId, text: str, dense: Sequence[float], limit: int
+    ) -> list[ChunkHit]:
+        """Чанки тенанта, в которых есть слова запроса; больше общих слов — выше."""
+        self.searches.append((tenant_id, text, list(dense), limit))
+        words = set(text.lower().split())
+        scored = [
+            (len(words & set(chunk.text.lower().split())), source_id, document, chunk)
+            for (t, source_id, _), document in self.documents.items()
+            if t == tenant_id
+            for chunk in document.chunks
+        ]
+        scored = [item for item in scored if item[0] > 0]
+        scored.sort(key=lambda item: -item[0])
+        return [
+            ChunkHit(
+                chunk_id=chunk.chunk_id,
+                document_id=document.document_id,
+                source_id=source_id,
+                title=document.title,
+                text=chunk.text,
+                score=float(score),
+                url=document.url,
+                section=chunk.section,
+            )
+            for score, source_id, document, chunk in scored[:limit]
+        ]
+
+
+@dataclass
+class FakeReranker:
+    """Возвращает заданный порядок `order` (по умолчанию — обратный); `fail` — RerankError."""
+
+    order: list[int] | None = None
+    fail: bool = False
+    calls: list[tuple[str, list[str], int]] = field(default_factory=list)
+
+    async def rerank(self, query: str, texts: Sequence[str], top_n: int) -> list[int]:
+        self.calls.append((query, list(texts), top_n))
+        if self.fail:
+            raise RerankError("реранкер недоступен")
+        order = self.order if self.order is not None else list(reversed(range(len(texts))))
+        return order[:top_n]

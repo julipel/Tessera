@@ -1,6 +1,7 @@
-"""Что пайплайн кладёт в векторный индекс: чанки документа с dense-векторами (§8).
+"""Что пайплайн кладёт в векторный индекс (чанки документа с dense-векторами) и что поиск
+из него достаёт (§8).
 
-Sparse-вектор (BM25) считает сам индекс по тексту чанка.
+Sparse-вектор (BM25) считает сам индекс по тексту чанка и запроса.
 """
 
 from collections.abc import Sequence
@@ -28,3 +29,18 @@ class IndexedDocument:
     title: str
     chunks: Sequence[IndexedChunk]
     url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkHit:
+    """Найденный чанк: payload точки индекса и оценка RRF (сравнима только внутри одной
+    выдачи)."""
+
+    chunk_id: UUID
+    document_id: UUID
+    source_id: UUID
+    title: str
+    text: str
+    score: float
+    url: str | None = None
+    section: str | None = None

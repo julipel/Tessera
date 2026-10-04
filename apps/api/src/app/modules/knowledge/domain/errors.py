@@ -13,3 +13,7 @@ class EmbeddingError(DomainError):
 
 class VectorIndexError(DomainError):
     """Ошибка векторного индекса: Qdrant недоступен, отклонил запрос или не та коллекция."""
+
+
+class RerankError(DomainError):
+    """Реранкер недоступен или вернул неверный ответ."""

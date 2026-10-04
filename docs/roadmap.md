@@ -149,8 +149,16 @@
 - [x] **P4-06b Индексация в Qdrant: пайплайн.** Индексация чанков в `run_sync` (до commit,
   сбой — ошибка элемента), удаление точек пропавших документов, `ensure_collection` и сборка
   в воркере. DoD: тесты пайплайна на фейковых эмбеддере и индексе.
-- [ ] **P4-07 search_knowledge.** Гибридный поиск + RRF + опциональный реранкинг, компонент `sources`.
-  DoD: тест изоляции тенантов в Qdrant, тест качества на мини-корпусе.
+- [x] **P4-07a search_knowledge: гибридный поиск.** `ChunkIndex.search` (Query API: dense +
+  BM25, IDF по тенанту, RRF), порт `Reranker`, use case `KnowledgeSearch` (кандидаты под
+  реранкинг, откат к RRF при сбое реранкера). DoD: тест изоляции тенантов в Qdrant, тест
+  качества на мини-корпусе.
+- [ ] **P4-07b search_knowledge: инструмент.** Встроенный инструмент (`query`, `top_k`),
+  `content` для модели, компонент `sources` (фрагменты с url), ошибки → `upstream_error`;
+  сборка `KnowledgeSearch` в API и раннере эвалов. DoD: тесты инструмента, тест цикла на
+  FakeLLM с компонентом `sources`.
+- [ ] **P4-07c Реранкер.** HTTP-адаптер `/rerank` в формате Cohere/Jina (httpx), env
+  `RERANK_URL`/`RERANK_API_KEY`/`RERANK_MODEL`, без env — реранкинг выключен; ADR-0015.
 - [ ] **P4-08 search_catalog / get_entity.** Фильтры по нормализованным полям и attributes,
   сортировка, опциональный семантический запрос. DoD: тесты фильтров.
 - [ ] **P4-09 Коннектор http_api и database.** Декларативный маппинг, read-only.

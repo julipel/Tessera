@@ -6,7 +6,7 @@ HAS_API := $(wildcard $(API)/pyproject.toml)
 HAS_WEB := $(wildcard $(WEB)/package.json)
 
 .PHONY: up down ps install check check-fast test lint-py typecheck-py arch lint-web typecheck-web test-web \
-        contracts contracts-check migrate migration eval eval-diff seed dev-api dev-web worker
+        contracts contracts-check migrate migration eval eval-diff seed sync pilot dev-api dev-web worker
 
 # --wait: команда завершается, когда все сервисы прошли healthcheck
 up:
@@ -76,6 +76,14 @@ migration:
 
 seed:
 	cd $(API) && uv run python -m app.cli seed
+
+# Синхронизация источников тенантов в этом процессе, без воркера (ADR-0019).
+# make sync [t="demo-beauty"] [s="kb"] — тенант / источник; по умолчанию все из config/tenants.
+sync:
+	cd $(API) && uv run python -m app.cli sync $(t) $(if $(s),--source $(s),)
+
+# Тенанты, источники и их индексация с нуля: после make up.
+pilot: migrate seed sync
 
 dev-api:
 	cd $(API) && uv run uvicorn app.main:app --reload

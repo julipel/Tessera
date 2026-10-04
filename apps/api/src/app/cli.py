@@ -1,23 +1,44 @@
-"""Служебные команды: `python -m app.cli seed [файлы...]`, `python -m app.cli ensure-db`."""
+"""Служебные команды: `python -m app.cli seed [файлы...]`, `python -m app.cli sync [slug...]`,
+`python -m app.cli ensure-db`."""
 
 import argparse
 import asyncio
 import sys
 from pathlib import Path
+from uuid import UUID
 
 from sqlalchemy import make_url, text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.modules.shared.public import create_engine, create_session_factory
+from app.modules.knowledge.public import (
+    InvalidSourceDeclarationError,
+    LocalSourceFileStore,
+    MarkdownChunker,
+    SourceDeclaration,
+    SourceRecord,
+    SourceRepository,
+    SourceSyncRepository,
+    SqlSyncStore,
+    SyncStatus,
+    build_web_client,
+    create_qdrant_index,
+    parse_source_declarations,
+    run_sync_now,
+    seed_sources,
+    validate_source_config,
+)
+from app.modules.shared.public import TenantId, create_engine, create_session_factory
 from app.modules.tenants.public import (
     AgentConfigRepository,
     InvalidTenantSpecError,
     SqlTenantDirectory,
+    TenantSpec,
     WidgetKeyRepository,
     load_tenant_spec,
     seed_tenant,
 )
 from app.settings import Settings
+from app.worker import build_connectors, build_embedder
 
 # src/app/cli.py → корень репозитория на 4 уровня выше пакета (как в settings.py).
 DEFAULT_TENANTS_DIR = Path(__file__).resolve().parents[4] / "config" / "tenants"
@@ -40,14 +61,23 @@ async def ensure_database(url: str) -> bool:
         await admin.dispose()
 
 
+def load_specs(paths: list[Path]) -> list[tuple[TenantSpec, list[SourceDeclaration]]]:
+    """Все описания разбираются до записи в БД: ошибка в любом — ничего не записано."""
+    specs = []
+    for path in paths:
+        spec = load_tenant_spec(path.read_text(encoding="utf-8"))
+        specs.append((spec, parse_source_declarations(spec.sources, path.parent)))
+    return specs
+
+
 async def seed(
     paths: list[Path], widget_key: str | None, reset_widget_key: bool, settings: Settings
 ) -> None:
+    specs = load_specs(paths)
     engine = create_engine(settings.database_url)
     try:
         async with create_session_factory(engine)() as session, session.begin():
-            for path in paths:
-                spec = load_tenant_spec(path.read_text(encoding="utf-8"))
+            for spec, declarations in specs:
                 result = await seed_tenant(
                     spec,
                     tenants=SqlTenantDirectory(session),
@@ -63,8 +93,96 @@ async def seed(
                 )
                 if result.new_widget_key:
                     print(f"{result.tenant.slug}: ключ виджета {result.new_widget_key}")
+                sources = await seed_sources(
+                    result.tenant.id,
+                    declarations,
+                    registry=SourceRepository(session),
+                    files=LocalSourceFileStore(settings.knowledge_files_dir),
+                    validate=validate_source_config,
+                )
+                for seeded in sources.seeded:
+                    line = f"{result.tenant.slug}: источник {seeded.name} — {seeded.action}"
+                    if (files := seeded.files) is not None:
+                        line += (
+                            f", файлы: скопировано {files.copied}, удалено {files.removed}, "
+                            f"без изменений {files.unchanged}"
+                        )
+                    print(line)
+                for name in sources.undeclared:
+                    print(f"{result.tenant.slug}: источник {name} не объявлен в YAML (не удалён)")
     finally:
         await engine.dispose()
+
+
+async def sync(slugs: list[str], names: list[str], full: bool, settings: Settings) -> bool:
+    """Синхронизировать именованные источники тенантов в этом процессе (без воркера).
+    False — тенант или источник не найден либо синхронизация завершилась ошибкой."""
+    engine = create_engine(settings.database_url)
+    session_factory = create_session_factory(engine)
+    web_client = build_web_client(
+        user_agent=settings.crawler_user_agent, timeout_s=settings.crawler_timeout_s
+    )
+    embedder = build_embedder(settings)
+    qdrant_key = settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None
+    index = create_qdrant_index(
+        settings.qdrant_url,
+        collection=settings.qdrant_collection,
+        dimensions=settings.embedding_dimensions,
+        api_key=qdrant_key or None,
+    )
+    connectors = build_connectors(settings, web_client)
+    ok = True
+    try:
+        await index.ensure_collection()
+        for slug in slugs:
+            sources = await _named_sources(session_factory, slug)
+            if sources is None:
+                print(f"{slug}: тенант не найден — сначала make seed", file=sys.stderr)
+                ok = False
+                continue
+            tenant_id, by_name = sources
+            for name in names:
+                if name not in by_name:
+                    print(f"{slug}: источник {name} не найден", file=sys.stderr)
+                    ok = False
+            for name, source_id in sorted(by_name.items()):
+                if names and name not in names:
+                    continue
+                async with session_factory() as session:
+                    sync_id = await run_sync_now(
+                        tenant_id,
+                        source_id,
+                        SqlSyncStore(session),
+                        connectors,
+                        MarkdownChunker(),
+                        embedder=embedder,
+                        index=index,
+                        full=full,
+                    )
+                async with session_factory() as session:
+                    record = await SourceSyncRepository(session).get_or_raise(tenant_id, sync_id)
+                line = f"{slug}: {name} — {record.status} {record.stats}"
+                if record.error:
+                    line += f": {record.error}"
+                print(line)
+                ok = ok and record.status is SyncStatus.SUCCEEDED
+    finally:
+        await web_client.http.aclose()
+        await embedder.aclose()
+        await index.aclose()
+        await engine.dispose()
+    return ok
+
+
+async def _named_sources(
+    session_factory: async_sessionmaker[AsyncSession], slug: str
+) -> tuple[TenantId, dict[str, UUID]] | None:
+    async with session_factory() as session:
+        tenant = await SqlTenantDirectory(session).get_by_slug(slug)
+        if tenant is None:
+            return None
+        records = await SourceRepository(session).list(tenant.id, SourceRecord.name.is_not(None))
+    return tenant.id, {r.name: r.id for r in records if r.name}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -81,6 +199,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="удалить ключи тенанта и выпустить новый (--widget-key / SEED_WIDGET_KEY / случайный)",
     )
+    sync_cmd = sub.add_parser("sync", help="синхронизировать источники тенантов (без воркера)")
+    sync_cmd.add_argument("slugs", nargs="*", help="по умолчанию — тенанты из config/tenants")
+    sync_cmd.add_argument(
+        "--source", action="append", default=[], help="имя источника (можно несколько)"
+    )
+    sync_cmd.add_argument(
+        "--incremental",
+        action="store_true",
+        help="по курсору; по умолчанию полная — видит и смену конфига источника",
+    )
     sub.add_parser("ensure-db", help="создать базу из DATABASE_URL, если её нет")
     args = parser.parse_args(argv)
 
@@ -90,7 +218,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{make_url(url).database}: {'создана' if created else 'уже есть'}")
         return 0
 
-    paths: list[Path] = args.paths or sorted(DEFAULT_TENANTS_DIR.glob("*.yaml"))
+    if args.command == "sync":
+        try:
+            slugs = args.slugs or [spec.tenant.slug for spec, _ in load_specs(_tenant_files())]
+        except (InvalidTenantSpecError, InvalidSourceDeclarationError) as e:
+            print(f"невалидное описание тенанта: {e}", file=sys.stderr)
+            return 1
+        ok = asyncio.run(sync(slugs, args.source, not args.incremental, Settings()))
+        return 0 if ok else 1
+
+    paths: list[Path] = args.paths or _tenant_files()
     if not paths:
         print(f"нет файлов тенантов в {DEFAULT_TENANTS_DIR}", file=sys.stderr)
         return 1
@@ -99,10 +236,14 @@ def main(argv: list[str] | None = None) -> int:
         # Settings читает и env, и .env — os.environ один .env не видит.
         widget_key = args.widget_key or settings.seed_widget_key or None
         asyncio.run(seed(paths, widget_key, args.reset_widget_key, settings))
-    except InvalidTenantSpecError as e:
+    except (InvalidTenantSpecError, InvalidSourceDeclarationError) as e:
         print(f"невалидное описание тенанта: {e}", file=sys.stderr)
         return 1
     return 0
+
+
+def _tenant_files() -> list[Path]:
+    return sorted(DEFAULT_TENANTS_DIR.glob("*.yaml"))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Описание тенанта в YAML (config/tenants/*.yaml): метаданные, виджет, AgentConfig."""
+"""Описание тенанта в YAML (config/tenants/*.yaml): метаданные, виджет, AgentConfig, источники."""
 
 from typing import Any
 
@@ -28,6 +28,8 @@ class TenantSpec(BaseModel):
     tenant: TenantInfo
     widget: WidgetSpec = Field(default_factory=WidgetSpec)
     agent_config: AgentConfig
+    # Декларации источников (ADR-0019) разбирает knowledge, здесь — как написаны.
+    sources: list[dict[str, Any]] = Field(default_factory=list)
 
     def config_json(self) -> dict[str, Any]:
         # exclude_unset: в БД — конфиг в том виде, в каком он написан, без подставленных

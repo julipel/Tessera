@@ -5,8 +5,10 @@ from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.public import (
     AgentEvent,
@@ -22,11 +24,15 @@ from app.modules.agent.public import (
     UserMessage,
 )
 from app.modules.chat.public import TurnRequest, builtin_turn_agent
+from app.modules.shared.public import TenantId
+from app.modules.tenants.public import SqlTenantDirectory
+from app.settings import Settings
 from evals.checks import CheckResult, CheckStatus, TurnOutcome, check_turn
 from evals.dialogs import Dialog, Expect, InvalidDialogError, load_dialogs, select_dialogs
 from evals.judge import Judge, TranscriptTurn, parse_verdict
 from evals.report import RunInfo, render_markdown, render_summary, totals, write_report
 from evals.runner import DialogRunner, RunStatus, TenantConfigs, run_dialogs
+from evals.tenant_data import connect_tenant_data, resolve_tenant_ids
 
 TENANT_YAML = """
 tenant: { slug: eval-shop, name: Eval Shop }
@@ -300,6 +306,39 @@ async def test_unknown_tenant_is_dialog_error(configs: TenantConfigs) -> None:
     assert result.status is RunStatus.ERROR
     assert result.error is not None and "'nope'" in result.error
     assert result.turns == []
+
+
+async def test_tenant_id_from_db_when_known(configs: TenantConfigs) -> None:
+    tenant_id = TenantId(uuid4())
+    agent = ScriptedAgent([AnswerDelta("ok"), done()], [AnswerDelta("ok"), done()])
+
+    await DialogRunner(agent, configs, tenant_ids={"eval-shop": tenant_id}).run(
+        dialog({"user": "Привет"})
+    )
+    await DialogRunner(agent, configs, tenant_ids={"other": tenant_id}).run(
+        dialog({"user": "Привет"})
+    )
+
+    assert agent.requests[0].tenant_id == tenant_id
+    assert agent.requests[1].tenant_id != tenant_id
+
+
+async def test_resolve_tenant_ids_from_db(db_session: AsyncSession) -> None:
+    directory = SqlTenantDirectory(db_session)
+    tenant = await directory.create("eval-shop", "Eval Shop")
+
+    assert await resolve_tenant_ids(directory, ["eval-shop", "missing"]) == {"eval-shop": tenant.id}
+
+
+async def test_unreachable_db_disables_tenant_data() -> None:
+    # Немаршрутизируемый адрес: подключение висит — срабатывает таймаут.
+    settings = Settings(database_url="postgresql+asyncpg://u:p@10.255.255.1:5432/x")
+
+    data = await connect_tenant_data(settings, ["eval-shop"], timeout_s=0.2)
+
+    assert data.ids == {} and data.catalog is None
+    assert data.error is not None and "БД недоступна" in data.error
+    await data.aclose()
 
 
 async def test_run_dialogs_keeps_order(configs: TenantConfigs) -> None:

@@ -6,7 +6,7 @@
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -120,7 +120,8 @@ class TenantConfigs:
 
 class DialogRunner:
     """`judge` — LLM-судья; None — его проверки `skipped`. `turn_timeout_s` — страховка от
-    зависшего хода; лимиты хода задаёт AgentConfig."""
+    зависшего хода; лимиты хода задаёт AgentConfig. `tenant_ids` — id тенантов из БД по slug
+    (ADR-0011 п.5); тенанту не из словаря — фиксированный id, его данных в БД нет."""
 
     def __init__(
         self,
@@ -128,11 +129,13 @@ class DialogRunner:
         configs: TenantConfigs,
         judge: Judge | None = None,
         turn_timeout_s: float = 180,
+        tenant_ids: Mapping[str, TenantId] | None = None,
     ) -> None:
         self._agent = agent
         self._configs = configs
         self._judge = judge
         self._turn_timeout_s = turn_timeout_s
+        self._tenant_ids = dict(tenant_ids or {})
 
     async def run(self, dialog: Dialog) -> DialogResult:
         result = DialogResult(dialog.id, dialog.tenant, list(dialog.tags))
@@ -142,7 +145,9 @@ class DialogRunner:
             result.error = f"конфиг тенанта {dialog.tenant!r}: {e}"
             return result
 
-        tenant_id = TenantId(uuid5(_EVAL_NAMESPACE, f"tenant:{dialog.tenant}"))
+        tenant_id = self._tenant_ids.get(dialog.tenant) or TenantId(
+            uuid5(_EVAL_NAMESPACE, f"tenant:{dialog.tenant}")
+        )
         conversation = _Conversation(tenant_id=tenant_id, conversation_id=uuid4())
         transcript: list[TranscriptTurn] = []
         failed = False

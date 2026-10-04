@@ -21,3 +21,7 @@ class RerankError(DomainError):
 
 class CatalogError(DomainError):
     """Каталог недоступен: сбой запроса к БД."""
+
+
+class InvalidSourceDeclarationError(DomainError):
+    """Декларация источников тенанта (YAML, ADR-0019) невалидна: имя, вид, конфиг, файлы."""

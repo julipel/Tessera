@@ -47,8 +47,19 @@ def _source_fk() -> Mapped[UUID]:
 
 class SourceRecord(TenantScopedBase):
     __tablename__ = "sources"
+    __table_args__ = (
+        # Имя — ключ источника из YAML тенанта (ADR-0019); у источников без имени — NULL.
+        Index(
+            "uq_sources_tenant_id_name",
+            "tenant_id",
+            "name",
+            unique=True,
+            postgresql_where=text("name IS NOT NULL"),
+        ),
+    )
 
     tenant_id: Mapped[UUID] = _tenant_fk()
+    name: Mapped[str | None] = mapped_column(String(64))
     kind: Mapped[SourceKind] = mapped_column(_str_enum(SourceKind, "kind"))
     config: Mapped[dict[str, Any]] = mapped_column(
         JSONB, default=dict, server_default=text("'{}'::jsonb")

@@ -3,7 +3,8 @@
 from app.modules.knowledge.application.chunking import MarkdownChunker
 from app.modules.knowledge.application.ingestion import run_sync
 from app.modules.knowledge.application.search import KnowledgeSearch
-from app.modules.knowledge.application.sync_requests import request_sync
+from app.modules.knowledge.application.source_seed import parse_source_declarations, seed_sources
+from app.modules.knowledge.application.sync_requests import request_sync, run_sync_now
 from app.modules.knowledge.domain.catalog import (
     AttributeFilter,
     CatalogEntity,
@@ -16,6 +17,7 @@ from app.modules.knowledge.domain.entities import SourceKind, SourceStatus, Sync
 from app.modules.knowledge.domain.errors import (
     CatalogError,
     EmbeddingError,
+    InvalidSourceDeclarationError,
     NoConnectorError,
     RerankError,
     VectorIndexError,
@@ -37,8 +39,17 @@ from app.modules.knowledge.domain.ports import (
     Embedder,
     Reranker,
     SourceConnector,
+    SourceFileStore,
+    SourceRegistry,
     SyncQueue,
     SyncStore,
+)
+from app.modules.knowledge.domain.source_seed import (
+    MirrorStats,
+    SeedAction,
+    SeededSource,
+    SeedSourcesResult,
+    SourceDeclaration,
 )
 from app.modules.knowledge.infrastructure.catalog import SqlCatalog
 from app.modules.knowledge.infrastructure.database_connector import (
@@ -76,7 +87,8 @@ from app.modules.knowledge.infrastructure.repositories import (
     SourceRepository,
     SourceSyncRepository,
 )
-from app.modules.knowledge.infrastructure.source_files import SourceFileError
+from app.modules.knowledge.infrastructure.source_configs import validate_source_config
+from app.modules.knowledge.infrastructure.source_files import LocalSourceFileStore, SourceFileError
 from app.modules.knowledge.infrastructure.source_secrets import SourceSecretError, SourceSecrets
 from app.modules.knowledge.infrastructure.sync_queue import SYNC_SOURCE_JOB, ArqSyncQueue
 from app.modules.knowledge.infrastructure.sync_store import SqlSyncStore
@@ -126,9 +138,12 @@ __all__ = [
     "HttpReranker",
     "IndexedChunk",
     "IndexedDocument",
+    "InvalidSourceDeclarationError",
     "KnowledgeSearch",
     "Listing",
+    "LocalSourceFileStore",
     "MarkdownChunker",
+    "MirrorStats",
     "NoConnectorError",
     "OpenAIEmbedder",
     "QdrantChunkIndex",
@@ -136,10 +151,16 @@ __all__ = [
     "RawItemRef",
     "RerankError",
     "Reranker",
+    "SeedAction",
+    "SeedSourcesResult",
+    "SeededSource",
     "SourceConnector",
+    "SourceDeclaration",
     "SourceFileError",
+    "SourceFileStore",
     "SourceKind",
     "SourceRecord",
+    "SourceRegistry",
     "SourceRepository",
     "SourceSecretError",
     "SourceSecrets",
@@ -166,6 +187,10 @@ __all__ = [
     "create_openai_embedder",
     "create_qdrant_index",
     "parse_networks",
+    "parse_source_declarations",
     "request_sync",
     "run_sync",
+    "run_sync_now",
+    "seed_sources",
+    "validate_source_config",
 ]

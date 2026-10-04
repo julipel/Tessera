@@ -6,11 +6,21 @@
 очищен Redis) так поднимается заново.
 """
 
+from collections.abc import Mapping
 from uuid import UUID
 
 import structlog
 
-from app.modules.knowledge.domain.ports import SyncQueue, SyncStore
+from app.modules.knowledge.application.ingestion import run_sync
+from app.modules.knowledge.domain.entities import SourceKind
+from app.modules.knowledge.domain.ports import (
+    Chunker,
+    ChunkIndex,
+    Embedder,
+    SourceConnector,
+    SyncQueue,
+    SyncStore,
+)
 from app.modules.shared.kernel import NotFoundError, TenantId
 
 logger = structlog.get_logger(__name__)
@@ -40,5 +50,29 @@ async def request_sync(
         source_id=str(source_id),
         sync_id=str(sync_id),
         full=full,
+    )
+    return sync_id
+
+
+async def run_sync_now(
+    tenant_id: TenantId,
+    source_id: UUID,
+    store: SyncStore,
+    connectors: Mapping[SourceKind, SourceConnector],
+    chunker: Chunker,
+    *,
+    embedder: Embedder,
+    index: ChunkIndex,
+    full: bool = False,
+) -> UUID:
+    """Синхронизация в текущем процессе, без очереди (`app.cli sync`). Если у источника уже
+    есть активная синхронизация, выполняется она же (новой не будет); если её в это время
+    ведёт воркер, работа задвоится, но запись идемпотентна (`run_sync`)."""
+    sync_id = await store.open_sync(tenant_id, source_id)
+    if sync_id is None:
+        raise NotFoundError(f"Source {source_id} not found")
+    await store.commit()
+    await run_sync(
+        tenant_id, sync_id, store, connectors, chunker, embedder=embedder, index=index, full=full
     )
     return sync_id

@@ -8,8 +8,9 @@ from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules.knowledge.domain.catalog import CatalogEntity, CatalogPage, CatalogQuery
-from app.modules.knowledge.domain.entities import SyncStatus
+from app.modules.knowledge.domain.entities import SourceKind, SyncStatus
 from app.modules.knowledge.domain.ingestion import ChunkDraft, DocumentItem, EntityItem
+from app.modules.knowledge.domain.source_seed import RegisteredSource
 from app.modules.knowledge.infrastructure.catalog_query import (
     any_word_tsquery,
     entity_tsvector,
@@ -30,7 +31,36 @@ _ACTIVE = SourceSyncRecord.status.in_([SyncStatus.PENDING, SyncStatus.RUNNING])
 
 
 class SourceRepository(TenantRepository[SourceRecord]):
+    """Ещё и `SourceRegistry` — именованные источники из YAML тенанта (ADR-0019)."""
+
     model = SourceRecord
+
+    async def get_by_name(self, tenant_id: TenantId, name: str) -> RegisteredSource | None:
+        stmt = self._scoped(tenant_id).where(SourceRecord.name == name)
+        record = (await self.session.execute(stmt)).scalar_one_or_none()
+        return None if record is None else RegisteredSource(record.id, record.kind, record.config)
+
+    async def create(
+        self, tenant_id: TenantId, name: str, kind: SourceKind, config: dict[str, Any]
+    ) -> UUID:
+        record = SourceRecord(tenant_id=tenant_id, name=name, kind=kind, config=config)
+        return (await self.add(tenant_id, record)).id
+
+    async def update_config(
+        self, tenant_id: TenantId, source_id: UUID, config: dict[str, Any]
+    ) -> None:
+        stmt = (
+            update(SourceRecord)
+            .where(SourceRecord.tenant_id == tenant_id, SourceRecord.id == source_id)
+            .values(config=config)
+        )
+        await self.session.execute(stmt)
+
+    async def names(self, tenant_id: TenantId) -> list[str]:
+        stmt = select(SourceRecord.name).where(
+            SourceRecord.tenant_id == tenant_id, SourceRecord.name.is_not(None)
+        )
+        return [name for name in (await self.session.execute(stmt)).scalars() if name]
 
 
 class SourceSyncRepository(TenantRepository[SourceSyncRecord]):

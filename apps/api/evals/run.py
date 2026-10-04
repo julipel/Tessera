@@ -21,6 +21,7 @@ from evals.dialogs import DIALOGS_DIR, InvalidDialogError, load_dialogs, select_
 from evals.judge import JUDGE_PROMPT_VERSION, Judge
 from evals.report import REPORTS_DIR, RunInfo, render_summary, totals, write_report
 from evals.runner import TENANTS_DIR, DialogRunner, TenantConfigs, run_dialogs
+from evals.tenant_data import connect_tenant_data
 
 
 def llm_clients(settings: Settings) -> LLMClients:
@@ -61,8 +62,14 @@ async def main_async(args: argparse.Namespace) -> int:
         None if args.no_judge else Judge(llms.for_provider, args.judge_provider, args.judge_model)
     )
     knowledge = build_knowledge_services(settings)
-    agent = builtin_turn_agent(llms.for_provider, knowledge.search if knowledge else None)
-    runner = DialogRunner(agent, configs, judge)
+    tenants = await connect_tenant_data(settings, sorted({d.tenant for d in dialogs}))
+    for tenant in sorted({d.tenant for d in dialogs}):
+        source = "БД" if tenant in tenants.ids else f"нет данных: {tenants.error or 'нет в БД'}"
+        print(f"Тенант {tenant}: знания и каталог — {source}", flush=True)
+    agent = builtin_turn_agent(
+        llms.for_provider, knowledge.search if knowledge else None, tenants.catalog
+    )
+    runner = DialogRunner(agent, configs, judge, tenant_ids=tenants.ids)
     started_at = datetime.now(UTC)
     print(f"Диалогов: {len(dialogs)}, параллельно: {args.concurrency}…", flush=True)
     try:
@@ -70,6 +77,7 @@ async def main_async(args: argparse.Namespace) -> int:
     finally:
         if knowledge is not None:
             await knowledge.aclose()
+        await tenants.aclose()
 
     models: dict[str, str] = {}
     judges: dict[str, str] = {}

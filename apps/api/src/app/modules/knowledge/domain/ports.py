@@ -2,6 +2,7 @@
 индекс и реранкер (реализации — вне domain)."""
 
 from collections.abc import Collection, Sequence
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from app.modules.knowledge.domain.ingestion import (
     SourceSpec,
     SyncJob,
 )
+from app.modules.knowledge.domain.source_seed import MirrorStats, RegisteredSource
 from app.modules.shared.kernel import TenantId
 
 
@@ -143,4 +145,29 @@ class Reranker(Protocol):
 
     async def rerank(self, query: str, texts: Sequence[str], top_n: int) -> list[int]:
         """Индексы `texts`, самые релевантные первыми; не больше `top_n`."""
+        ...
+
+
+class SourceRegistry(Protocol):
+    """Именованные источники тенанта (ADR-0019)."""
+
+    async def get_by_name(self, tenant_id: TenantId, name: str) -> RegisteredSource | None: ...
+
+    async def create(
+        self, tenant_id: TenantId, name: str, kind: SourceKind, config: dict[str, Any]
+    ) -> UUID: ...
+
+    async def update_config(
+        self, tenant_id: TenantId, source_id: UUID, config: dict[str, Any]
+    ) -> None: ...
+
+    async def names(self, tenant_id: TenantId) -> list[str]:
+        """Имена всех именованных источников тенанта."""
+        ...
+
+
+class SourceFileStore(Protocol):
+    def mirror(self, source: SourceSpec, from_dir: Path) -> MirrorStats:
+        """Сделать каталог источника копией `from_dir`: новые и изменённые файлы копируются,
+        лишние удаляются; скрытые файлы и симлинки пропускаются. Синхронный (файловый I/O)."""
         ...

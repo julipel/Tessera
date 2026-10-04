@@ -6,11 +6,13 @@
 """
 
 import os
-from collections.abc import Collection
+import shutil
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from app.modules.knowledge.domain.ingestion import SourceSpec
+from app.modules.knowledge.domain.source_seed import MirrorStats
 
 
 class SourceFileError(Exception):
@@ -25,6 +27,10 @@ class SourceFile:
     size: int
 
 
+def source_dir(root: Path, source: SourceSpec) -> Path:
+    return root / str(source.tenant_id) / str(source.source_id)
+
+
 class SourceFiles:
     """Каталоги источников под `root`; читаются только файлы с расширениями `suffixes`."""
 
@@ -33,7 +39,7 @@ class SourceFiles:
         self.suffixes = frozenset(s.lower() for s in suffixes)
 
     def source_dir(self, source: SourceSpec) -> Path:
-        return self.root / str(source.tenant_id) / str(source.source_id)
+        return source_dir(self.root, source)
 
     def scan(self, source: SourceSpec) -> list[SourceFile]:
         base = self.source_dir(source)
@@ -72,3 +78,41 @@ class SourceFiles:
 
 def files_cursor(files: Collection[SourceFile], fallback: str | None = None) -> str | None:
     return str(max(f.mtime_ns for f in files)) if files else fallback
+
+
+class LocalSourceFileStore:
+    """`SourceFileStore` на локальном диске: seed файлов источника из YAML тенанта (ADR-0019)."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def mirror(self, source: SourceSpec, from_dir: Path) -> MirrorStats:
+        target = source_dir(self.root, source)
+        target.mkdir(parents=True, exist_ok=True)
+        wanted = dict(_visible_files(from_dir))
+        copied = unchanged = 0
+        for relative, path in wanted.items():
+            destination = target / relative
+            if destination.is_file() and destination.read_bytes() == path.read_bytes():
+                unchanged += 1
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            # copyfile, не copy2: новый mtime — изменение увидит и инкрементальная синхронизация.
+            shutil.copyfile(path, destination)
+            copied += 1
+        removed = 0
+        for relative, path in list(_visible_files(target)):
+            if relative not in wanted:
+                path.unlink()
+                removed += 1
+        return MirrorStats(copied=copied, removed=removed, unchanged=unchanged)
+
+
+def _visible_files(base: Path) -> Iterator[tuple[str, Path]]:
+    """(относительный posix-путь, путь) файлов без скрытых и симлинков — как читает `scan`."""
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        for name in sorted(filenames):
+            path = Path(dirpath, name)
+            if not name.startswith(".") and not path.is_symlink():
+                yield path.relative_to(base).as_posix(), path

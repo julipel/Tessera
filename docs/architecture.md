@@ -170,7 +170,9 @@ class SourceConnector(Protocol):  # knowledge/domain/ports.py
 - Каждый элемент коммитится отдельно; ошибка элемента считается в `stats.failed`,
   синхронизация продолжается. Ошибка листинга или нет коннектора — `SourceSync.failed`.
 Реализации: `website` (краулер + sitemap), `file` (PDF/DOCX/MD/TXT; файлы в
-`<KNOWLEDGE_FILES_DIR>/<tenant_id>/<source_id>/`, приводятся к markdown), `table` (CSV/XLSX),
+`<KNOWLEDGE_FILES_DIR>/<tenant_id>/<source_id>/`, приводятся к markdown: DOCX — заголовки
+по стилям `Heading N`/`Title`, списки, таблицы; PDF — текст постранично, без заголовков
+и OCR; битый/зашифрованный/пустой файл — ошибка элемента), `table` (CSV/XLSX),
 `http_api` (декларативный маппинг), `database` (SQL-запрос из конфига, read-only).
 
 ### Нормализация

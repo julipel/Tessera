@@ -134,7 +134,7 @@
   (порт SyncQueue), защита от параллельного запуска одного источника. DoD: тест задачи воркера.
 - [x] **P4-03a Коннектор file: MD/TXT.** Структурный чанкинг по заголовкам, каталог
   `<root>/<tenant_id>/<source_id>/`, `SourceSpec` в интерфейсе коннектора (ADR-0012).
-- [ ] **P4-03b Коннектор file: PDF/DOCX.** Парсеры в markdown (pypdf, python-docx).
+- [x] **P4-03b Коннектор file: PDF/DOCX.** Парсеры в markdown (pypdf, python-docx).
 - [ ] **P4-04 Коннектор table.** CSV/XLSX → Entity по маппингу колонок из конфига.
 - [ ] **P4-05 Коннектор website.** Sitemap + краулер с лимитами, извлечение основного контента.
 - [ ] **P4-06 Индексация в Qdrant.** Эмбеддинги (порт + реализация), dense+sparse, payload с tenant_id.

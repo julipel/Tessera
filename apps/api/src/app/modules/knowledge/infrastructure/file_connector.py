@@ -19,7 +19,11 @@ from app.modules.knowledge.domain.ingestion import (
     RawItemRef,
     SourceSpec,
 )
-from app.modules.knowledge.infrastructure.file_parsers import PARSERS, FileParser
+from app.modules.knowledge.infrastructure.file_parsers import (
+    PARSERS,
+    FileParseError,
+    FileParser,
+)
 
 DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024
 
@@ -92,7 +96,10 @@ class FileConnector:
         size = path.stat().st_size
         if size > self.max_file_bytes:
             raise SourceFileError(f"файл больше {self.max_file_bytes} байт: {external_id}")
-        parsed = parser(path.read_bytes())
+        try:
+            parsed = parser(path.read_bytes())
+        except FileParseError as e:
+            raise SourceFileError(f"{external_id}: {e}") from e
         return DocumentItem(
             external_id=external_id,
             title=parsed.title or path.stem,

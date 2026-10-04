@@ -153,6 +153,7 @@
               "get_entity",
               "show_entities",
               "update_dialog_state",
+              "suggest_replies",
               "show_form",
               "create_lead",
               "handoff_to_human"
@@ -209,8 +210,30 @@
           "additionalProperties": { "type": "string", "minLength": 1 },
           "description": "Подписи атрибутов Entity.attributes для пользователя; show_entities(layout=comparison) выводит строки только для них, в этом порядке.",
           "default": {}
+        },
+        "card_actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CardAction" },
+          "maxItems": 3,
+          "description": "Кнопки каждой product_card из show_entities; payload кнопки — {entity_id}.",
+          "default": []
         }
       },
+      "additionalProperties": false
+    },
+    "CardAction": {
+      "type": "object",
+      "description": "Кнопка карточки позиции: нажатие отправляет input.type=action с payload {entity_id}.",
+      "properties": {
+        "action_id": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9_]*$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "style": {
+          "type": "string",
+          "enum": ["primary", "secondary", "link"],
+          "default": "secondary"
+        }
+      },
+      "required": ["action_id", "label"],
       "additionalProperties": false
     },
     "KnowledgeConfig": {

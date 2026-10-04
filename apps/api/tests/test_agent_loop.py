@@ -19,6 +19,7 @@ from app.modules.agent.public import (
     FakeReply,
     FinishReason,
     LLMRequest,
+    SuggestionsOffered,
     ToolCall,
     ToolExecutor,
     ToolFinished,
@@ -427,3 +428,26 @@ async def test_no_state_event_without_patches() -> None:
     events = await run(llm, FakeTools())
 
     assert not any(isinstance(e, DialogStateUpdated) for e in events)
+
+
+async def test_suggestions_from_successful_tool_results() -> None:
+    a, bad = call("call_a"), call("call_bad")
+    llm = FakeLLM([FakeReply(text="Какой у вас тип кожи?", tool_calls=(a, bad)), FakeReply()])
+    tools = FakeTools(
+        {
+            "call_a": ToolResult(suggestions=("Сухая", "Жирная")),
+            # Подсказки из неуспешного вызова не показываются.
+            "call_bad": ToolResult(
+                suggestions=("Не то",),
+                error=ToolError(code="upstream_error", message="сбой", retryable=False),
+            ),
+        }
+    )
+
+    events = await run(llm, tools)
+
+    assert [e for e in events if isinstance(e, SuggestionsOffered)] == [
+        SuggestionsOffered(("Сухая", "Жирная"))
+    ]
+    assert text(events) == "Какой у вас тип кожи?"
+    assert completed(events).finish is FinishReason.ANSWERED

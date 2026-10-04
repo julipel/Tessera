@@ -1,7 +1,7 @@
 """Встроенные инструменты ядра (contracts.md §4), включаемые тенанту через `tools.builtin`.
 
-Реализованы `update_dialog_state`, `search_knowledge`, `search_catalog`, `get_entity` и
-`show_entities`;
+Реализованы `update_dialog_state`, `search_knowledge`, `search_catalog`, `get_entity`,
+`show_entities` и `suggest_replies`;
 остальные имена из конфига пропускаются — их добавят следующие задачи. Инструменты с
 зависимостями подключаются, только если окружение их собрало: `search_knowledge` — поиск
 по знаниям (`knowledge`), каталог — `catalog`; иначе — предупреждение в лог.
@@ -21,6 +21,7 @@ from app.modules.tools.application.catalog import (
 )
 from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
 from app.modules.tools.application.show_entities import SHOW_ENTITIES, show_entities_tool
+from app.modules.tools.application.suggest_replies import SUGGEST_REPLIES, suggest_replies_tool
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition
 from app.modules.tools.domain.ports import Catalog, KnowledgeSearcher
 from app.modules.tools.domain.result import ToolResult
@@ -46,6 +47,7 @@ def builtin_tools(
     которых есть зависимости."""
     factories: dict[str, Callable[[AgentConfig], ToolDefinition]] = {
         UPDATE_DIALOG_STATE: lambda c: update_dialog_state_tool(c.prompt.scenarios or []),
+        SUGGEST_REPLIES: lambda c: suggest_replies_tool(),
     }
     if knowledge is not None:
         factories[SEARCH_KNOWLEDGE] = lambda c: search_knowledge_tool(

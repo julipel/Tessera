@@ -52,6 +52,14 @@ class ComponentEmitted:
 
 
 @dataclass(frozen=True, slots=True)
+class SuggestionsOffered:
+    """Быстрые ответы из результата инструмента (`suggest_replies`); в ходе действуют
+    последние предложенные."""
+
+    items: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class DialogStateUpdated:
     """Состояние диалога после шага, в котором инструменты вернули `state_patch`: полное,
     а не патч, — chat сохраняет последнее, в том числе при прерванном ходе."""
@@ -75,5 +83,11 @@ class TurnCompleted:
 
 
 type AgentEvent = (
-    AnswerDelta | ToolStarted | ToolFinished | ComponentEmitted | DialogStateUpdated | TurnCompleted
+    AnswerDelta
+    | ToolStarted
+    | ToolFinished
+    | ComponentEmitted
+    | SuggestionsOffered
+    | DialogStateUpdated
+    | TurnCompleted
 )

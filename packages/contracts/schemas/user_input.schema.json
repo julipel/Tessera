@@ -24,6 +24,12 @@
       "properties": {
         "type": { "const": "action" },
         "action_id": { "type": "string", "minLength": 1 },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Что увидел пользователь (подпись кнопки, при необходимости с названием позиции): показывается в истории и передаётся модели. Нет — вместо подписи action_id."
+        },
         "payload": { "type": "object", "default": {} }
       },
       "required": ["type", "action_id"],

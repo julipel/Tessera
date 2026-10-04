@@ -53,7 +53,7 @@ class DialogTurn(BaseModel):
     def user_input(self) -> dict[str, Any]:
         """UserInput хода в JSON — как его присылает клиент."""
         if self.input is not None:
-            data: dict[str, Any] = self.input.root.model_dump(mode="json")
+            data: dict[str, Any] = self.input.root.model_dump(mode="json", exclude_none=True)
             return data
         return {"type": "text", "text": self.user}
 

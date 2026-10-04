@@ -126,30 +126,17 @@ AttributeLabelsAdditionalProperty = TypeAliasType(
 )
 
 
-class CatalogConfig(BaseModel):
+class CardAction(BaseModel):
+    """
+    Кнопка карточки позиции: нажатие отправляет input.type=action с payload {entity_id}.
+    """
+
     model_config = ConfigDict(
         extra="forbid",
     )
-    entity_types: dict[str, EntityTypesAdditionalProperty] | None = {}
-    """
-    Типы позиций каталога (Entity.type) → описание для модели; search_catalog принимает filters.type только из них.
-    """
-    filterable_attributes: list[str] | None = []
-    """
-    Имена полей Entity.attributes, по которым search_catalog принимает фильтры.
-    """
-    attribute_labels: dict[str, AttributeLabelsAdditionalProperty] | None = {}
-    """
-    Подписи атрибутов Entity.attributes для пользователя; show_entities(layout=comparison) выводит строки только для них, в этом порядке.
-    """
-
-
-class KnowledgeConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
-    search_knowledge: KnowledgeSearchConfig | None = None
-    catalog: CatalogConfig | None = None
+    action_id: Annotated[str, Field(min_length=1, pattern="^[a-z][a-z0-9_]*$")]
+    label: Annotated[str, Field(max_length=40, min_length=1)]
+    style: Literal["primary", "secondary", "link"] | None = "secondary"
 
 
 class BrandingTokens(BaseModel):
@@ -181,6 +168,7 @@ class ToolsConfig(BaseModel):
                 "get_entity",
                 "show_entities",
                 "update_dialog_state",
+                "suggest_replies",
                 "show_form",
                 "create_lead",
                 "handoff_to_human",
@@ -199,6 +187,38 @@ class FormConfig(BaseModel):
     )
     title: str
     fields: Annotated[list[components_schema.FormField], Field(min_length=1)]
+
+
+class CatalogConfig(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    entity_types: dict[str, EntityTypesAdditionalProperty] | None = {}
+    """
+    Типы позиций каталога (Entity.type) → описание для модели; search_catalog принимает filters.type только из них.
+    """
+    filterable_attributes: list[str] | None = []
+    """
+    Имена полей Entity.attributes, по которым search_catalog принимает фильтры.
+    """
+    attribute_labels: dict[str, AttributeLabelsAdditionalProperty] | None = {}
+    """
+    Подписи атрибутов Entity.attributes для пользователя; show_entities(layout=comparison) выводит строки только для них, в этом порядке.
+    """
+    card_actions: Annotated[
+        list[CardAction] | None, Field(max_length=3, validate_default=True)
+    ] = []
+    """
+    Кнопки каждой product_card из show_entities; payload кнопки — {entity_id}.
+    """
+
+
+class KnowledgeConfig(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    search_knowledge: KnowledgeSearchConfig | None = None
+    catalog: CatalogConfig | None = None
 
 
 class AgentConfig(BaseModel):

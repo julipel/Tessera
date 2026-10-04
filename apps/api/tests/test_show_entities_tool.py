@@ -25,9 +25,8 @@ LABELS = {"skin_type": "Тип кожи", "fragrance_free": "Без отдуше
 
 
 def tool(
-    catalog: FakeCatalog | None = None, labels: dict[str, str] | None = None
+    catalog: FakeCatalog | None = None, settings: CatalogConfig | None = None
 ) -> ToolDefinition:
-    settings = CatalogConfig(attribute_labels=labels) if labels is not None else None
     return show_entities_tool(catalog or FakeCatalog([CREAM, SERUM, MASK]), settings)
 
 
@@ -35,8 +34,11 @@ async def show(
     ids: Sequence[uuid.UUID | str], layout: str, catalog: FakeCatalog | None = None, **extra: Any
 ) -> ToolResult:
     labels = extra.pop("labels", None)
+    settings = extra.pop("settings", None)
+    if labels is not None:
+        settings = CatalogConfig(attribute_labels=labels)
     arguments = {"entity_ids": [str(i) for i in ids], "layout": layout, **extra}
-    return await call(tool(catalog, labels), arguments)
+    return await call(tool(catalog, settings), arguments)
 
 
 def validated(result: ToolResult) -> list[dict[str, Any]]:
@@ -91,6 +93,45 @@ async def test_carousel_with_title() -> None:
     assert carousel["type"] == "product_carousel"
     assert carousel["title"] == "Подходящие варианты"
     assert [item["entity_id"] for item in carousel["items"]] == [str(SERUM.id), str(CREAM.id)]
+
+
+CARD_ACTIONS = CatalogConfig.model_validate(
+    {
+        "card_actions": [
+            {"action_id": "ask_about", "label": "Подробнее"},
+            {"action_id": "select_product", "label": "Выбрать", "style": "primary"},
+        ]
+    }
+)
+
+
+async def test_card_actions_from_config_carry_entity_id() -> None:
+    [carousel] = validated(await show([SERUM.id, CREAM.id], "carousel", settings=CARD_ACTIONS))
+
+    serum, cream = carousel["items"]
+    assert serum["actions"] == [
+        {
+            "action_id": "ask_about",
+            "label": "Подробнее",
+            "style": "secondary",
+            "payload": {"entity_id": str(SERUM.id)},
+            "url": None,
+        },
+        {
+            "action_id": "select_product",
+            "label": "Выбрать",
+            "style": "primary",
+            "payload": {"entity_id": str(SERUM.id)},
+            "url": None,
+        },
+    ]
+    assert [a["payload"] for a in cream["actions"]] == [{"entity_id": str(CREAM.id)}] * 2
+
+
+async def test_comparison_has_no_card_actions() -> None:
+    [table] = validated(await show([SERUM.id, CREAM.id], "comparison", settings=CARD_ACTIONS))
+
+    assert "actions" not in table
 
 
 async def test_comparison_rows_from_labels_in_config_order() -> None:

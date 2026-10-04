@@ -275,6 +275,7 @@ export interface ToolsConfig {
     | "get_entity"
     | "show_entities"
     | "update_dialog_state"
+    | "suggest_replies"
     | "show_form"
     | "create_lead"
     | "handoff_to_human"
@@ -417,6 +418,27 @@ export interface CatalogConfig {
   attribute_labels?: {
     [k: string]: string;
   };
+  /**
+   * Кнопки каждой product_card из show_entities; payload кнопки — {entity_id}.
+   *
+   * @maxItems 3
+   */
+  card_actions?:
+    [] | [CardAction] | [CardAction, CardAction] | [CardAction, CardAction, CardAction];
+}
+/**
+ * Кнопка карточки позиции: нажатие отправляет input.type=action с payload {entity_id}.
+ *
+ * This interface was referenced by `AgentConfig`'s JSON-Schema
+ * via the `definition` "CardAction".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "CardAction".
+ */
+export interface CardAction {
+  action_id: string;
+  label: string;
+  style?: "primary" | "secondary" | "link";
 }
 /**
  * This interface was referenced by `AgentConfig`'s JSON-Schema
@@ -654,6 +676,10 @@ export interface TextInput {
 export interface ActionInput {
   type: "action";
   action_id: string;
+  /**
+   * Что увидел пользователь (подпись кнопки, при необходимости с названием позиции): показывается в истории и передаётся модели. Нет — вместо подписи action_id.
+   */
+  label?: string;
   payload?: {};
 }
 /**

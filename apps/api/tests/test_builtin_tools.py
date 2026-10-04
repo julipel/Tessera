@@ -8,12 +8,14 @@ import pytest
 from app.contracts import AgentConfig, ScenarioConfig
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.public import (
+    SUGGEST_REPLIES,
     UPDATE_DIALOG_STATE,
     ToolContext,
     ToolInvocation,
     ToolRegistry,
     ToolResult,
     builtin_tools,
+    suggest_replies_tool,
     update_dialog_state_tool,
 )
 
@@ -108,3 +110,52 @@ def test_builtin_tools_include_only_enabled_and_implemented() -> None:
 
     assert [t.name for t in enabled] == [UPDATE_DIALOG_STATE]
     assert builtin_tools(config(["search_catalog"])) == []
+
+
+# --- suggest_replies (P5-03a) ---
+
+
+async def suggest(arguments: dict[str, Any]) -> ToolResult:
+    registry = ToolRegistry([suggest_replies_tool()])
+    ctx = ToolContext(tenant_id=TenantId(uuid4()), conversation_id=uuid4(), turn_id=uuid4())
+    [result] = await registry.execute_many(
+        [ToolInvocation(id="call_1", name=SUGGEST_REPLIES, arguments=arguments)], ctx
+    )
+    return result
+
+
+async def test_suggestions_are_trimmed_in_order() -> None:
+    result = await suggest({"options": [" Сухая ", "Жирная", "Не знаю"]})
+
+    assert result.ok
+    assert result.suggestions == ("Сухая", "Жирная", "Не знаю")
+    assert result.state_patch is None and result.components == ()
+
+
+async def test_blank_or_duplicate_after_trim_options_are_dropped() -> None:
+    result = await suggest({"options": ["  ", "Да", "Да "]})
+
+    assert result.suggestions == ("Да",)
+    assert (await suggest({"options": [" "]})).suggestions == ()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"options": []},
+        {"options": ["a", "b", "c", "d", "e"]},
+        {"options": ["x" * 41]},
+        {"options": ["Да", "Да"]},
+        {"options": ["Да"], "extra": 1},
+    ],
+)
+async def test_invalid_suggestions_are_validation_errors(arguments: dict[str, Any]) -> None:
+    result = await suggest(arguments)
+
+    assert result.error is not None and result.error.code == "validation_error"
+    assert result.suggestions == ()
+
+
+def test_suggest_replies_is_enabled_by_config() -> None:
+    assert [t.name for t in builtin_tools(config(["suggest_replies"]))] == [SUGGEST_REPLIES]

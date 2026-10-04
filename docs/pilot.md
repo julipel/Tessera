@@ -101,7 +101,7 @@ fragrance_free, contains_retinoids, gender, families, seasons, intensity, concen
 ## 5. Инструменты
 
 Встроенные: `search_catalog`, `search_knowledge`, `get_entity`, `show_entities`,
-`update_dialog_state`, `show_form`, `create_lead`.
+`update_dialog_state`, `suggest_replies`, `show_form`, `create_lead`.
 
 Опционально (HTTP-инструмент тенанта, проверка декларативных инструментов):
 `check_stock(entity_id, city)` — наличие в пунктах выдачи/магазинах.

@@ -6,6 +6,7 @@
 
 from app.contracts.generated.agent_config_schema import (
     AgentConfig,
+    CardAction,
     CatalogConfig,
     KnowledgeSearchConfig,
     ScenarioConfig,
@@ -77,6 +78,7 @@ __all__ = [
     "Action",
     "ActionInput",
     "AgentConfig",
+    "CardAction",
     "CatalogConfig",
     "ComparisonTable",
     "ComparisonTableRow",

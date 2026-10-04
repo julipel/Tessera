@@ -41,9 +41,13 @@
 ```json
 {
   "client_message_id": "uuid",
-  "input": { "type": "action", "action_id": "select_product", "payload": { "entity_id": "e_123" } }
+  "input": { "type": "action", "action_id": "select_product", "label": "Выбрать — Linen Morning",
+             "payload": { "entity_id": "e_123" } }
 }
 ```
+`label` (необязательно) — что увидел пользователь: подпись кнопки, при необходимости с названием
+позиции. Показывается в истории вместо `action_id` и передаётся модели вместе с `action_id`
+и `payload`. Быстрый ответ (`suggestions`) отправляется обычным `input.type=text`.
 ```json
 {
   "client_message_id": "uuid",
@@ -98,6 +102,10 @@
 `error` → `done{failed}`. `seq` начинается с 1. Ответ ассистента записан в историю до `done`;
 при обрыве соединения клиентом частичный ответ сохраняется со статусом `interrupted`.
 
+`suggestions` приходит из инструмента `suggest_replies` (ADR-0020) в любой момент хода; если
+событий несколько, действует последнее. Подсказки показываются под последним ответом, пока
+пользователь не отправил новый ввод; в историю не сохраняются.
+
 Правила: `seq` монотонно растёт в пределах хода; блоки сообщения упорядочены по первому
 появлению `block_id`; клиент игнорирует неизвестные `type`. Сырые результаты инструментов
 в клиент не отправляются.
@@ -150,6 +158,8 @@ Discriminated union по полю `type`. Все URL и цены — из дан
   "payload": { }, "url": null }
 ```
 Если `url` задан — это ссылка; иначе нажатие отправляет `input.type = "action"`.
+Кнопки `product_card` из `show_entities` — из `knowledge.catalog.card_actions` тенанта
+(`payload: {entity_id}`); у `comparison_table` кнопок нет.
 
 ## 4. Интерфейс инструментов
 
@@ -167,6 +177,7 @@ class ToolResult(BaseModel):
     content: str | dict            # компактно, для модели
     components: list[Component] = []
     state_patch: dict | None = None
+    suggestions: list[str] = []    # быстрые ответы → SSE `suggestions`
     error: ToolError | None = None
 
 class ToolError(BaseModel):
@@ -194,6 +205,7 @@ AgentConfig (лишний слот или неверный тип — `validatio
 | `get_entity(entity_id)` | детали сущности; неизвестный id — `not_found` |
 | `show_entities(entity_ids, layout: "cards" \| "carousel" \| "comparison", title?)` | UI-компоненты по id из БД (ADR-0004) |
 | `update_dialog_state(slots?, facts?)` | запись собранной информации |
+| `suggest_replies(options)` | 1–4 быстрых ответа (≤ 40 символов) от лица пользователя → SSE `suggestions` (ADR-0020) |
 | `show_form(form_key)` | форма из конфига тенанта |
 | `create_lead(fields)` | заявка (side_effect, requires_confirmation) |
 | `handoff_to_human(reason)` | передача оператору (позже) |
@@ -248,7 +260,8 @@ prompt:
         budget: { type: number, description: "Бюджет" }
         recipient: { type: string }
 tools:
-  builtin: [search_knowledge, search_catalog, get_entity, show_entities, update_dialog_state]
+  builtin: [search_knowledge, search_catalog, get_entity, show_entities, update_dialog_state,
+            suggest_replies]
   custom: [ ...HTTP-инструменты... ]
 forms:
   contact: { title: "...", fields: [...] }
@@ -258,6 +271,7 @@ knowledge:
     entity_types: { product: "товары", service: "услуги" }   # filters.type search_catalog — только эти
     filterable_attributes: [color, size, material]
     attribute_labels: { color: "Цвет", size: "Размер" }   # строки comparison в show_entities
+    card_actions: [{ action_id: ask_about, label: "Подробнее", style: secondary }]  # ≤ 3
 branding:
   tokens: { primary: "#1F4FFF", radius: "12px", font: "Inter" }
   logo_url: "..."

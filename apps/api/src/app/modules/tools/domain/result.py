@@ -20,11 +20,13 @@ class ToolError:
 @dataclass(frozen=True, slots=True)
 class ToolResult:
     """`content` — компактно для модели, `components` — UI-компоненты (contracts.md §3) для чата,
-    `state_patch` — изменения DialogState."""
+    `state_patch` — изменения DialogState, `suggestions` — быстрые ответы под сообщением
+    (подписи, которые клиент отправит как текст пользователя)."""
 
     content: str | dict[str, Any] = ""
     components: tuple[dict[str, Any], ...] = ()
     state_patch: dict[str, Any] | None = None
+    suggestions: tuple[str, ...] = ()
     error: ToolError | None = None
 
     @property

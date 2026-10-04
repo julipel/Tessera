@@ -110,9 +110,12 @@ def _user_text(message: ChatMessage) -> str:
     user_input: dict[str, Any] = message.input or {}
     match user_input.get("type"):
         case "action":
+            # Подпись — то, что видел пользователь; action_id и payload — для инструментов.
+            label = user_input.get("label")
+            button = f"«{label}» ({user_input['action_id']})" if label else user_input["action_id"]
             payload = user_input.get("payload")
             details = f" {_json(payload)}" if payload else ""
-            return f"[Нажата кнопка {user_input['action_id']}{details}]"
+            return f"[Нажата кнопка {button}{details}]"
         case "form_submit":
             return f"[Отправлена форма {user_input['form_id']}: {_json(user_input['values'])}]"
         case _:

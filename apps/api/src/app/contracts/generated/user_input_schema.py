@@ -26,6 +26,10 @@ class ActionInput(BaseModel):
     )
     type: Literal["action"]
     action_id: Annotated[str, Field(min_length=1)]
+    label: Annotated[str | None, Field(max_length=200, min_length=1)] = None
+    """
+    Что увидел пользователь (подпись кнопки, при необходимости с названием позиции): показывается в истории и передаётся модели. Нет — вместо подписи action_id.
+    """
     payload: dict[str, Any] | None = {}
 
 

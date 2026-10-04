@@ -147,6 +147,7 @@ agent_config:
       - get_entity
       - show_entities
       - update_dialog_state
+      - suggest_replies
       - show_form
       - create_lead
 
@@ -196,6 +197,9 @@ agent_config:
         longevity: "Стойкость"
         seasons: "Сезоны"
         volume_ml: "Объём, мл"
+      # Кнопки карточек show_entities: нажатие → input.type=action, payload {entity_id}
+      card_actions:
+        - { action_id: ask_about, label: "Подробнее" }
 
   branding:
     tokens: { primary: "#8C5A6B", radius: "12px", font: "Inter" }

@@ -4,7 +4,9 @@
 
 Строки таблицы сравнения — цена, наличие, категория и атрибуты из
 `knowledge.catalog.attribute_labels` (в порядке конфига): ключи атрибутов пользователю не
-показываются, подписи — бизнес-специфика тенанта.
+показываются, подписи — бизнес-специфика тенанта. Кнопки карточек — из
+`knowledge.catalog.card_actions`: нажатие приходит в диалог как `input.type=action` с
+`payload: {entity_id}` (contracts.md §1).
 """
 
 from collections.abc import Mapping, Sequence
@@ -15,6 +17,8 @@ from uuid import UUID
 import structlog
 
 from app.contracts import (
+    Action,
+    CardAction,
     CatalogConfig,
     ComparisonTable,
     ComparisonTableRow,
@@ -49,6 +53,7 @@ _DESCRIPTION = (
 
 def show_entities_tool(catalog: Catalog, settings: CatalogConfig | None = None) -> ToolDefinition:
     labels = dict((settings.attribute_labels if settings else None) or {})
+    actions = tuple((settings.card_actions if settings else None) or ())
     return ToolDefinition(
         name=SHOW_ENTITIES,
         description=_DESCRIPTION,
@@ -74,12 +79,14 @@ def show_entities_tool(catalog: Catalog, settings: CatalogConfig | None = None) 
             "required": ["entity_ids", "layout"],
             "additionalProperties": False,
         },
-        handler=_handler(catalog, labels),
+        handler=_handler(catalog, labels, actions),
         display_label="Показываю варианты",
     )
 
 
-def _handler(catalog: Catalog, labels: Mapping[str, str]) -> ToolHandler:
+def _handler(
+    catalog: Catalog, labels: Mapping[str, str], actions: Sequence[CardAction]
+) -> ToolHandler:
     async def handle(arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
         raw_ids: list[str] = arguments["entity_ids"]
         layout: str = arguments["layout"]
@@ -119,7 +126,7 @@ def _handler(catalog: Catalog, labels: Mapping[str, str]) -> ToolHandler:
             content["not_found"] = missing
         return ToolResult(
             content=content,
-            components=_components(layout, entities, labels, arguments.get("title")),
+            components=_components(layout, entities, labels, actions, arguments.get("title")),
             state_patch={"shown_entities": [str(e.id) for e in entities]},
         )
 
@@ -130,18 +137,19 @@ def _components(
     layout: str,
     entities: Sequence[CatalogEntity],
     labels: Mapping[str, str],
+    actions: Sequence[CardAction],
     title: str | None,
 ) -> tuple[dict[str, Any], ...]:
     if layout == COMPARISON:
         return (comparison_table(entities, labels),)
-    cards = [product_card(entity) for entity in entities]
+    cards = [product_card(entity, actions) for entity in entities]
     if layout == CAROUSEL:
         carousel = ProductCarousel(type="product_carousel", title=title, items=cards)
         return (carousel.model_dump(mode="json"),)
     return tuple(card.model_dump(mode="json") for card in cards)
 
 
-def product_card(entity: CatalogEntity) -> ProductCard:
+def product_card(entity: CatalogEntity, actions: Sequence[CardAction] = ()) -> ProductCard:
     price = None
     if entity.price is not None and entity.currency:
         price = Price(amount=_number(entity.price), currency=entity.currency)
@@ -154,6 +162,15 @@ def product_card(entity: CatalogEntity) -> ProductCard:
         price=price,
         badges=[label] if (label := _stock_label(entity.in_stock)) else [],
         url=entity.url,
+        actions=[
+            Action(
+                action_id=action.action_id,
+                label=action.label,
+                style=action.style,
+                payload={"entity_id": str(entity.id)},
+            )
+            for action in actions
+        ],
     )
 
 

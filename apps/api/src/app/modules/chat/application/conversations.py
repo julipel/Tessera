@@ -88,6 +88,6 @@ def user_message(
         role=MessageRole.USER,
         status=MessageStatus.COMPLETED,
         content=payload.text if isinstance(payload, TextInput) else "",
-        input=user_input.model_dump(mode="json"),
+        input=user_input.model_dump(mode="json", exclude_none=True),
         client_message_id=client_message_id,
     )

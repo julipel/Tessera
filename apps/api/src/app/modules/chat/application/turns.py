@@ -17,6 +17,7 @@ from app.modules.agent.kernel import (
     ComponentEmitted,
     DialogStateUpdated,
     LLMError,
+    SuggestionsOffered,
     ToolFinished,
     ToolStarted,
     TurnCompleted,
@@ -176,6 +177,12 @@ class TurnStream:
                 block = self._add_block({"type": "component", "component": component})
                 yield self._event(
                     "component", {"block_id": block["block_id"], "component": component}
+                )
+            case SuggestionsOffered(items=items):
+                # Нажатие быстрого ответа — обычный текст пользователя (contracts.md §2).
+                yield self._event(
+                    "suggestions",
+                    {"items": [{"label": i, "input": {"type": "text", "text": i}} for i in items]},
                 )
             case DialogStateUpdated(state=state):
                 self._dialog_state = state.to_dict()

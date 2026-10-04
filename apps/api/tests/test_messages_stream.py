@@ -30,6 +30,7 @@ from app.modules.agent.public import (
     ToolStarted,
     TurnCompleted,
     Usage,
+    UserMessage,
 )
 from app.modules.chat.api.router import get_turn_agent
 from app.modules.chat.api.sse import sse_stream
@@ -51,7 +52,7 @@ from app.modules.tenants.public import (
     WidgetKeyRepository,
     hash_widget_key,
 )
-from app.modules.tools.public import ToolRegistry, builtin_tools
+from app.modules.tools.public import ToolRegistry, builtin_tools, suggest_replies_tool
 
 URL = "/v1/conversations"
 TEXT = {"type": "text", "text": "Нужен подарок маме"}
@@ -663,6 +664,53 @@ async def test_dialog_through_agent_loop_keeps_history(
         if m.role == "assistant"
     ]
     assert texts == [ANSWER, "Тогда посмотрите наборы до 3000."]
+
+
+# --- Действия и быстрые ответы (P5-03a) ---
+
+
+async def test_action_with_label_and_suggestions_through_agent_loop(
+    db_client: AsyncClient, conversation_id: UUID, use_agent: Any
+) -> None:
+    suggest = ToolCall(
+        id="call_1",
+        name="suggest_replies",
+        arguments={"options": ["Сухая", "Жирная"]},
+        raw_arguments='{"options": ["Сухая", "Жирная"]}',
+    )
+    llm = FakeLLM([FakeReply(text="Какой у вас тип кожи?", tool_calls=(suggest,)), FakeReply()])
+    use_agent(
+        LoopTurnAgent(
+            lambda _: llm, lambda _: RegistryToolExecutor(ToolRegistry([suggest_replies_tool()]))
+        )
+    )
+    action = {
+        "type": "action",
+        "action_id": "ask_about",
+        "label": "Подробнее — Крем",
+        "payload": {"entity_id": "e1"},
+    }
+
+    events = [
+        e.model_dump()
+        for _, e in _parse_sse((await _send(db_client, conversation_id, action)).text)
+    ]
+
+    [suggestions] = [e["data"] for e in events if e["type"] == "suggestions"]
+    assert suggestions == {
+        "items": [
+            {"label": "Сухая", "input": {"type": "text", "text": "Сухая"}},
+            {"label": "Жирная", "input": {"type": "text", "text": "Жирная"}},
+        ]
+    }
+    assert events[-1]["type"] == "done" and events[-1]["data"]["status"] == "completed"
+    # Модель видит подпись кнопки, история хранит исходный ввод с подписью.
+    assert llm.requests[0].messages[-1] == UserMessage(
+        '[Нажата кнопка «Подробнее — Крем» (ask_about) {"entity_id": "e1"}]'
+    )
+    user, _ = (await _history(db_client, conversation_id)).messages
+    assert user.input is not None
+    assert user.input.root.model_dump() == action
 
 
 # --- DialogState (P2-09) ---

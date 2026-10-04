@@ -56,6 +56,16 @@ def test_history_maps_inputs_and_skips_empty_answers() -> None:
         message(
             MessageRole.USER,
             "",
+            {
+                "type": "action",
+                "action_id": "ask_about",
+                "label": "Подробнее — Крем",
+                "payload": {"entity_id": "e1"},
+            },
+        ),
+        message(
+            MessageRole.USER,
+            "",
             {"type": "form_submit", "form_id": "contact", "values": {"name": "Аня"}},
         ),
     ]
@@ -64,6 +74,8 @@ def test_history_maps_inputs_and_skips_empty_answers() -> None:
         UserMessage("Привет"),
         UserMessage('[Нажата кнопка pick {"id": 7}]'),
         AssistantMessage("Отличный выбор."),
+        # Подпись кнопки — то, что видел пользователь; id и payload — для инструментов.
+        UserMessage('[Нажата кнопка «Подробнее — Крем» (ask_about) {"entity_id": "e1"}]'),
         UserMessage('[Отправлена форма contact: {"name": "Аня"}]'),
     ]
 

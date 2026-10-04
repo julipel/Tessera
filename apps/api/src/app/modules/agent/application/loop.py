@@ -12,6 +12,7 @@ from app.modules.agent.domain.events import (
     ComponentEmitted,
     DialogStateUpdated,
     FinishReason,
+    SuggestionsOffered,
     ToolFinished,
     ToolStarted,
     TurnCompleted,
@@ -94,6 +95,8 @@ class AgentLoop:
                 )
                 for component in result.components:
                     yield ComponentEmitted(component)
+                if result.ok and result.suggestions:
+                    yield SuggestionsOffered(result.suggestions)
             patches = [r.state_patch for r in results if r.ok and r.state_patch]
             if patches:
                 for patch in patches:

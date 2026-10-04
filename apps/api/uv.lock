@@ -75,6 +75,8 @@ dependencies = [
     { name = "arq" },
     { name = "asyncpg" },
     { name = "fastapi" },
+    { name = "httpcore" },
+    { name = "httpx" },
     { name = "jsonschema" },
     { name = "openai" },
     { name = "openpyxl" },
@@ -90,7 +92,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "datamodel-code-generator" },
-    { name = "httpx" },
     { name = "import-linter" },
     { name = "mypy" },
     { name = "pytest" },
@@ -108,6 +109,8 @@ requires-dist = [
     { name = "arq", specifier = ">=0.28.0" },
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "fastapi", specifier = ">=0.142.2" },
+    { name = "httpcore", specifier = ">=1.0.9" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "openai", specifier = ">=3.24.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
@@ -123,7 +126,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "datamodel-code-generator", specifier = ">=0.83.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "import-linter", specifier = ">=2.15" },
     { name = "mypy", specifier = ">=2.3.1" },
     { name = "pytest", specifier = ">=9.1.1" },

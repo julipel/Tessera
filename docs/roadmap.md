@@ -138,8 +138,11 @@
 - [x] **P4-04 Коннектор table.** CSV/XLSX → Entity по маппингу колонок из конфига.
 - [x] **P4-05a Коннектор website: разбор.** HTML → markdown (основной контент, ссылки,
   meta robots), sitemap (`urlset`/`sitemapindex`/текст/gzip), нормализация URL.
-- [ ] **P4-05b Коннектор website: краулер.** httpx, robots.txt, лимиты, защита от SSRF,
-  sitemap + обход ссылок, кэш discover → fetch, ADR-0013.
+- [x] **P4-05b Коннектор website: сеть.** HTTP-клиент на httpx с защитой от SSRF в сетевом
+  бэкенде (DNS rebinding, редиректы), лимиты ответа, robots.txt (RFC 9309), ADR-0013.
+- [ ] **P4-05c Коннектор website: краулер.** `WebsiteConnector`: sitemap + обход ссылок,
+  лимиты обхода (страницы, глубина, время, Crawl-delay), кэш discover → fetch, подключение
+  в воркере, настройки User-Agent/таймаута.
 - [ ] **P4-06 Индексация в Qdrant.** Эмбеддинги (порт + реализация), dense+sparse, payload с tenant_id.
 - [ ] **P4-07 search_knowledge.** Гибридный поиск + RRF + опциональный реранкинг, компонент `sources`.
   DoD: тест изоляции тенантов в Qdrant, тест качества на мини-корпусе.

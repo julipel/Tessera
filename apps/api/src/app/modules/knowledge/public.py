@@ -1,6 +1,6 @@
 """Публичный интерфейс модуля knowledge — единственная точка входа для других модулей."""
 
-from app.modules.knowledge.application.chunking import ParagraphChunker
+from app.modules.knowledge.application.chunking import MarkdownChunker
 from app.modules.knowledge.application.ingestion import run_sync
 from app.modules.knowledge.application.sync_requests import request_sync
 from app.modules.knowledge.domain.entities import SourceKind, SourceStatus, SyncStatus
@@ -12,9 +12,11 @@ from app.modules.knowledge.domain.ingestion import (
     Listing,
     RawItem,
     RawItemRef,
+    SourceSpec,
     content_hash,
 )
 from app.modules.knowledge.domain.ports import Chunker, SourceConnector, SyncQueue, SyncStore
+from app.modules.knowledge.infrastructure.file_connector import FileConnector, SourceFileError
 from app.modules.knowledge.infrastructure.models import (
     ChunkRecord,
     DocumentRecord,
@@ -45,15 +47,18 @@ __all__ = [
     "EntityItem",
     "EntityRecord",
     "EntityRepository",
+    "FileConnector",
     "Listing",
+    "MarkdownChunker",
     "NoConnectorError",
-    "ParagraphChunker",
     "RawItem",
     "RawItemRef",
     "SourceConnector",
+    "SourceFileError",
     "SourceKind",
     "SourceRecord",
     "SourceRepository",
+    "SourceSpec",
     "SourceStatus",
     "SourceSyncRecord",
     "SourceSyncRepository",

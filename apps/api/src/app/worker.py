@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.logs import configure_logging
 from app.modules.knowledge.public import (
     Chunker,
-    ParagraphChunker,
+    FileConnector,
+    MarkdownChunker,
     SourceConnector,
     SourceKind,
     SqlSyncStore,
@@ -28,9 +29,9 @@ from app.settings import Settings
 logger = structlog.get_logger(__name__)
 
 
-def build_connectors() -> dict[SourceKind, SourceConnector]:
-    """Коннекторы источников по виду. Реализации добавляются в P4-03+."""
-    return {}
+def build_connectors(settings: Settings) -> dict[SourceKind, SourceConnector]:
+    """Коннекторы источников по виду."""
+    return {SourceKind.FILE: FileConnector(settings.knowledge_files_dir)}
 
 
 async def sync_source(ctx: dict[str, Any], tenant_id: str, sync_id: str, full: bool) -> None:
@@ -63,8 +64,8 @@ async def startup(ctx: dict[str, Any]) -> None:
     engine = create_engine(settings.database_url, echo=settings.database_echo)
     ctx["engine"] = engine
     ctx["session_factory"] = create_session_factory(engine)
-    ctx["connectors"] = build_connectors()
-    ctx["chunker"] = ParagraphChunker()
+    ctx["connectors"] = build_connectors(settings)
+    ctx["chunker"] = MarkdownChunker()
     logger.info("worker.started")
 
 

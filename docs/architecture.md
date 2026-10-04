@@ -153,10 +153,11 @@ async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
 ```python
 class SourceConnector(Protocol):  # knowledge/domain/ports.py
     kind: SourceKind
-    async def discover(self, cfg) -> Listing: ...               # полный список + курсор
-    async def fetch(self, cfg, ref: RawItemRef) -> RawItem: ...  # DocumentItem | EntityItem
-    async def changed_since(self, cfg, cursor) -> Listing: ...  # инкрементально
+    async def discover(self, source: SourceSpec) -> Listing: ...               # полный список + курсор
+    async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem: ...  # DocumentItem | EntityItem
+    async def changed_since(self, source: SourceSpec, cursor) -> Listing: ...  # инкрементально
 ```
+`SourceSpec = (tenant_id, source_id, config)` — коннектор знает владельца источника (ADR-0012).
 `Listing = (refs, cursor)`: курсор для следующего `changed_since`. Коннектор отдаёт уже
 нормализованный элемент (по маппингу своего конфига); остальное делает общий пайплайн
 `run_sync` (knowledge/application/ingestion.py):
@@ -168,7 +169,8 @@ class SourceConnector(Protocol):  # knowledge/domain/ports.py
   что не удалось получить в этом прогоне).
 - Каждый элемент коммитится отдельно; ошибка элемента считается в `stats.failed`,
   синхронизация продолжается. Ошибка листинга или нет коннектора — `SourceSync.failed`.
-Реализации: `website` (краулер + sitemap), `file` (PDF/DOCX/MD/TXT), `table` (CSV/XLSX),
+Реализации: `website` (краулер + sitemap), `file` (PDF/DOCX/MD/TXT; файлы в
+`<KNOWLEDGE_FILES_DIR>/<tenant_id>/<source_id>/`, приводятся к markdown), `table` (CSV/XLSX),
 `http_api` (декларативный маппинг), `database` (SQL-запрос из конфига, read-only).
 
 ### Нормализация
@@ -180,7 +182,8 @@ Entity хранится в Postgres: нормализованные поля (`t
 
 ### Индексация и поиск
 - Чанкинг по структуре документа (заголовки), 300–800 токенов, overlap, метаданные:
-  tenant_id, source_id, url, title, section, updated_at.
+  tenant_id, source_id, url, title, section, updated_at. `MarkdownChunker`: коннекторы отдают
+  markdown, чанк не пересекает секцию, `section` — путь заголовков («Доставка > Сроки»).
 - Qdrant: коллекция на окружение, изоляция по payload `tenant_id` (обязательный фильтр в
   репозитории). Dense + sparse (BM25) векторы, гибридный поиск с RRF.
 - Реранкинг top-k (по конфигу; можно отключить).

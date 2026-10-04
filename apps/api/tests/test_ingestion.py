@@ -15,13 +15,14 @@ from app.modules.knowledge.public import (
     EntityItem,
     EntityRepository,
     Listing,
-    ParagraphChunker,
+    MarkdownChunker,
     RawItem,
     RawItemRef,
     SourceConnector,
     SourceKind,
     SourceRecord,
     SourceRepository,
+    SourceSpec,
     SourceSyncRecord,
     SourceSyncRepository,
     SqlSyncStore,
@@ -49,18 +50,18 @@ class FakeConnector:
     discover_error: Exception | None = None
     calls: list[tuple[str, Any]] = field(default_factory=list)
 
-    async def discover(self, cfg: dict[str, Any]) -> Listing:
-        self.calls.append(("discover", cfg))
+    async def discover(self, source: SourceSpec) -> Listing:
+        self.calls.append(("discover", source.config))
         if self.discover_error is not None:
             raise self.discover_error
         return Listing([RawItemRef(ext) for ext in self.items], self.cursor)
 
-    async def fetch(self, cfg: dict[str, Any], ref: RawItemRef) -> RawItem:
+    async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem:
         if ref.external_id in self.broken:
             raise FetchError("источник не ответил")
         return self.items[ref.external_id]
 
-    async def changed_since(self, cfg: dict[str, Any], cursor: str) -> Listing:
+    async def changed_since(self, source: SourceSpec, cursor: str) -> Listing:
         self.calls.append(("changed_since", cursor))
         return Listing([RawItemRef(ext) for ext in self.changes], self.cursor)
 
@@ -102,7 +103,7 @@ class Env:
             sync_id,
             SqlSyncStore(self.session),
             {SourceKind.FILE: connector or self.connector},
-            ParagraphChunker(max_chars=20),
+            MarkdownChunker(max_tokens=2, overlap_tokens=0),
             full=full,
         )
         return sync_id
@@ -246,7 +247,7 @@ async def test_unknown_source_kind_marks_sync_failed(env: Env) -> None:
     sync = await SourceSyncRepository(env.session).add(
         env.tenant_id, SourceSyncRecord(tenant_id=env.tenant_id, source_id=env.source_id)
     )
-    await run_sync(env.tenant_id, sync.id, SqlSyncStore(env.session), {}, ParagraphChunker())
+    await run_sync(env.tenant_id, sync.id, SqlSyncStore(env.session), {}, MarkdownChunker())
 
     record = await env.sync_record(sync.id)
     assert record.status is SyncStatus.FAILED
@@ -311,7 +312,7 @@ async def test_finished_sync_is_not_rerun(env: Env) -> None:
         sync_id,
         SqlSyncStore(env.session),
         {SourceKind.FILE: env.connector},
-        ParagraphChunker(),
+        MarkdownChunker(),
     )
 
     assert env.connector.calls == []
@@ -330,7 +331,7 @@ async def test_sync_of_other_tenant_is_not_found(db_session: AsyncSession) -> No
             b_sync.id,
             SqlSyncStore(db_session),
             {SourceKind.FILE: a.connector},
-            ParagraphChunker(),
+            MarkdownChunker(),
         )
 
 
@@ -369,19 +370,6 @@ def test_content_hash_ignores_attribute_order() -> None:
 
     assert content_hash(a) == content_hash(b)
     assert content_hash(a) != content_hash(replace(a, price=Decimal("1.00")))
-
-
-def test_paragraph_chunker() -> None:
-    chunker = ParagraphChunker(max_chars=12)
-
-    chunks = chunker.chunk("раз два\n\nтри\n\n  \n\nчетыре пять шесть")
-
-    assert [(c.ord, c.text, c.token_count) for c in chunks] == [
-        (0, "раз два\n\nтри", 3),
-        (1, "четыре пять ", 2),
-        (2, "шесть", 1),
-    ]
-    assert chunker.chunk("   ") == []
 
 
 def test_fake_connector_satisfies_protocol() -> None:

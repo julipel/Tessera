@@ -11,3 +11,5 @@ node_modules/
 evals/reports/
 .claude/settings.local.json
 dist/
+# Файлы источников знаний (KNOWLEDGE_FILES_DIR).
+data/

@@ -9,6 +9,16 @@ from typing import Any
 from uuid import UUID
 
 from app.modules.knowledge.domain.entities import SourceKind, SyncStatus
+from app.modules.shared.kernel import TenantId
+
+
+@dataclass(frozen=True, slots=True)
+class SourceSpec:
+    """Источник для коннектора: тенант, id и `Source.config` (ADR-0012)."""
+
+    tenant_id: TenantId
+    source_id: UUID
+    config: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)

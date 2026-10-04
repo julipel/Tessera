@@ -13,23 +13,24 @@ from app.modules.knowledge.domain.ingestion import (
     Listing,
     RawItem,
     RawItemRef,
+    SourceSpec,
     SyncJob,
 )
 from app.modules.shared.kernel import TenantId
 
 
 class SourceConnector(Protocol):
-    """Коннектор источника (architecture.md §8). `cfg` — `Source.config`."""
+    """Коннектор источника (architecture.md §8, ADR-0012)."""
 
     kind: SourceKind
 
-    async def discover(self, cfg: dict[str, Any]) -> Listing:
+    async def discover(self, source: SourceSpec) -> Listing:
         """Полный список элементов источника: чего нет в листинге — удаляется."""
         ...
 
-    async def fetch(self, cfg: dict[str, Any], ref: RawItemRef) -> RawItem: ...
+    async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem: ...
 
-    async def changed_since(self, cfg: dict[str, Any], cursor: str) -> Listing:
+    async def changed_since(self, source: SourceSpec, cursor: str) -> Listing:
         """Элементы, изменённые после `cursor`. Удалений не сообщает."""
         ...
 

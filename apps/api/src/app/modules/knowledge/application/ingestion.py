@@ -15,6 +15,7 @@ from app.modules.knowledge.domain.errors import NoConnectorError
 from app.modules.knowledge.domain.ingestion import (
     DocumentItem,
     ItemKey,
+    SourceSpec,
     SyncJob,
     SyncStats,
     content_hash,
@@ -88,12 +89,13 @@ async def _ingest(
     if connector is None:
         raise NoConnectorError(f"нет коннектора для источника вида {job.kind}")
 
+    source = SourceSpec(tenant_id, job.source_id, job.config)
     previous = None if full else await store.last_cursor(tenant_id, job.source_id)
     if previous is not None:
         stats.incremental = True
-        listing = await connector.changed_since(job.config, previous)
+        listing = await connector.changed_since(source, previous)
     else:
-        listing = await connector.discover(job.config)
+        listing = await connector.discover(source)
     stats.discovered = len(listing.refs)
 
     known = await store.item_hashes(tenant_id, job.source_id)
@@ -101,7 +103,7 @@ async def _ingest(
     failed_ids: set[str] = set()
     for ref in listing.refs:
         try:
-            item = await connector.fetch(job.config, ref)
+            item = await connector.fetch(source, ref)
             key = item_key(item)
             seen.add(key)
             digest = content_hash(item)

@@ -14,12 +14,13 @@ from app.modules.knowledge.public import (
     DocumentItem,
     DocumentRepository,
     Listing,
-    ParagraphChunker,
+    MarkdownChunker,
     RawItem,
     RawItemRef,
     SourceKind,
     SourceRecord,
     SourceRepository,
+    SourceSpec,
     SourceSyncRecord,
     SourceSyncRepository,
     SqlSyncStore,
@@ -36,13 +37,13 @@ from app.worker import WorkerSettings, sync_source
 class OneDocConnector:
     kind: SourceKind = SourceKind.FILE
 
-    async def discover(self, cfg: dict[str, Any]) -> Listing:
+    async def discover(self, source: SourceSpec) -> Listing:
         return Listing([RawItemRef("faq")], None)
 
-    async def fetch(self, cfg: dict[str, Any], ref: RawItemRef) -> RawItem:
+    async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem:
         return DocumentItem(external_id=ref.external_id, title="FAQ", text="Доставка 2 дня.")
 
-    async def changed_since(self, cfg: dict[str, Any], cursor: str) -> Listing:
+    async def changed_since(self, source: SourceSpec, cursor: str) -> Listing:
         return Listing([], cursor)
 
 
@@ -91,7 +92,7 @@ async def test_worker_task_runs_sync(
             bind=db_connection, join_transaction_mode="create_savepoint", expire_on_commit=False
         ),
         "connectors": {SourceKind.FILE: OneDocConnector()},
-        "chunker": ParagraphChunker(),
+        "chunker": MarkdownChunker(),
     }
     await sync_source(ctx, str(tenant_id), str(queued_id), full)
 

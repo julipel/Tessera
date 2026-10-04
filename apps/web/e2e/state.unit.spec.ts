@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 import type { Event } from "@/contracts";
-import { type ChatState, TYPING, chatReducer, initialChatState } from "../src/lib/chat/state";
+import {
+  type ChatState,
+  TYPING,
+  chatReducer,
+  initialChatState,
+  inputText,
+} from "../src/lib/chat/state";
 
 const base = { protocol_version: "1", conversation_id: "c", turn_id: "t1", ts: "" } as const;
 let seq = 0;
@@ -11,7 +17,11 @@ function run(state: ChatState, ...events: Event[]): ChatState {
   return events.reduce((s, event) => chatReducer(s, { type: "event", event }), state);
 }
 
-const sent = chatReducer(initialChatState, { type: "user_sent", id: "local:1", text: "привет" });
+const sent = chatReducer(initialChatState, {
+  type: "user_sent",
+  id: "local:1",
+  input: { type: "text", text: "привет" },
+});
 
 test("ход: индикатор до первого текста, дельты склеиваются по block_id, done завершает", () => {
   expect(sent).toMatchObject({ busy: true, activity: TYPING });
@@ -115,4 +125,60 @@ test("ошибка до начала ответа (например, 401) пок
   expect(failed.messages).toEqual([
     expect.objectContaining({ role: "user", status: "completed", error: "неизвестный ключ виджета" }),
   ]);
+});
+
+test("нажатие кнопки: в истории подпись выбора, без подписи — action_id", () => {
+  const action = {
+    type: "action",
+    action_id: "ask_about",
+    label: "Подробнее — Крем",
+    payload: { entity_id: "e1" },
+  } as const;
+  const state = chatReducer(initialChatState, { type: "user_sent", id: "local:2", input: action });
+  expect(state.messages).toEqual([
+    expect.objectContaining({ role: "user", text: "Подробнее — Крем" }),
+  ]);
+  expect(state.busy).toBe(true);
+
+  // Старые сообщения истории — без label.
+  expect(inputText({ type: "action", action_id: "select_product" })).toBe("select_product");
+  expect(inputText({ type: "form_submit", form_id: "f", values: {} })).toBe("Форма отправлена");
+});
+
+test("suggestions: подсказки у сообщения хода, действует последнее событие", () => {
+  const item = (text: string) => ({ label: text, input: { type: "text", text } }) as const;
+  const state = run(
+    sent,
+    ev({ type: "turn_started", message_id: "m2", data: {} }),
+    ev({ type: "suggestions", data: { items: [item("Сухая")] } }),
+    ev({ type: "suggestions", data: { items: [item("Жирная"), item("Не знаю")] } }),
+    ev({ type: "done", data: { status: "completed" } }),
+  );
+  expect(state.messages.at(-1)).toMatchObject({
+    role: "assistant",
+    suggestions: [item("Жирная"), item("Не знаю")],
+  });
+  // Подсказки остаются у своего сообщения; MessageList показывает их только под последним.
+  const next = chatReducer(state, { type: "user_sent", id: "local:3", input: item("Жирная").input });
+  expect(next.messages.at(-1)).toMatchObject({ role: "user", text: "Жирная" });
+});
+
+test("история: ввод action показывается подписью", () => {
+  const restored = chatReducer(initialChatState, {
+    type: "history",
+    history: {
+      conversation_id: "c",
+      messages: [
+        {
+          message_id: "u1",
+          role: "user",
+          status: "completed",
+          created_at: "",
+          input: { type: "action", action_id: "ask_about", label: "Подробнее — Сыворотка" },
+          blocks: [],
+        },
+      ],
+    },
+  });
+  expect(restored.messages[0].text).toBe("Подробнее — Сыворотка");
 });

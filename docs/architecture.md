@@ -438,6 +438,10 @@ AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSON
   картинок — их приносят только компоненты) + компоненты из discriminated union `type`
   (см. contracts). Неизвестный тип игнорируется. Витрина всех вариантов — `/demo/components`
   (только dev), скриншот-тесты — `e2e/components.spec.ts`.
+- Действия и быстрые ответы (ADR-0020): кнопка компонента отправляет `input.type=action`
+  с `label` («подпись — название позиции» для карточек), в истории видна подпись. Подсказки
+  `suggestions` — под последним ответом, пока не начат новый ход; на пустом чате —
+  `starter_suggestions` из public config. Во время хода кнопки и подсказки неактивны.
 - Клиент SSE с переподключением, состояниями «печатает / ищет / ошибка / повторить».
 - Типы — только из `@/contracts` (`apps/web/src/contracts/generated`, см. contracts.md).
 

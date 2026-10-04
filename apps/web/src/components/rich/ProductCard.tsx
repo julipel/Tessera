@@ -43,7 +43,7 @@ export function ProductCard({ card, onAction }: { card: ProductCardData; onActio
         )}
         <div className="mt-auto flex flex-col gap-2">
           {card.price && <p className="text-lg font-semibold">{formatPrice(card.price)}</p>}
-          <ActionRow actions={card.actions} onAction={onAction} />
+          <ActionRow actions={card.actions} subject={card.title} onAction={onAction} />
         </div>
       </div>
     </article>

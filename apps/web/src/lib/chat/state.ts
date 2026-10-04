@@ -1,5 +1,12 @@
 // Состояние чата: история + применение событий хода. Чистые функции — тестируются без браузера.
-import type { Event, HistoryMessage, MessageBlock, MessageHistory, UserInput } from "@/contracts";
+import type {
+  Event,
+  HistoryMessage,
+  MessageBlock,
+  MessageHistory,
+  SuggestionItem,
+  UserInput,
+} from "@/contracts";
 
 export type MessageStatus = "streaming" | HistoryMessage["status"];
 
@@ -10,6 +17,8 @@ export interface ChatMessage {
   /** Текст пользователя (для user); у assistant — пусто, содержимое в blocks. */
   text: string;
   blocks: MessageBlock[];
+  /** Быстрые ответы хода (событие `suggestions`); показываются только под последним ответом. */
+  suggestions?: SuggestionItem[];
   turnId?: string;
   error?: string;
 }
@@ -24,7 +33,7 @@ export interface ChatState {
 
 export type ChatAction =
   | { type: "history"; history: MessageHistory }
-  | { type: "user_sent"; id: string; text: string }
+  | { type: "user_sent"; id: string; input: UserInput }
   | { type: "event"; event: Event }
   | { type: "stream_failed"; message: string };
 
@@ -43,7 +52,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         activity: TYPING,
         messages: [
           ...state.messages,
-          { id: action.id, role: "user", status: "completed", text: action.text, blocks: [] },
+          { id: action.id, role: "user", status: "completed", text: inputText(action.input), blocks: [] },
         ],
       };
     case "event":
@@ -98,6 +107,9 @@ function applyEvent(state: ChatState, event: Event): ChatState {
     }
     case "status":
       return { ...state, activity: event.data.label };
+    case "suggestions":
+      // Несколько событий за ход — действует последнее.
+      return { ...state, messages: update((m) => ({ ...m, suggestions: event.data.items })) };
     case "error":
       return { ...state, messages: update((m) => ({ ...m, error: event.data.message })) };
     case "done":
@@ -107,7 +119,7 @@ function applyEvent(state: ChatState, event: Event): ChatState {
         messages: update((m) => ({ ...m, status: event.data.status })),
       };
     default:
-      // text_done, инструменты и подсказки — с P5-03/P5-07.
+      // text_done и инструменты — с P5-07.
       return state;
   }
 }
@@ -140,7 +152,7 @@ export function inputText(input: UserInput): string {
     case "text":
       return input.text;
     case "action":
-      return `Действие: ${input.action_id}`;
+      return input.label ?? input.action_id;
     case "form_submit":
       return "Форма отправлена";
   }

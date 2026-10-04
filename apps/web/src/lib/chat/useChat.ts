@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { Action, UserInput } from "@/contracts";
 import { ApiError, ChatApi } from "@/lib/api/client";
 import { type ChatMessage, chatReducer, initialChatState } from "./state";
 
@@ -12,14 +13,22 @@ export interface UseChat {
   busy: boolean;
   activity: string | null;
   loadError: string | null;
-  send: (text: string) => Promise<void>;
+  /** Стартовые подсказки тенанта (public config) — для пустого чата. */
+  starterSuggestions: string[];
+  send: (input: UserInput) => Promise<void>;
+  sendText: (text: string) => Promise<void>;
+  /** Нажатие кнопки компонента: `input.type=action` с подписью выбора для истории. */
+  act: (action: Action, subject?: string) => Promise<void>;
 }
+
+const LABEL_MAX = 200; // ActionInput.label в user_input.schema.json
 
 /** Диалог посетителя: восстановление из истории, отправка и стрим хода. */
 export function useChat(apiUrl: string, widgetKey: string): UseChat {
   const api = useMemo(() => new ChatApi(apiUrl, widgetKey), [apiUrl, widgetKey]);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [starterSuggestions, setStarterSuggestions] = useState<string[]>([]);
   const conversationId = useRef<string | null>(null);
   const abort = useRef<AbortController | null>(null);
 
@@ -27,6 +36,14 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
     async (id: string) => dispatch({ type: "history", history: await api.getHistory(id) }),
     [api],
   );
+
+  useEffect(() => {
+    // Без конфига чат работает, просто без стартовых подсказок.
+    api
+      .getPublicConfig()
+      .then((config) => setStarterSuggestions(config.assistant.starter_suggestions))
+      .catch(() => setStarterSuggestions([]));
+  }, [api]);
 
   useEffect(() => {
     const stored = readStorage(conversationKey(widgetKey));
@@ -46,10 +63,10 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
   }, [widgetKey, loadHistory]);
 
   const send = useCallback(
-    async (text: string) => {
-      if (state.busy || !text.trim()) return;
+    async (input: UserInput) => {
+      if (state.busy || (input.type === "text" && !input.text.trim())) return;
       const clientMessageId = crypto.randomUUID();
-      dispatch({ type: "user_sent", id: `local:${clientMessageId}`, text });
+      dispatch({ type: "user_sent", id: `local:${clientMessageId}`, input });
       abort.current = new AbortController();
       let finished = false;
       try {
@@ -59,7 +76,7 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
         }
         const events = await api.sendMessage(
           conversationId.current,
-          { client_message_id: clientMessageId, input: { type: "text", text } },
+          { client_message_id: clientMessageId, input },
           abort.current.signal,
         );
         for await (const event of events) {
@@ -83,7 +100,20 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
     [api, widgetKey, state.busy, loadHistory],
   );
 
-  return { ...state, loadError, send };
+  const sendText = useCallback((text: string) => send({ type: "text", text }), [send]);
+
+  const act = useCallback(
+    (action: Action, subject?: string) =>
+      send({
+        type: "action",
+        action_id: action.action_id,
+        label: (subject ? `${action.label} — ${subject}` : action.label).slice(0, LABEL_MAX),
+        payload: action.payload ?? {},
+      }),
+    [send],
+  );
+
+  return { ...state, loadError, starterSuggestions, send, sendText, act };
 }
 
 function visitorId(): string {

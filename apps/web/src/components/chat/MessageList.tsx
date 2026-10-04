@@ -1,25 +1,44 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import type { UserInput } from "@/contracts";
 import type { ChatMessage } from "@/lib/chat/state";
+import type { OnAction } from "../rich/ActionButton";
 import { MessageBlocks } from "./MessageBlocks";
+import { type Suggestion, Suggestions } from "./Suggestions";
 
 const STATUS_NOTE: Partial<Record<ChatMessage["status"], string>> = {
   interrupted: "Ответ прерван",
   failed: "Не удалось ответить",
 };
 
+/**
+ * `onAction` и `onPick` не заданы, пока идёт ход: кнопки компонентов отключены, подсказки скрыты.
+ * Подсказки — под последним ответом ассистента; на пустом чате — стартовые (`starter`).
+ */
 export function MessageList({
   messages,
   activity,
+  starter,
+  onAction,
+  onPick,
 }: {
   messages: ChatMessage[];
   activity: string | null;
+  starter: string[];
+  onAction?: OnAction;
+  onPick?: (input: UserInput) => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
+  const last = messages.at(-1);
+  const suggestions: Suggestion[] = !messages.length
+    ? starter.map((text) => ({ label: text, input: { type: "text", text } }))
+    : last?.role === "assistant"
+      ? (last.suggestions ?? [])
+      : [];
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [messages, activity]);
+  }, [messages, activity, starter]);
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6">
@@ -36,7 +55,7 @@ export function MessageList({
                 {m.text}
               </div>
             ) : (
-              <MessageBlocks blocks={m.blocks} />
+              <MessageBlocks blocks={m.blocks} onAction={onAction} />
             )}
             {(m.error || STATUS_NOTE[m.status]) && (
               <p className="mt-1 text-sm text-chat-danger">{m.error ?? STATUS_NOTE[m.status]}</p>
@@ -44,6 +63,11 @@ export function MessageList({
           </li>
         ))}
       </ol>
+      {onPick && (
+        <div className="mx-auto mt-3 max-w-2xl">
+          <Suggestions items={suggestions} onPick={onPick} />
+        </div>
+      )}
       <div aria-live="polite" className="mx-auto max-w-2xl">
         {activity && (
           <p role="status" className="mt-3 text-sm text-chat-muted animate-pulse">

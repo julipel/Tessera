@@ -194,7 +194,7 @@
 - [x] **P5-03a Действия и быстрые ответы: бэкенд.** `suggest_replies` → SSE `suggestions`,
   кнопки карточек из `knowledge.catalog.card_actions`, `ActionInput.label` (история и модель),
   ADR-0020. DoD: тесты на FakeLLM и SSE.
-- [ ] **P5-03b Действия и быстрые ответы: фронт.** Нажатие Action → `input.type=action`
+- [x] **P5-03b Действия и быстрые ответы: фронт.** Нажатие Action → `input.type=action`
   с `label`, чипы `suggestions` под последним ответом, `starter_suggestions` из public config
   на пустом чате, подпись выбора в истории. DoD: unit-тесты reducer'а, e2e.
 - [ ] **P5-04 Формы и подтверждения.** form, confirm, `create_lead` с requires_confirmation.

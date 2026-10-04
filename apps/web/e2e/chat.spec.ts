@@ -34,3 +34,33 @@ test("неверный ключ виджета — ошибка вместо о�
   await expect(page.getByRole("button", { name: "Отправить" })).toBeDisabled(); // пустой ввод
   await expect(page.getByRole("status")).toHaveCount(0);
 });
+
+test("стартовые подсказки на пустом чате отправляются как текст", async ({ page }) => {
+  await page.goto(`/?key=${WIDGET_KEY}`);
+  const quick = page.getByRole("group", { name: "Быстрые ответы" });
+  // starter_suggestions демо-тенанта (config/tenants/demo-beauty.yaml).
+  await quick.getByRole("button", { name: "Найти аромат" }).click();
+
+  await expect(page.locator('li[data-role="user"]')).toHaveText("Найти аромат");
+  await expect(page.locator('li[data-role="assistant"]')).toHaveText("Вы написали: Найти аромат");
+  await expect(quick).toHaveCount(0);
+});
+
+test("быстрые ответы от suggest_replies: под последним ответом, нажатие отправляет текст", async ({
+  page,
+}) => {
+  await page.goto(`/?key=${WIDGET_KEY}`);
+  // Мок модели на слово «варианты» вызывает suggest_replies(["Сухая", "Жирная"]).
+  await page.getByLabel("Сообщение").fill("Покажи варианты");
+  await page.getByLabel("Сообщение").press("Enter");
+
+  const quick = page.getByRole("group", { name: "Быстрые ответы" });
+  await expect(quick.getByRole("button")).toHaveText(["Сухая", "Жирная"]);
+  await expect(page.locator('li[data-role="assistant"]')).toHaveAttribute("data-status", "completed");
+
+  await quick.getByRole("button", { name: "Сухая" }).click();
+  await expect(page.locator('li[data-role="user"]').last()).toHaveText("Сухая");
+  await expect(page.locator('li[data-role="assistant"]').last()).toHaveText("Вы написали: Сухая");
+  // У нового ответа подсказок нет — старые не показываются.
+  await expect(quick).toHaveCount(0);
+});

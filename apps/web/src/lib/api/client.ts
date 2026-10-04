@@ -4,6 +4,7 @@ import type {
   Event,
   HttpErrorBody,
   MessageHistory,
+  PublicConfig,
   SendMessageRequest,
 } from "@/contracts";
 import { readEvents } from "./sse";
@@ -35,6 +36,11 @@ export class ChatApi {
     });
     const body = (await resp.json()) as CreateConversationResponse;
     return body.conversation_id;
+  }
+
+  async getPublicConfig(): Promise<PublicConfig> {
+    const resp = await this.request("/v1/public/config");
+    return (await resp.json()) as PublicConfig;
   }
 
   async getHistory(conversationId: string): Promise<MessageHistory> {

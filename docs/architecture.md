@@ -264,7 +264,9 @@ Entity хранится в Postgres: нормализованные поля (`t
   prefetch и на верхнем уровне.
 - Реранкинг top-k (по конфигу; можно отключить): порт `Reranker`, из индекса берётся
   `max(3·top_k, 20)` кандидатов. Без настроенного реранкера `rerank: true` игнорируется;
-  сбой реранкера — порядок RRF и предупреждение в лог, поиск не падает.
+  сбой реранкера — порядок RRF и предупреждение в лог, поиск не падает. Реализация —
+  `HttpReranker`: HTTP `/rerank` в формате Cohere/Jina (`RERANK_URL`, `RERANK_MODEL`,
+  `RERANK_API_KEY`), порядок по `relevance_score` (ADR-0015).
 - `search_knowledge` возвращает фрагменты с источниками; `search_catalog` — Entity по
   фильтрам + опционально семантическому запросу по описанию.
   `search_knowledge` (tools) зависит от порта `KnowledgeSearcher` (tools.domain, типы из

@@ -157,7 +157,7 @@
   `content` для модели, компонент `sources` (фрагменты с url), ошибки → `upstream_error`;
   сборка `KnowledgeSearch` в API и раннере эвалов. DoD: тесты инструмента, тест цикла на
   FakeLLM с компонентом `sources`.
-- [ ] **P4-07c Реранкер.** HTTP-адаптер `/rerank` в формате Cohere/Jina (httpx), env
+- [x] **P4-07c Реранкер.** HTTP-адаптер `/rerank` в формате Cohere/Jina (httpx), env
   `RERANK_URL`/`RERANK_API_KEY`/`RERANK_MODEL`, без env — реранкинг выключен; ADR-0015.
 - [ ] **P4-08 search_catalog / get_entity.** Фильтры по нормализованным полям и attributes,
   сортировка, опциональный семантический запрос. DoD: тесты фильтров.

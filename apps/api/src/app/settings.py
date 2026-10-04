@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     embedding_batch_size: int = 128
+    # Реранкинг search_knowledge: HTTP `/rerank` в формате Cohere/Jina (ADR-0015), полный URL
+    # endpoint. Без URL и модели реранкинг выключен (`rerank: true` в конфиге не действует).
+    rerank_url: str | None = None
+    rerank_api_key: SecretStr | None = None
+    rerank_model: str | None = None
+    # Короткий: весь search_knowledge (эмбеддинг, Qdrant, реранкинг) укладывается в 10 с.
+    rerank_timeout_s: float = 3.0
     # Файлы источников `file`: <dir>/<tenant_id>/<source_id>/ (ADR-0012).
     knowledge_files_dir: Path = _REPO_ROOT / "data" / "knowledge"
     # Краулер источников `website` (ADR-0013).

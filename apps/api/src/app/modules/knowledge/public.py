@@ -32,6 +32,7 @@ from app.modules.knowledge.domain.ports import (
     SyncStore,
 )
 from app.modules.knowledge.infrastructure.file_connector import FileConnector
+from app.modules.knowledge.infrastructure.http_reranker import HttpReranker, create_http_reranker
 from app.modules.knowledge.infrastructure.models import (
     ChunkRecord,
     DocumentRecord,
@@ -87,6 +88,7 @@ __all__ = [
     "EntityRecord",
     "EntityRepository",
     "FileConnector",
+    "HttpReranker",
     "IndexedChunk",
     "IndexedDocument",
     "KnowledgeSearch",
@@ -122,6 +124,7 @@ __all__ = [
     "WebsiteSourceError",
     "build_web_client",
     "content_hash",
+    "create_http_reranker",
     "create_openai_embedder",
     "create_qdrant_index",
     "request_sync",

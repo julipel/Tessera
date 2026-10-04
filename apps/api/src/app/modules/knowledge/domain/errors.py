@@ -17,3 +17,7 @@ class VectorIndexError(DomainError):
 
 class RerankError(DomainError):
     """Реранкер недоступен или вернул неверный ответ."""
+
+
+class CatalogError(DomainError):
+    """Каталог недоступен: сбой запроса к БД."""

@@ -268,7 +268,16 @@ Entity хранится в Postgres: нормализованные поля (`t
   `HttpReranker`: HTTP `/rerank` в формате Cohere/Jina (`RERANK_URL`, `RERANK_MODEL`,
   `RERANK_API_KEY`), порядок по `relevance_score` (ADR-0015).
 - `search_knowledge` возвращает фрагменты с источниками; `search_catalog` — Entity по
-  фильтрам + опционально семантическому запросу по описанию.
+  фильтрам + опционально текстовому запросу.
+  Каталог (P4-08a, ADR-0016) — `EntityRepository.search(tenant_id, CatalogQuery)`, один SQL-запрос:
+  фильтры `types`, `categories` (без учёта регистра), `price_min/max`, `in_stock`,
+  `attributes` (`any_of`: строка — без учёта регистра, число, boolean — по типу JSON; `min/max` —
+  только числовые значения). `query` — полнотекстовый поиск Postgres (`russian`) по
+  названию, категории и строковым атрибутам: подходит любое из слов, ранг — `ts_rank`.
+  Порядок: в наличии выше, затем `sort` (`relevance`/`price_asc`/`price_desc`/`title`; без
+  цены — в конце), затем название и id; `total` — до limit/offset. Для инструментов — порт
+  tools `Catalog`, реализация `SqlCatalog`: своя короткая сессия на вызов, сбой БД —
+  `CatalogError`. Векторного поиска по сущностям пока нет.
   `search_knowledge` (tools) зависит от порта `KnowledgeSearcher` (tools.domain, типы из
   `knowledge.kernel` — ADR-0008); `KnowledgeSearch` подставляет сборщик агента
   (`app/knowledge_wiring.py` → API и раннер эвалов; без `OPENAI_API_KEY` инструмент не

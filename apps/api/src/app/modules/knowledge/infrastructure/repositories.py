@@ -4,11 +4,19 @@ from collections.abc import Collection, Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
+from app.modules.knowledge.domain.catalog import CatalogEntity, CatalogPage, CatalogQuery
 from app.modules.knowledge.domain.entities import SyncStatus
 from app.modules.knowledge.domain.ingestion import ChunkDraft, DocumentItem, EntityItem
+from app.modules.knowledge.infrastructure.catalog_query import (
+    any_word_tsquery,
+    entity_tsvector,
+    filter_criteria,
+    order_by,
+    to_catalog_entity,
+)
 from app.modules.knowledge.infrastructure.models import (
     ChunkRecord,
     DocumentRecord,
@@ -158,6 +166,44 @@ class EntityRepository(_SourceItemRepository[EntityRecord]):
                 "content_hash": content_hash,
             },
         )
+
+    async def search(self, tenant_id: TenantId, query: CatalogQuery) -> CatalogPage:
+        """Структурный поиск по каталогу (ADR-0003, ADR-0016): фильтры, полнотекстовый `query`
+        (подходит любое из слов, ранг — `ts_rank`) и сортировка."""
+        criteria = filter_criteria(query.filters)
+        rank: ColumnElement[Any] | None = None
+        text = (query.query or "").strip()
+        if text:
+            ts_query = any_word_tsquery(text)
+            document = entity_tsvector()
+            # Запрос из одних стоп-слов пуст: тогда он не фильтрует и не ранжирует.
+            criteria.append(or_(func.numnode(ts_query) == 0, document.op("@@")(ts_query)))
+            rank = func.ts_rank(document, ts_query)
+        stmt = (
+            self._scoped(tenant_id)
+            .add_columns(func.count().over().label("total"))
+            .where(*criteria)
+            .order_by(*order_by(query.sort, rank))
+            .limit(query.limit)
+            .offset(query.offset)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        if rows:
+            total = int(rows[0].total)
+        elif query.offset == 0:
+            total = 0
+        else:  # страница за концом выдачи: окну нечего посчитать
+            count = (
+                select(func.count())
+                .select_from(EntityRecord)
+                .where(EntityRecord.tenant_id == tenant_id, *criteria)
+            )
+            total = int((await self.session.execute(count)).scalar_one())
+        return CatalogPage(items=[to_catalog_entity(row[0]) for row in rows], total=total)
+
+    async def get_catalog_entity(self, tenant_id: TenantId, id: UUID) -> CatalogEntity | None:
+        record = await self.get(tenant_id, id)
+        return to_catalog_entity(record) if record is not None else None
 
 
 class ChunkRepository(TenantRepository[ChunkRecord]):

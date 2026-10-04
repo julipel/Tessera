@@ -159,8 +159,14 @@
   FakeLLM с компонентом `sources`.
 - [x] **P4-07c Реранкер.** HTTP-адаптер `/rerank` в формате Cohere/Jina (httpx), env
   `RERANK_URL`/`RERANK_API_KEY`/`RERANK_MODEL`, без env — реранкинг выключен; ADR-0015.
-- [ ] **P4-08 search_catalog / get_entity.** Фильтры по нормализованным полям и attributes,
-  сортировка, опциональный семантический запрос. DoD: тесты фильтров.
+- [x] **P4-08a Запрос каталога.** `EntityRepository.search` (`CatalogQuery`): фильтры по
+  нормализованным полям и attributes, сортировка, `query` — полнотекстовый поиск Postgres
+  (ADR-0016); `SqlCatalog` (своя сессия на вызов) и порт tools `Catalog`.
+  DoD: тесты фильтров на Postgres, изоляция тенантов.
+- [ ] **P4-08b search_catalog / get_entity: инструменты.** Схема аргументов по
+  `knowledge.catalog.filterable_attributes`, `content` для модели, `not_found`/`upstream_error`,
+  сборка `SqlCatalog` в API (в эвалах без БД — не подключается). DoD: тесты инструментов,
+  тест цикла на FakeLLM.
 - [ ] **P4-09 Коннектор http_api и database.** Декларативный маппинг, read-only.
 - [ ] **P4-10 Загрузка данных пилота.** Все источники пилота проиндексированы. DoD: `make eval` —
   вопросы по знаниям проходят.

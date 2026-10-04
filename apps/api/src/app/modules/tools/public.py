@@ -14,12 +14,13 @@ from app.modules.tools.domain.definition import (
     ToolHandler,
     ToolInvocation,
 )
-from app.modules.tools.domain.ports import KnowledgeSearcher
+from app.modules.tools.domain.ports import Catalog, KnowledgeSearcher
 from app.modules.tools.domain.result import ToolError, ToolErrorCode, ToolResult
 
 __all__ = [
     "SEARCH_KNOWLEDGE",
     "UPDATE_DIALOG_STATE",
+    "Catalog",
     "InvalidToolDefinitionError",
     "KnowledgeSearcher",
     "ToolContext",

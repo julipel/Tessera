@@ -4,8 +4,17 @@ from app.modules.knowledge.application.chunking import MarkdownChunker
 from app.modules.knowledge.application.ingestion import run_sync
 from app.modules.knowledge.application.search import KnowledgeSearch
 from app.modules.knowledge.application.sync_requests import request_sync
+from app.modules.knowledge.domain.catalog import (
+    AttributeFilter,
+    CatalogEntity,
+    CatalogFilters,
+    CatalogPage,
+    CatalogQuery,
+    CatalogSort,
+)
 from app.modules.knowledge.domain.entities import SourceKind, SourceStatus, SyncStatus
 from app.modules.knowledge.domain.errors import (
+    CatalogError,
     EmbeddingError,
     NoConnectorError,
     RerankError,
@@ -31,6 +40,7 @@ from app.modules.knowledge.domain.ports import (
     SyncQueue,
     SyncStore,
 )
+from app.modules.knowledge.infrastructure.catalog import SqlCatalog
 from app.modules.knowledge.infrastructure.file_connector import FileConnector
 from app.modules.knowledge.infrastructure.http_reranker import HttpReranker, create_http_reranker
 from app.modules.knowledge.infrastructure.models import (
@@ -73,6 +83,13 @@ from app.modules.knowledge.infrastructure.website_connector import (
 __all__ = [
     "SYNC_SOURCE_JOB",
     "ArqSyncQueue",
+    "AttributeFilter",
+    "CatalogEntity",
+    "CatalogError",
+    "CatalogFilters",
+    "CatalogPage",
+    "CatalogQuery",
+    "CatalogSort",
     "ChunkDraft",
     "ChunkHit",
     "ChunkIndex",
@@ -110,6 +127,7 @@ __all__ = [
     "SourceStatus",
     "SourceSyncRecord",
     "SourceSyncRepository",
+    "SqlCatalog",
     "SqlSyncStore",
     "SyncQueue",
     "SyncStatus",

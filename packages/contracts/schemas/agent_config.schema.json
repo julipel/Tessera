@@ -37,9 +37,19 @@
           "items": { "type": "string" },
           "default": []
         },
-        "fallback_message": { "type": "string" }
+        "fallback_message": { "type": "string" },
+        "confirm_labels": { "$ref": "#/$defs/ConfirmLabels" }
       },
       "required": ["name", "greeting", "fallback_message"],
+      "additionalProperties": false
+    },
+    "ConfirmLabels": {
+      "type": "object",
+      "description": "Подписи кнопок компонента confirm у инструментов с requires_confirmation (ADR-0021).",
+      "properties": {
+        "confirm": { "type": "string", "minLength": 1, "default": "Подтвердить" },
+        "cancel": { "type": "string", "minLength": 1, "default": "Отмена" }
+      },
       "additionalProperties": false
     },
     "ModelConfig": {

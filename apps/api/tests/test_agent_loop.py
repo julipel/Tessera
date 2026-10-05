@@ -14,6 +14,7 @@ from app.modules.agent.public import (
     AnswerDelta,
     AssistantMessage,
     ComponentEmitted,
+    ConfirmationReply,
     DialogStateUpdated,
     FakeLLM,
     FakeReply,
@@ -32,7 +33,7 @@ from app.modules.agent.public import (
     Usage,
     UserMessage,
 )
-from app.modules.memory.public import DialogState
+from app.modules.memory.public import DialogState, PendingConfirmation
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.public import ToolError, ToolErrorCode, ToolResult
 
@@ -79,6 +80,7 @@ class FakeTools:
         self.hang = hang
         self.delay_s = delay_s
         self.batches: list[tuple[ToolCall, ...]] = []
+        self.confirmed: list[ToolCall] = []
         self.cancelled = False
 
     def schemas(self) -> tuple[ToolSchema, ...]:
@@ -95,13 +97,21 @@ class FakeTools:
         await asyncio.sleep(self.delay_s)
         return [self.results.get(c.id, ToolResult(content={"found": 1})) for c in calls]
 
+    async def execute_confirmed(self, call: ToolCall, ctx: TurnContext) -> ToolResult:
+        self.confirmed.append(call)
+        return self.results.get(call.id, ToolResult(content="Заявка создана."))
+
     @property
     def executed(self) -> list[ToolCall]:
         return [c for batch in self.batches for c in batch]
 
 
 def context(
-    *, max_steps: int = 6, max_tool_retries: int = 2, state: DialogState | None = None
+    *,
+    max_steps: int = 6,
+    max_tool_retries: int = 2,
+    state: DialogState | None = None,
+    confirmation: ConfirmationReply | None = None,
 ) -> TurnContext:
     return TurnContext(
         tenant_id=TenantId(uuid4()),
@@ -114,6 +124,7 @@ def context(
         fallback_message=FALLBACK,
         temperature=0.3,
         state=state or DialogState(),
+        confirmation=confirmation,
     )
 
 
@@ -451,3 +462,86 @@ async def test_suggestions_from_successful_tool_results() -> None:
     ]
     assert text(events) == "Какой у вас тип кожи?"
     assert completed(events).finish is FinishReason.ANSWERED
+
+
+PENDING = PendingConfirmation("cf_1", "create_lead", {"form_key": "consultation", "fields": {}})
+WAITING = DialogState(slots={"budget": 3000}, pending_confirmation=PENDING)
+
+
+def last_user_text(request: LLMRequest) -> str:
+    last = request.messages[-1]
+    assert isinstance(last, UserMessage)
+    return last.text
+
+
+async def test_approved_confirmation_runs_pending_call_before_model() -> None:
+    llm = FakeLLM([FakeReply(text="Заявка принята.")])
+    tools = FakeTools()
+
+    events = await run(
+        llm, tools, context(state=WAITING, confirmation=ConfirmationReply("cf_1", approved=True))
+    )
+
+    # Исполнен ожидающий вызов с аргументами из состояния, а не от модели.
+    [executed] = tools.confirmed
+    assert (executed.id, executed.name, executed.arguments) == (
+        "cf_1",
+        "create_lead",
+        {"form_key": "consultation", "fields": {}},
+    )
+    assert tools.batches == []
+    assert events[0] == ToolStarted(tool_call_id="cf_1", name="create_lead")
+    finished = next(e for e in events if isinstance(e, ToolFinished))
+    assert (finished.ok, finished.content) == (True, "Заявка создана.")
+    [updated] = [e for e in events if isinstance(e, DialogStateUpdated)]
+    assert updated.state == DialogState(slots={"budget": 3000})
+    note = last_user_text(llm.requests[0])
+    assert note.startswith(HISTORY[0].text)
+    assert "[Подтверждено, create_lead: Заявка создана.]" in note
+    assert text(events) == "Заявка принята."
+
+
+async def test_cancelled_confirmation_clears_pending_without_running() -> None:
+    llm = FakeLLM([FakeReply(text="Хорошо, не отправляю.")])
+    tools = FakeTools()
+
+    events = await run(
+        llm, tools, context(state=WAITING, confirmation=ConfirmationReply("cf_1", approved=False))
+    )
+
+    assert tools.confirmed == []
+    assert not any(isinstance(e, ToolStarted | ToolFinished) for e in events)
+    [updated] = [e for e in events if isinstance(e, DialogStateUpdated)]
+    assert updated.state.pending_confirmation is None
+    assert "[Пользователь отменил create_lead" in last_user_text(llm.requests[0])
+
+
+@pytest.mark.parametrize(
+    "state", [DialogState(), WAITING], ids=["nothing_pending", "other_confirm_id"]
+)
+async def test_stale_confirmation_runs_nothing(state: DialogState) -> None:
+    llm = FakeLLM([FakeReply(text="Это подтверждение уже неактуально.")])
+    tools = FakeTools()
+    reply = ConfirmationReply("cf_old", approved=True)
+
+    events = await run(llm, tools, context(state=state, confirmation=reply))
+
+    assert tools.confirmed == []
+    assert not any(isinstance(e, DialogStateUpdated) for e in events)
+    assert "[Подтверждение устарело" in last_user_text(llm.requests[0])
+
+
+async def test_failed_confirmed_call_is_reported_to_model() -> None:
+    llm = FakeLLM([FakeReply(text="Не получилось, попробуйте позже.")])
+    tools = FakeTools({"cf_1": failure("upstream_error", "create_lead: данные недоступны")})
+
+    events = await run(
+        llm, tools, context(state=WAITING, confirmation=ConfirmationReply("cf_1", approved=True))
+    )
+
+    finished = next(e for e in events if isinstance(e, ToolFinished))
+    assert finished.error_code == "upstream_error"
+    # Ожидание снято и при ошибке: повтор — новым вызовом и новым подтверждением.
+    [updated] = [e for e in events if isinstance(e, DialogStateUpdated)]
+    assert updated.state.pending_confirmation is None
+    assert "upstream_error: create_lead: данные недоступны" in last_user_text(llm.requests[0])

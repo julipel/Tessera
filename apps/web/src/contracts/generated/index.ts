@@ -164,6 +164,20 @@ export interface AssistantConfig {
   greeting: string;
   starter_suggestions?: string[];
   fallback_message: string;
+  confirm_labels?: ConfirmLabels;
+}
+/**
+ * Подписи кнопок компонента confirm у инструментов с requires_confirmation (ADR-0021).
+ *
+ * This interface was referenced by `AgentConfig`'s JSON-Schema
+ * via the `definition` "ConfirmLabels".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ConfirmLabels".
+ */
+export interface ConfirmLabels {
+  confirm?: string;
+  cancel?: string;
 }
 /**
  * This interface was referenced by `AgentConfig`'s JSON-Schema

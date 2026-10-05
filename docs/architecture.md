@@ -25,6 +25,7 @@
 | `agent` | Агентный цикл, сборка промпта, LLM-адаптеры, лимиты, fallback |
 | `tools` | Реестр инструментов, валидация аргументов, исполнение, HTTP-инструменты тенанта |
 | `knowledge` | Источники, коннекторы, ingestion, чанкинг, индексация, гибридный поиск, каталог |
+| `leads` | Заявки пользователей (`create_lead`): хранение по тенанту |
 | `memory` | Состояние диалога (слоты, показанные сущности), суммаризация истории |
 | `observability` | AgentEvent-лог, трейсы, метрики, стоимость |
 | `shared` | Базовые типы, ошибки, tenant context, утилиты БД (без бизнес-логики) |
@@ -33,6 +34,7 @@
 
 ```
 chat ──► agent ──► tools ──► knowledge
+  │        │  │      ┆ (порт LeadStore) ┄┄► leads
   │        │  └──► memory
   │        └─────► tenants
   └──────────────► tenants
@@ -116,6 +118,12 @@ async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
   бюджет токенов на ход.
 - LLM-провайдер за портом `LLMClient` (domain). Реализации: OpenAI, Anthropic, `FakeLLM` для тестов.
 - Fallback: на таймаут/5xx/429 — ретрай с backoff, затем резервная модель из конфига.
+- Подтверждение (ADR-0021): вызов инструмента с `requires_confirmation` Registry не исполняет,
+  а отдаёт компонент `confirm` и ожидающий вызов в `state_patch` (`pending_confirmation`).
+  Ход с вводом `action confirm|cancel` и совпадающим `confirm_id` (`TurnContext.confirmation`)
+  цикл начинает без модели: исполняет ожидающий вызов с аргументами из состояния
+  (`ToolExecutor.execute_confirmed`) или отменяет его, снимает ожидание и дописывает итог
+  пометкой к сообщению пользователя. Чужой или устаревший `confirm_id` ничего не исполняет.
 
 ## 6. Сборка системного промпта
 
@@ -140,7 +148,8 @@ async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
   после хода), сводка кладётся в Runtime context.
 - **Состояние (DialogState)** — JSON: слоты (заданы схемой сценария в AgentConfig, напр. budget,
   size, purpose), `shown_entities` (id показанных товаров), `facts` (что пользователь сообщил),
-  `active_scenario`. Обновляется инструментом `update_dialog_state` и результатами инструментов
+  `active_scenario`, `pending_confirmation` (вызов, ждущий подтверждения, ADR-0021; в промпт
+  не попадает). Обновляется инструментом `update_dialog_state` и результатами инструментов
   (`state_patch`, формат — contracts.md §4). Всегда передаётся модели целиком (Runtime-слой
   промпта) — поэтому агент не переспрашивает. Тип и слияние — `memory` (`memory.kernel`,
   ADR-0008); патчи применяет агентный цикл; хранится в `Conversation.state`, chat записывает
@@ -377,7 +386,11 @@ Entity хранится в Postgres: нормализованные поля (`t
 - Результат инструмента: `content` (для модели, компактный), `components` (для UI),
   `state_patch` (для DialogState), `suggestions` (быстрые ответы, ADR-0020), `error`.
 - Инструменты с побочными эффектами (создать заявку, бронь) требуют подтверждения
-  пользователя через компонент `confirm`.
+  пользователя через компонент `confirm` (`requires_confirmation`, ADR-0021, §5).
+- Формы — `forms` в AgentConfig: `show_form` отдаёт компонент `form`, отправка формы
+  (`form_submit`) проверяется chat по полям формы до записи (422 `invalid_input`),
+  `create_lead` сохраняет заявку в `leads` после подтверждения. Доставка заявок бизнесу
+  (webhook, email, админка) — позже.
 
 ## 10. Мультитенантность
 
@@ -408,6 +421,7 @@ Message(id, conversation_id, tenant_id, role, status, content, input JSONB, bloc
         client_message_id, created_at)  # input — UserInput (user); blocks — текст/компоненты
                                         # в порядке стрима (assistant); content — плоский текст
 ToolCall(id, message_id, tenant_id, name, arguments JSONB, result JSONB, error, duration_ms)
+Lead(id, tenant_id, conversation_id, form_key, fields JSONB, created_at)  # create_lead
 AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSONB, ts)
 ```
 

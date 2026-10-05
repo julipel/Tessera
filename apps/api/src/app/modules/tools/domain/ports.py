@@ -1,7 +1,7 @@
 """Порты зависимостей встроенных инструментов (реализации — в других модулях, подключает
 тот, кто собирает агент)."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Protocol
 from uuid import UUID
 
@@ -31,3 +31,15 @@ class Catalog(Protocol):
     ) -> list[CatalogEntity]:
         """Найденные сущности тенанта в любом порядке; чужих и несуществующих нет."""
         ...
+
+
+class LeadStore(Protocol):
+    """Заявки тенанта (leads `SqlLeadStore`). Возвращает id созданной заявки."""
+
+    async def create(
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        form_key: str,
+        fields: Mapping[str, str],
+    ) -> UUID: ...

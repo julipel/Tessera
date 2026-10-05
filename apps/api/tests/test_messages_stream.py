@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -37,13 +37,14 @@ from app.modules.chat.api.sse import sse_stream
 from app.modules.chat.application.turns import TurnRegistry, start_turn
 from app.modules.chat.domain.entities import ToolCallEntry, TurnRequest
 from app.modules.chat.domain.ports import TurnAgent
-from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent
+from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent, builtin_turn_agent
 from app.modules.chat.infrastructure.repositories import (
     ConversationRepository,
     MessageRepository,
     TenantsAgentConfigs,
     ToolCallRepository,
 )
+from app.modules.leads.public import LeadRepository
 from app.modules.memory.public import DialogState
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import (
@@ -825,3 +826,124 @@ async def test_state_is_passed_to_agent_and_unchanged_without_updates(
 
     assert agent.requests[0].dialog_state == {"slots": {"budget": 3000}}
     assert await _state(db_session, shop, conversation_id) == {"slots": {"budget": 3000}}
+
+
+# --- Формы и подтверждение заявки (P5-04a, ADR-0021) ---
+
+FORMS = {
+    "contact": {
+        "title": "Контакт",
+        "fields": [
+            {"name": "phone", "label": "Телефон", "kind": "text", "required": True},
+            {
+                "name": "time",
+                "label": "Когда",
+                "kind": "select",
+                "options": [{"label": "Утром", "value": "morning"}],
+            },
+        ],
+    }
+}
+
+
+@pytest.fixture
+async def forms_tenant(db_session: AsyncSession) -> TenantId:
+    return await _tenant(
+        db_session,
+        "forms",
+        {**_config("forms"), "tools": {"builtin": ["create_lead"]}, "forms": FORMS},
+    )
+
+
+@pytest.fixture
+async def form_conversation(db_client: AsyncClient, forms_tenant: TenantId, use_agent: Any) -> UUID:
+    response = await db_client.post(URL, json={"visitor_id": "v-1"}, headers=_key("forms"))
+    return UUID(response.json()["conversation_id"])
+
+
+@pytest.mark.parametrize(
+    ("form_id", "values"),
+    [
+        ("order", {"phone": "+7900"}),
+        ("contact", {}),
+        ("contact", {"phone": "+7900", "email": "a@b.c"}),
+        ("contact", {"phone": "+7900", "time": "night"}),
+    ],
+    ids=["unknown_form", "missing_required", "unknown_field", "not_an_option"],
+)
+async def test_invalid_form_submit_is_422_and_not_saved(
+    db_client: AsyncClient, form_conversation: UUID, form_id: str, values: dict[str, Any]
+) -> None:
+    submit = {"type": "form_submit", "form_id": form_id, "values": values}
+
+    response = await _send(db_client, form_conversation, submit, slug="forms")
+
+    assert response.status_code == 422
+    assert _error_code(response) == "invalid_input"
+    history = await db_client.get(f"{URL}/{form_conversation}/messages", headers=_key("forms"))
+    assert history.json()["messages"] == []
+
+
+class SessionLeads:
+    """Заявки в сессии теста (откатывается после теста), а не через свою сессию с commit."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._repo = LeadRepository(session)
+
+    async def create(
+        self, tenant_id: TenantId, conversation_id: UUID, form_key: str, fields: Mapping[str, str]
+    ) -> UUID:
+        return (await self._repo.create(tenant_id, conversation_id, form_key, fields)).id
+
+
+async def _events(response: Response) -> list[dict[str, Any]]:
+    return [e.model_dump() for _, e in _parse_sse(response.text)]
+
+
+async def test_form_submit_then_confirmed_lead_through_agent_loop(
+    db_session: AsyncSession,
+    db_client: AsyncClient,
+    forms_tenant: TenantId,
+    form_conversation: UUID,
+    use_agent: Any,
+) -> None:
+    create = ToolCall(
+        id="call_1",
+        name="create_lead",
+        arguments={"form_key": "contact", "fields": {"phone": "+7900"}},
+        raw_arguments="{}",
+    )
+    llm = FakeLLM(
+        [
+            FakeReply(text="Проверьте заявку.", tool_calls=(create,)),
+            FakeReply(),
+            FakeReply(text="Заявка отправлена."),
+        ]
+    )
+    use_agent(builtin_turn_agent(lambda _: llm, leads=SessionLeads(db_session)))
+    submit = {"type": "form_submit", "form_id": "contact", "values": {"phone": "+7900"}}
+
+    first = await _events(await _send(db_client, form_conversation, submit, slug="forms"))
+    [confirm] = [e["data"]["component"] for e in first if e["type"] == "component"]
+    leads = LeadRepository(db_session)
+    assert confirm["type"] == "confirm"
+    assert await leads.list_for_conversation(forms_tenant, form_conversation) == []
+    # Модель видит отправленную форму.
+    assert llm.requests[0].messages[-1] == UserMessage(
+        '[Отправлена форма contact: {"phone": "+7900"}]'
+    )
+
+    action = confirm["confirm_action"]
+    press = {
+        "type": "action",
+        "action_id": action["action_id"],
+        "label": action["label"],
+        "payload": action["payload"],
+    }
+    second = await _events(await _send(db_client, form_conversation, press, slug="forms"))
+
+    [lead] = await leads.list_for_conversation(forms_tenant, form_conversation)
+    assert (lead.form_key, lead.fields) == ("contact", {"phone": "+7900"})
+    assert [e["type"] for e in second][:3] == ["turn_started", "tool_started", "tool_finished"]
+    assert second[-1]["data"]["status"] == "completed"
+    assert "pending_confirmation" not in await _state(db_session, forms_tenant, form_conversation)

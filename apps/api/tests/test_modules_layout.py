@@ -6,7 +6,17 @@ import pytest
 
 import app.modules
 
-MODULES = ["tenants", "chat", "agent", "tools", "knowledge", "memory", "observability", "shared"]
+MODULES = [
+    "tenants",
+    "chat",
+    "agent",
+    "tools",
+    "knowledge",
+    "leads",
+    "memory",
+    "observability",
+    "shared",
+]
 LAYERS = ["domain", "application", "infrastructure", "api"]
 MODULES_DIR = Path(app.modules.__file__).parent
 

@@ -83,6 +83,7 @@ containers = [
     "app.modules.agent",
     "app.modules.tools",
     "app.modules.knowledge",
+    "app.modules.leads",
     "app.modules.memory",
     "app.modules.observability",
     "app.modules.shared",
@@ -97,7 +98,7 @@ layers = [
     "app.modules.chat",
     "app.modules.agent",
     "app.modules.tools | app.modules.memory | app.modules.tenants",
-    "app.modules.knowledge",
+    "app.modules.knowledge | app.modules.leads",
     "app.modules.observability",
     "app.modules.shared",
 ]
@@ -182,6 +183,17 @@ protected_modules = [
     "app.modules.knowledge.api",
 ]
 allowed_importers = ["app.modules.knowledge"]
+
+[[tool.importlinter.contracts]]
+name = "leads: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.leads.domain",
+    "app.modules.leads.application",
+    "app.modules.leads.infrastructure",
+    "app.modules.leads.api",
+]
+allowed_importers = ["app.modules.leads"]
 
 [[tool.importlinter.contracts]]
 name = "memory: доступ извне только через public.py"

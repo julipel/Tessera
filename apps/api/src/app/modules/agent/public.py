@@ -33,7 +33,12 @@ from app.modules.agent.domain.llm import (
     Usage,
     UserMessage,
 )
-from app.modules.agent.domain.turn import ToolExecutor, TurnContext, TurnLimits
+from app.modules.agent.domain.turn import (
+    ConfirmationReply,
+    ToolExecutor,
+    TurnContext,
+    TurnLimits,
+)
 from app.modules.agent.infrastructure.anthropic_llm import AnthropicLLM, create_anthropic_llm
 from app.modules.agent.infrastructure.fake_llm import FakeLLM, FakeLLMExhaustedError, FakeReply
 from app.modules.agent.infrastructure.llm_clients import LLMClients, Provider
@@ -52,6 +57,7 @@ __all__ = [
     "AnthropicLLM",
     "AssistantMessage",
     "ComponentEmitted",
+    "ConfirmationReply",
     "DialogStateUpdated",
     "FakeLLM",
     "FakeLLMExhaustedError",

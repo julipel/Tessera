@@ -17,3 +17,8 @@ class DuplicateMessageError(DomainError):
 
 class AgentConfigMissingError(DomainError):
     """Версии AgentConfig, с которой начат диалог, нет. Нарушение инварианта: FK с RESTRICT."""
+
+
+class InvalidInputError(DomainError):
+    """Ввод не подходит диалогу: например, отправлена форма, которой нет в конфиге, или её
+    значения не проходят проверку полей."""

@@ -2,7 +2,8 @@
 
 import json
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
+from dataclasses import dataclass
 
 import structlog
 
@@ -28,8 +29,10 @@ from app.modules.agent.domain.llm import (
     ToolCallStarted,
     ToolResultMessage,
     Usage,
+    UserMessage,
 )
 from app.modules.agent.domain.turn import ToolExecutor, TurnContext
+from app.modules.memory.kernel import DialogState
 from app.modules.tools.public import ToolError, ToolResult
 
 logger = structlog.get_logger(__name__)
@@ -49,6 +52,13 @@ class AgentLoop:
         schemas = self._tools.schemas()
         usage = Usage()
         state = ctx.state
+        if ctx.confirmation is not None:
+            outcome = _Outcome()
+            async for event in self._resolve_confirmation(ctx, outcome):
+                yield event
+            if outcome.state is not None:
+                state = outcome.state
+            messages = _with_note(messages, outcome.note)
         retries = 0
         steps = 0
         finish = FinishReason.STEP_LIMIT
@@ -83,20 +93,8 @@ class AgentLoop:
             results = await self._execute(response.tool_calls, ctx)
             batch_ms = round((time.perf_counter() - started) * 1000)
             for call, result in zip(response.tool_calls, results, strict=True):
-                yield ToolFinished(
-                    tool_call_id=call.id,
-                    name=call.name,
-                    ok=result.ok,
-                    error_code=result.error.code if result.error else None,
-                    arguments=call.raw_arguments if call.arguments is None else call.arguments,
-                    content=result.content,
-                    error_message=result.error.message if result.error else None,
-                    duration_ms=batch_ms if call.arguments is not None else 0,
-                )
-                for component in result.components:
-                    yield ComponentEmitted(component)
-                if result.ok and result.suggestions:
-                    yield SuggestionsOffered(result.suggestions)
+                for event in _reported(call, result, batch_ms):
+                    yield event
             patches = [r.state_patch for r in results if r.ok and r.state_patch]
             if patches:
                 for patch in patches:
@@ -128,6 +126,39 @@ class AgentLoop:
         )
         yield TurnCompleted(finish=finish, usage=usage, steps=steps)
 
+    async def _resolve_confirmation(
+        self, ctx: TurnContext, outcome: "_Outcome"
+    ) -> AsyncIterator[AgentEvent]:
+        """Ответ на подтверждение — до модели и без неё (ADR-0021): подтверждённый вызов
+        исполняется с аргументами из состояния, ожидание снимается. Итог — пометка
+        к сообщению пользователя, чтобы модель знала, что произошло."""
+        assert ctx.confirmation is not None
+        pending = ctx.state.pending_confirmation
+        if pending is None or pending.confirm_id != ctx.confirmation.confirm_id:
+            outcome.note = "[Подтверждение устарело: действие не выполнено]"
+            return
+        state = ctx.state.apply({"pending_confirmation": None})
+        if not ctx.confirmation.approved:
+            outcome.note = f"[Пользователь отменил {pending.tool}: действие не выполнено]"
+        else:
+            arguments = dict(pending.arguments)
+            call = ToolCall(
+                id=pending.confirm_id,
+                name=pending.tool,
+                arguments=arguments,
+                raw_arguments=json.dumps(arguments, ensure_ascii=False),
+            )
+            yield ToolStarted(tool_call_id=call.id, name=call.name)
+            started = time.perf_counter()
+            result = await self._tools.execute_confirmed(call, ctx)
+            for event in _reported(call, result, round((time.perf_counter() - started) * 1000)):
+                yield event
+            if result.ok and result.state_patch:
+                state = state.apply(result.state_patch)
+            outcome.note = f"[Подтверждено, {pending.tool}: {_as_message(call, result).content}]"
+        outcome.state = state
+        yield DialogStateUpdated(state)
+
     async def _execute(self, calls: Sequence[ToolCall], ctx: TurnContext) -> list[ToolResult]:
         """Результаты в порядке `calls`; вызовы с неразобранными аргументами отклоняются
         без исполнителя."""
@@ -136,6 +167,39 @@ class AgentLoop:
         return [
             next(executed) if call.arguments is not None else _unparseable(call) for call in calls
         ]
+
+
+@dataclass(slots=True)
+class _Outcome:
+    """Итог разбора подтверждения: пометка для модели и новое состояние (None — не менялось)."""
+
+    note: str = ""
+    state: DialogState | None = None
+
+
+def _with_note(messages: tuple[LLMMessage, ...], note: str) -> tuple[LLMMessage, ...]:
+    """Пометка дописывается к последнему сообщению пользователя (ввод этого хода)."""
+    if messages and isinstance(last := messages[-1], UserMessage):
+        return (*messages[:-1], UserMessage(f"{last.text}\n{note}"))
+    return (*messages, UserMessage(note))
+
+
+def _reported(call: ToolCall, result: ToolResult, duration_ms: int) -> Iterator[AgentEvent]:
+    """События завершённого вызова: итог, UI-компоненты и быстрые ответы."""
+    yield ToolFinished(
+        tool_call_id=call.id,
+        name=call.name,
+        ok=result.ok,
+        error_code=result.error.code if result.error else None,
+        arguments=call.raw_arguments if call.arguments is None else call.arguments,
+        content=result.content,
+        error_message=result.error.message if result.error else None,
+        duration_ms=duration_ms if call.arguments is not None else 0,
+    )
+    for component in result.components:
+        yield ComponentEmitted(component)
+    if result.ok and result.suggestions:
+        yield SuggestionsOffered(result.suggestions)
 
 
 def _unparseable(call: ToolCall) -> ToolResult:

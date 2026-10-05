@@ -215,6 +215,20 @@ class DialogRunner:
         result.output_tokens = collector.output_tokens
 
 
+class MemoryLeads:
+    """Хранилище заявок `create_lead` для эвалов (порт tools `LeadStore`): прогоны не пишут
+    заявки в БД тенанта, созданные видны в `created`."""
+
+    def __init__(self) -> None:
+        self.created: list[tuple[TenantId, UUID, str, dict[str, str]]] = []
+
+    async def create(
+        self, tenant_id: TenantId, conversation_id: UUID, form_key: str, fields: Mapping[str, str]
+    ) -> UUID:
+        self.created.append((tenant_id, conversation_id, form_key, dict(fields)))
+        return uuid4()
+
+
 async def run_dialogs(
     runner: DialogRunner, dialogs: Iterable[Dialog], concurrency: int = 4
 ) -> list[DialogResult]:

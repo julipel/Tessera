@@ -20,6 +20,7 @@ from app.modules.chat.application.turns import TurnRegistry, start_turn
 from app.modules.chat.domain.errors import (
     ConversationNotFoundError,
     DuplicateMessageError,
+    InvalidInputError,
     NoActiveConfigError,
 )
 from app.modules.chat.domain.ports import TurnAgent
@@ -32,6 +33,7 @@ from app.modules.chat.infrastructure.repositories import (
     ToolCallRepository,
 )
 from app.modules.knowledge.public import KnowledgeSearch, SqlCatalog
+from app.modules.leads.public import SqlLeadStore
 from app.modules.shared.public import ApiError, DbSession, StreamDbSession
 from app.modules.tenants.public import WidgetTenant
 
@@ -41,12 +43,13 @@ logger = structlog.get_logger(__name__)
 
 def get_turn_agent(request: Request) -> TurnAgent:
     """Агентный цикл с LLM-клиентами приложения и встроенными инструментами из
-    `tools.builtin` конфига (поиск по знаниям — если собран; каталог); тесты подменяют через
-    dependency_overrides."""
+    `tools.builtin` конфига (поиск по знаниям — если собран; каталог; заявки); тесты
+    подменяют через dependency_overrides."""
     llms: LLMClients = request.app.state.llm_clients
     knowledge: KnowledgeSearch | None = request.app.state.knowledge_search
     catalog: SqlCatalog = request.app.state.catalog
-    return builtin_turn_agent(llms.for_provider, knowledge, catalog)
+    leads: SqlLeadStore = request.app.state.leads
+    return builtin_turn_agent(llms.for_provider, knowledge, catalog, leads)
 
 
 Agent = Annotated[TurnAgent, Depends(get_turn_agent)]
@@ -128,6 +131,8 @@ async def send_message(
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e
     except DuplicateMessageError as e:
         raise ApiError(status.HTTP_409_CONFLICT, "duplicate_message", str(e)) from e
+    except InvalidInputError as e:
+        raise ApiError(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_input", str(e)) from e
     structlog.contextvars.bind_contextvars(turn_id=str(turn.turn_id))
     logger.info("turn_started")
     return EventSourceResponse(sse_stream(turn))

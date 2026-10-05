@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -11,6 +12,8 @@ import pytest
 from app.modules.agent.public import (
     AgentLoop,
     ComponentEmitted,
+    ConfirmationReply,
+    DialogStateUpdated,
     FakeLLM,
     FakeReply,
     FinishReason,
@@ -24,8 +27,10 @@ from app.modules.agent.public import (
     TurnLimits,
     UserMessage,
 )
+from app.modules.memory.public import DialogState
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.public import (
+    ConfirmLabels,
     InvalidToolDefinitionError,
     ToolContext,
     ToolDefinition,
@@ -237,6 +242,7 @@ async def test_cancellation_cancels_all_handlers() -> None:
         ([tool(parameters={"type": "object", "properties": {"x": {"type": "strng"}}})], "Schema"),
         ([tool(parameters={"type": "string"})], "type: object"),
         ([tool(timeout_s=0)], "timeout_s"),
+        ([replace(tool(), requires_confirmation=True)], "confirm_text"),
     ],
 )
 def test_invalid_configuration_is_rejected(definitions: list[ToolDefinition], message: str) -> None:
@@ -247,7 +253,9 @@ def test_invalid_configuration_is_rejected(definitions: list[ToolDefinition], me
 # --- Агентный цикл поверх реестра ---
 
 
-def turn_context() -> TurnContext:
+def turn_context(
+    state: DialogState | None = None, confirmation: ConfirmationReply | None = None
+) -> TurnContext:
     return TurnContext(
         tenant_id=CTX.tenant_id,
         conversation_id=CTX.conversation_id,
@@ -257,6 +265,8 @@ def turn_context() -> TurnContext:
         history=(UserMessage("Есть в наличии в Москве?"),),
         limits=TurnLimits(max_steps=6, max_tool_retries=2),
         fallback_message="Извините.",
+        state=state or DialogState(),
+        confirmation=confirmation,
     )
 
 
@@ -304,3 +314,114 @@ async def test_agent_recovers_from_validation_error_via_registry() -> None:
     [rejected] = [m for m in llm.requests[1].messages if isinstance(m, ToolResultMessage)]
     assert rejected.is_error
     assert "'city' is a required property" in rejected.content
+
+
+# --- Подтверждение (ADR-0021) ---
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def __call__(self, arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
+        self.calls.append(dict(arguments))
+        return ToolResult(content="Забронировано.")
+
+
+def booking(handler: ToolHandler, **overrides: Any) -> ToolDefinition:
+    return replace(
+        tool("book", handler),
+        side_effect=True,
+        requires_confirmation=True,
+        confirm_text=lambda a: f"Забронировать {a['entity_id']} в городе {a['city']}?",
+        **overrides,
+    )
+
+
+async def test_call_requiring_confirmation_returns_confirm_instead_of_running() -> None:
+    handler = Recorder()
+    registry = ToolRegistry([booking(handler)], ConfirmLabels(confirm="Да", cancel="Нет"))
+
+    [result] = await registry.execute_many([inv("c1", "book", **VALID)], CTX)
+
+    assert handler.calls == []
+    [confirm] = result.components
+    confirm_id = confirm["confirm_id"]
+    assert confirm["type"] == "confirm"
+    assert confirm["text"] == "Забронировать e_1 в городе Москва?"
+    assert (confirm["confirm_action"]["action_id"], confirm["confirm_action"]["label"]) == (
+        "confirm",
+        "Да",
+    )
+    assert (confirm["cancel_action"]["action_id"], confirm["cancel_action"]["label"]) == (
+        "cancel",
+        "Нет",
+    )
+    assert confirm["confirm_action"]["payload"] == {"confirm_id": confirm_id}
+    assert result.state_patch == {
+        "pending_confirmation": {"confirm_id": confirm_id, "tool": "book", "arguments": VALID}
+    }
+    assert isinstance(result.content, str) and "не вызывай инструмент повторно" in result.content
+
+
+async def test_invalid_arguments_are_rejected_before_confirmation() -> None:
+    def check(arguments: Mapping[str, Any]) -> str | None:
+        return "город не обслуживается" if arguments["city"] == "Тверь" else None
+
+    registry = ToolRegistry([booking(Recorder(), check=check)])
+
+    [missing, unserved] = await registry.execute_many(
+        [inv("c1", "book", entity_id="e_1"), inv("c2", "book", entity_id="e_1", city="Тверь")],
+        CTX,
+    )
+
+    assert missing.error is not None and missing.error.code == "validation_error"
+    assert unserved.error is not None
+    assert unserved.error.code == "validation_error"
+    assert "город не обслуживается" in unserved.error.message
+    assert missing.components == unserved.components == ()
+
+
+async def test_confirmed_call_runs_handler_and_is_still_validated() -> None:
+    handler = Recorder()
+    registry = ToolRegistry([booking(handler)])
+
+    result = await registry.execute_confirmed(inv("cf_1", "book", **VALID), CTX)
+    invalid = await registry.execute_confirmed(inv("cf_2", "book", entity_id="e_1"), CTX)
+
+    assert result.content == "Забронировано."
+    assert handler.calls == [VALID]
+    assert invalid.error is not None and invalid.error.code == "validation_error"
+
+
+async def test_side_effect_runs_once_only_after_user_confirms() -> None:
+    handler = Recorder()
+    executor = RegistryToolExecutor(ToolRegistry([booking(handler)]))
+    book = replace(call("c1", VALID), name="book")
+    llm = FakeLLM(
+        [
+            FakeReply(text="Проверьте бронь.", tool_calls=(book,)),
+            FakeReply(),
+            FakeReply(text="Готово, забронировано."),
+            FakeReply(text="Бронь уже оформлена."),
+        ]
+    )
+
+    async def turn(
+        state: DialogState | None = None, reply: ConfirmationReply | None = None
+    ) -> list[Any]:
+        return [e async for e in AgentLoop(llm, executor).run_turn(turn_context(state, reply))]
+
+    first = await turn()
+    [confirm] = [e.component for e in first if isinstance(e, ComponentEmitted)]
+    [waiting] = [e.state for e in first if isinstance(e, DialogStateUpdated)]
+    reply = ConfirmationReply(confirm["confirm_id"], approved=True)
+    assert handler.calls == []
+
+    second = await turn(waiting, reply)
+    [after] = [e.state for e in second if isinstance(e, DialogStateUpdated)]
+    # Повторное нажатие той же кнопки (двойной клик, старое сообщение) — не второй вызов.
+    await turn(after, reply)
+
+    assert handler.calls == [VALID]
+    assert any(isinstance(e, ToolFinished) and e.ok for e in second)

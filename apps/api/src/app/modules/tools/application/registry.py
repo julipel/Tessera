@@ -5,11 +5,16 @@ import asyncio
 import re
 import time
 from collections.abc import Iterable, Sequence
+from uuid import uuid4
 
 import structlog
 from jsonschema import Draft202012Validator, SchemaError
 
+from app.contracts import Action, Confirm
 from app.modules.tools.domain.definition import (
+    CANCEL_ACTION_ID,
+    CONFIRM_ACTION_ID,
+    ConfirmLabels,
     InvalidToolDefinitionError,
     ToolContext,
     ToolDefinition,
@@ -24,9 +29,18 @@ _NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
 class ToolRegistry:
     """Инструменты хода. Конфигурация проверяется при создании: невалидная схема или дубль
-    имени — ошибка настройки тенанта, а не шага модели."""
+    имени — ошибка настройки тенанта, а не шага модели.
 
-    def __init__(self, definitions: Iterable[ToolDefinition]) -> None:
+    Вызов инструмента с `requires_confirmation` не исполняется, а возвращает компонент
+    confirm и ожидающий вызов в `state_patch` (ADR-0021); исполняет его `execute_confirmed`,
+    когда пользователь подтвердил. `confirm_labels` — подписи кнопок confirm."""
+
+    def __init__(
+        self,
+        definitions: Iterable[ToolDefinition],
+        confirm_labels: ConfirmLabels | None = None,
+    ) -> None:
+        self._labels = confirm_labels or ConfirmLabels()
         self._tools: dict[str, tuple[ToolDefinition, Draft202012Validator]] = {}
         for definition in definitions:
             name = definition.name
@@ -44,6 +58,10 @@ class ToolRegistry:
                 ) from e
             if definition.parameters.get("type") != "object":
                 raise InvalidToolDefinitionError(f"{name!r}: схема аргументов — type: object")
+            if definition.requires_confirmation and definition.confirm_text is None:
+                raise InvalidToolDefinitionError(
+                    f"{name!r}: requires_confirmation требует confirm_text"
+                )
             self._tools[name] = (definition, Draft202012Validator(definition.parameters))
 
     def definitions(self) -> tuple[ToolDefinition, ...]:
@@ -57,9 +75,16 @@ class ToolRegistry:
             tasks = [group.create_task(self._execute(inv, ctx)) for inv in invocations]
         return [task.result() for task in tasks]
 
-    async def _execute(self, invocation: ToolInvocation, ctx: ToolContext) -> ToolResult:
+    async def execute_confirmed(self, invocation: ToolInvocation, ctx: ToolContext) -> ToolResult:
+        """Исполнить вызов, который пользователь подтвердил: без повторного запроса
+        подтверждения, но с проверкой аргументов."""
+        return await self._execute(invocation, ctx, confirmed=True)
+
+    async def _execute(
+        self, invocation: ToolInvocation, ctx: ToolContext, *, confirmed: bool = False
+    ) -> ToolResult:
         started = time.perf_counter()
-        result = await self._run(invocation, ctx)
+        result = await self._run(invocation, ctx, confirmed=confirmed)
         logger.info(
             "tool.executed",
             tenant_id=str(ctx.tenant_id),
@@ -72,7 +97,9 @@ class ToolRegistry:
         )
         return result
 
-    async def _run(self, invocation: ToolInvocation, ctx: ToolContext) -> ToolResult:
+    async def _run(
+        self, invocation: ToolInvocation, ctx: ToolContext, *, confirmed: bool
+    ) -> ToolResult:
         entry = self._tools.get(invocation.name)
         if entry is None:
             available = ", ".join(self._tools) or "нет"
@@ -89,6 +116,10 @@ class ToolRegistry:
                 "validation_error",
                 f"{invocation.name}: аргументы не соответствуют схеме: {details}",
             )
+        if definition.check is not None and (problem := definition.check(invocation.arguments)):
+            return _failure("validation_error", f"{invocation.name}: {problem}")
+        if definition.requires_confirmation and not confirmed:
+            return self._ask_confirmation(definition, invocation)
 
         try:
             async with asyncio.timeout(definition.timeout_s) as deadline:
@@ -103,6 +134,45 @@ class ToolRegistry:
             )
         except Exception:
             return _crashed(invocation, ctx)
+
+    def _ask_confirmation(
+        self, definition: ToolDefinition, invocation: ToolInvocation
+    ) -> ToolResult:
+        assert definition.confirm_text is not None  # проверено при создании реестра
+        confirm_id = f"cf_{uuid4().hex[:12]}"
+        payload = {"confirm_id": confirm_id}
+        confirm = Confirm(
+            type="confirm",
+            confirm_id=confirm_id,
+            text=definition.confirm_text(invocation.arguments),
+            confirm_action=Action(
+                action_id=CONFIRM_ACTION_ID,
+                label=self._labels.confirm,
+                style="primary",
+                payload=payload,
+            ),
+            cancel_action=Action(
+                action_id=CANCEL_ACTION_ID,
+                label=self._labels.cancel,
+                style="secondary",
+                payload=payload,
+            ),
+        )
+        return ToolResult(
+            content=(
+                "Пользователю показано подтверждение. Действие выполнится, только когда он "
+                f"нажмёт «{self._labels.confirm}»: не вызывай инструмент повторно и не пиши, "
+                "что действие выполнено."
+            ),
+            components=(confirm.model_dump(mode="json"),),
+            state_patch={
+                "pending_confirmation": {
+                    "confirm_id": confirm_id,
+                    "tool": invocation.name,
+                    "arguments": dict(invocation.arguments),
+                }
+            },
+        )
 
 
 def _crashed(invocation: ToolInvocation, ctx: ToolContext) -> ToolResult:

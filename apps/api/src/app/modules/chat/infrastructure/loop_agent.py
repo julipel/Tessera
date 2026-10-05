@@ -14,6 +14,7 @@ from app.modules.agent.public import (
     AgentEvent,
     AgentLoop,
     AssistantMessage,
+    ConfirmationReply,
     LLMClient,
     LLMMessage,
     Provider,
@@ -27,7 +28,16 @@ from app.modules.agent.public import (
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, TurnRequest
 from app.modules.memory.public import DialogState
-from app.modules.tools.public import Catalog, KnowledgeSearcher, ToolRegistry, builtin_tools
+from app.modules.tools.public import (
+    CANCEL_ACTION_ID,
+    CONFIRM_ACTION_ID,
+    Catalog,
+    ConfirmLabels,
+    KnowledgeSearcher,
+    LeadStore,
+    ToolRegistry,
+    builtin_tools,
+)
 
 type LLMForProvider = Callable[[Provider], LLMClient]
 type ToolsForConfig = Callable[[AgentConfig], ToolExecutor]
@@ -53,9 +63,12 @@ class LoopTurnAgent:
         primary = config.model.primary
         limits = config.limits
         state = DialogState.from_dict(request.dialog_state)
+        # Ожидающий вызов — не знание о пользователе: о нём модель узнаёт из результата
+        # инструмента и пометки к ответу на подтверждение.
+        known = {k: v for k, v in state.to_dict().items() if k != "pending_confirmation"}
         runtime = RuntimeContext(
             now=self._now(),
-            dialog_state=state.to_dict(),
+            dialog_state=known,
             active_scenario=state.active_scenario,
         )
         prompt = build_system_prompt(config, runtime)
@@ -74,6 +87,7 @@ class LoopTurnAgent:
             fallback_message=config.assistant.fallback_message,
             temperature=primary.temperature,  # подсказка: применяет адаптер (ADR-0009)
             state=state,
+            confirmation=confirmation_reply(request.input),
         )
         loop = AgentLoop(self._llm_for(primary.provider), self._tools_for(config))
         async for event in loop.run_turn(ctx):
@@ -84,15 +98,41 @@ def builtin_turn_agent(
     llm_for: LLMForProvider,
     knowledge: KnowledgeSearcher | None = None,
     catalog: Catalog | None = None,
+    leads: LeadStore | None = None,
 ) -> LoopTurnAgent:
     """Агентный цикл со встроенными инструментами из `tools.builtin` конфига — так ход
     собирают chat API и раннер эвалов (ADR-0011). Без `knowledge` не подключается
-    `search_knowledge`, без `catalog` — `search_catalog` и `get_entity`."""
+    `search_knowledge`, без `catalog` — `search_catalog` и `get_entity`, без `leads` —
+    `create_lead`."""
     return LoopTurnAgent(
         llm_for,
         lambda config: RegistryToolExecutor(
-            ToolRegistry(builtin_tools(config, knowledge=knowledge, catalog=catalog))
+            ToolRegistry(
+                builtin_tools(config, knowledge=knowledge, catalog=catalog, leads=leads),
+                _confirm_labels(config),
+            )
         ),
+    )
+
+
+def confirmation_reply(user_input: dict[str, Any]) -> ConfirmationReply | None:
+    """Нажатие кнопки компонента confirm (ADR-0021); иначе None."""
+    if user_input.get("type") != "action":
+        return None
+    action_id = user_input.get("action_id")
+    confirm_id = (user_input.get("payload") or {}).get("confirm_id")
+    if action_id not in (CONFIRM_ACTION_ID, CANCEL_ACTION_ID) or not isinstance(confirm_id, str):
+        return None
+    return ConfirmationReply(confirm_id=confirm_id, approved=action_id == CONFIRM_ACTION_ID)
+
+
+def _confirm_labels(config: AgentConfig) -> ConfirmLabels:
+    labels = config.assistant.confirm_labels
+    if labels is None:
+        return ConfirmLabels()
+    default = ConfirmLabels()
+    return ConfirmLabels(
+        confirm=labels.confirm or default.confirm, cancel=labels.cancel or default.cancel
     )
 
 

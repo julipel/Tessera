@@ -20,10 +20,19 @@ class TurnLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class ConfirmationReply:
+    """Пользователь нажал кнопку компонента confirm: подтвердил или отменил `confirm_id`."""
+
+    confirm_id: str
+    approved: bool
+
+
+@dataclass(frozen=True, slots=True)
 class TurnContext:
     """`history` уже содержит новое сообщение пользователя. `fallback_message` — текст мягкого
     завершения (лимит шагов, исчерпаны ретраи); берётся из AgentConfig тенанта. `state` —
-    состояние диалога на начало хода; цикл применяет к нему `state_patch` инструментов."""
+    состояние диалога на начало хода; цикл применяет к нему `state_patch` инструментов.
+    `confirmation` — ввод хода — ответ на подтверждение (ADR-0021)."""
 
     tenant_id: TenantId
     conversation_id: UUID
@@ -35,6 +44,7 @@ class TurnContext:
     fallback_message: str
     temperature: float | None = None
     state: DialogState = field(default_factory=DialogState)
+    confirmation: ConfirmationReply | None = None
 
 
 class ToolExecutor(Protocol):
@@ -47,3 +57,7 @@ class ToolExecutor(Protocol):
     async def execute_many(
         self, calls: Sequence[ToolCall], ctx: TurnContext
     ) -> Sequence[ToolResult]: ...
+
+    async def execute_confirmed(self, call: ToolCall, ctx: TurnContext) -> ToolResult:
+        """Вызов, подтверждённый пользователем: исполняется без запроса подтверждения."""
+        ...

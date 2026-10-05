@@ -10,18 +10,40 @@ from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
+class PendingConfirmation:
+    """Вызов инструмента с `requires_confirmation`, ждущий ответа пользователя (ADR-0021):
+    исполняется с этими аргументами, когда пользователь подтвердит `confirm_id`."""
+
+    confirm_id: str
+    tool: str
+    arguments: Mapping[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"confirm_id": self.confirm_id, "tool": self.tool, "arguments": dict(self.arguments)}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "PendingConfirmation":
+        return cls(
+            confirm_id=data["confirm_id"], tool=data["tool"], arguments=data.get("arguments") or {}
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class DialogState:
     """`slots` — значения слотов сценариев; `facts` — что пользователь сообщил вне слотов;
-    `shown_entities` — id уже показанных сущностей; `active_scenario` — ключ сценария."""
+    `shown_entities` — id уже показанных сущностей; `active_scenario` — ключ сценария;
+    `pending_confirmation` — вызов, ждущий подтверждения пользователя."""
 
     slots: Mapping[str, Any] = field(default_factory=dict)
     facts: tuple[str, ...] = ()
     shown_entities: tuple[str, ...] = ()
     active_scenario: str | None = None
+    pending_confirmation: PendingConfirmation | None = None
 
     def apply(self, patch: Mapping[str, Any]) -> "DialogState":
         """Новое состояние с патчем: слоты сливаются (`null` удаляет слот), факты и показанные
-        сущности дописываются без повторов, `active_scenario` заменяется. Неизвестные ключи
+        сущности дописываются без повторов, `active_scenario` и `pending_confirmation`
+        заменяются (`null` в `pending_confirmation` снимает ожидание). Неизвестные ключи
         патча игнорируются."""
         slots = dict(self.slots)
         for name, value in (patch.get("slots") or {}).items():
@@ -34,6 +56,7 @@ class DialogState:
             facts=_append_unique(self.facts, patch.get("facts")),
             shown_entities=_append_unique(self.shown_entities, patch.get("shown_entities")),
             active_scenario=patch.get("active_scenario", self.active_scenario),
+            pending_confirmation=_pending(patch, self.pending_confirmation),
         )
 
     @property
@@ -51,12 +74,23 @@ class DialogState:
             data["shown_entities"] = list(self.shown_entities)
         if self.active_scenario is not None:
             data["active_scenario"] = self.active_scenario
+        if self.pending_confirmation is not None:
+            data["pending_confirmation"] = self.pending_confirmation.to_dict()
         return data
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any] | None) -> "DialogState":
         """Из сохранённого JSON; пустой или неполный — недостающие части пустые."""
         return cls().apply(data or {})
+
+
+def _pending(
+    patch: Mapping[str, Any], current: PendingConfirmation | None
+) -> PendingConfirmation | None:
+    if "pending_confirmation" not in patch:
+        return current
+    value = patch["pending_confirmation"]
+    return None if value is None else PendingConfirmation.from_dict(value)
 
 
 def _append_unique(current: tuple[str, ...], new: Sequence[Any] | None) -> tuple[str, ...]:

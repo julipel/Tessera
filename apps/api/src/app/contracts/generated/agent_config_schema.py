@@ -11,15 +11,16 @@ from typing_extensions import TypeAliasType
 from . import components_schema, tools_schema
 
 
-class AssistantConfig(BaseModel):
+class ConfirmLabels(BaseModel):
+    """
+    Подписи кнопок компонента confirm у инструментов с requires_confirmation (ADR-0021).
+    """
+
     model_config = ConfigDict(
         extra="forbid",
     )
-    name: Annotated[str, Field(min_length=1)]
-    language: Literal["auto", "ru", "en", "sv"] | None = "auto"
-    greeting: str
-    starter_suggestions: list[str] | None = []
-    fallback_message: str
+    confirm: Annotated[str | None, Field(min_length=1)] = "Подтвердить"
+    cancel: Annotated[str | None, Field(min_length=1)] = "Отмена"
 
 
 class ModelConfig(BaseModel):
@@ -154,6 +155,18 @@ class BrandingConfig(BaseModel):
     )
     tokens: BrandingTokens | None = None
     logo_url: str | None = None
+
+
+class AssistantConfig(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    name: Annotated[str, Field(min_length=1)]
+    language: Literal["auto", "ru", "en", "sv"] | None = "auto"
+    greeting: str
+    starter_suggestions: list[str] | None = []
+    fallback_message: str
+    confirm_labels: ConfirmLabels | None = None
 
 
 class ToolsConfig(BaseModel):

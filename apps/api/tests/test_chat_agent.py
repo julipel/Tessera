@@ -1,14 +1,18 @@
 """Подключение агента к chat (P2-08): TurnRequest → TurnContext, история для модели, LLMClients."""
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from app.modules.agent.public import (
     AnthropicLLM,
     AssistantMessage,
+    ComponentEmitted,
+    ConfirmationReply,
+    DialogStateUpdated,
     FakeLLM,
     FakeReply,
     LLMClients,
@@ -17,10 +21,17 @@ from app.modules.agent.public import (
     OpenAIResponsesLLM,
     Provider,
     RegistryToolExecutor,
+    ToolCall,
+    ToolFinished,
     UserMessage,
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, MessageStatus, TurnRequest
-from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent, to_llm_messages
+from app.modules.chat.infrastructure.loop_agent import (
+    LoopTurnAgent,
+    builtin_turn_agent,
+    confirmation_reply,
+    to_llm_messages,
+)
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.public import ToolRegistry
 
@@ -185,3 +196,107 @@ async def test_openai_compatible_provider_selects_its_client() -> None:
 
     assert providers == ["openai_compatible"]
     assert llm.requests[0].model == "anthropic/m"
+
+
+# --- Подтверждение create_lead через ход chat (P5-04a, ADR-0021) ---
+
+LEAD_CONFIG: dict[str, Any] = {
+    **config({"provider": "openai", "name": "m"}),
+    "assistant": {
+        "name": "A",
+        "greeting": "Привет!",
+        "fallback_message": "Не вышло.",
+        "confirm_labels": {"confirm": "Да, отправить"},
+    },
+    "tools": {"builtin": ["create_lead"]},
+    "forms": {
+        "contact": {
+            "title": "Контакт",
+            "fields": [{"name": "phone", "label": "Телефон", "kind": "text", "required": True}],
+        }
+    },
+}
+
+
+class RecordingLeads:
+    def __init__(self) -> None:
+        self.fields: list[dict[str, str]] = []
+
+    async def create(
+        self, tenant_id: TenantId, conversation_id: UUID, form_key: str, fields: Mapping[str, str]
+    ) -> UUID:
+        self.fields.append(dict(fields))
+        return uuid4()
+
+
+def lead_request(user_input: dict[str, Any], state: dict[str, Any]) -> TurnRequest:
+    return TurnRequest(
+        tenant_id=TENANT,
+        conversation_id=uuid4(),
+        agent_config_id=uuid4(),
+        turn_id=uuid4(),
+        input=user_input,
+        agent_config=LEAD_CONFIG,
+        history=(message(MessageRole.USER, "", user_input),),
+        dialog_state=state,
+    )
+
+
+async def test_lead_is_created_only_after_confirm_button() -> None:
+    lead_call = ToolCall(
+        id="c1",
+        name="create_lead",
+        arguments={"form_key": "contact", "fields": {"phone": "+7900"}},
+        raw_arguments="{}",
+    )
+    llm = FakeLLM(
+        [
+            FakeReply(text="Проверьте заявку.", tool_calls=(lead_call,)),
+            FakeReply(),
+            FakeReply(text="Заявка отправлена."),
+        ]
+    )
+    leads = RecordingLeads()
+    agent = builtin_turn_agent(lambda _: llm, leads=leads)
+
+    first = [e async for e in agent.run_turn(lead_request({"type": "text", "text": "Да"}, {}))]
+    [confirm] = [e.component for e in first if isinstance(e, ComponentEmitted)]
+    [waiting] = [e.state for e in first if isinstance(e, DialogStateUpdated)]
+    assert leads.fields == []
+    assert confirm["confirm_action"]["label"] == "Да, отправить"
+    assert confirm["cancel_action"]["label"] == "Отмена"  # по умолчанию из схемы
+
+    press = {
+        "type": "action",
+        "action_id": "confirm",
+        "label": "Да, отправить",
+        "payload": {"confirm_id": confirm["confirm_id"]},
+    }
+    second = [e async for e in agent.run_turn(lead_request(press, waiting.to_dict()))]
+
+    assert leads.fields == [{"phone": "+7900"}]
+    assert any(isinstance(e, ToolFinished) and e.ok for e in second)
+    # Ожидающий вызов — не знание о пользователе: в Runtime-слой промпта не попадает.
+    assert "pending_confirmation" not in llm.requests[-1].system
+
+
+@pytest.mark.parametrize(
+    ("user_input", "expected"),
+    [
+        (
+            {"type": "action", "action_id": "confirm", "payload": {"confirm_id": "cf_1"}},
+            ConfirmationReply("cf_1", approved=True),
+        ),
+        (
+            {"type": "action", "action_id": "cancel", "payload": {"confirm_id": "cf_1"}},
+            ConfirmationReply("cf_1", approved=False),
+        ),
+        ({"type": "action", "action_id": "confirm", "payload": {}}, None),
+        ({"type": "action", "action_id": "ask_about", "payload": {"confirm_id": "cf_1"}}, None),
+        ({"type": "text", "text": "да"}, None),
+    ],
+)
+def test_confirmation_reply_from_input(
+    user_input: dict[str, Any], expected: ConfirmationReply | None
+) -> None:
+    assert confirmation_reply(user_input) == expected

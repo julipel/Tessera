@@ -197,7 +197,12 @@
 - [x] **P5-03b Действия и быстрые ответы: фронт.** Нажатие Action → `input.type=action`
   с `label`, чипы `suggestions` под последним ответом, `starter_suggestions` из public config
   на пустом чате, подпись выбора в истории. DoD: unit-тесты reducer'а, e2e.
-- [ ] **P5-04 Формы и подтверждения.** form, confirm, `create_lead` с requires_confirmation.
+- [x] **P5-04a Формы и подтверждения: бэкенд.** `show_form`, `create_lead` с
+  requires_confirmation — ожидающий вызов в DialogState, исполнение по кнопке `confirm` без
+  модели, `assistant.confirm_labels`, модуль `leads`, проверка `form_submit` (422), ADR-0021.
+  DoD: тесты на FakeLLM, SSE и Postgres.
+- [ ] **P5-04b Формы и подтверждения: фронт.** Отправка формы (`form_submit`, подпись
+  в истории), кнопки confirm, блокировка во время хода. DoD: unit-тесты reducer'а, e2e.
 - [ ] **P5-05 Брендинг.** Токены из public config → CSS-переменные, логотип, приветствие.
   DoD: два демо-тенанта выглядят по-разному.
 - [ ] **P5-06 Виджет.** `widget.js` + iframe, allowed_origins, кнопка открытия, мобильная вёрстка.

@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from app.contracts import Event, UserInput
+from app.contracts import AgentConfig, Event, FormSubmitInput, UserInput
 from app.modules.agent.kernel import (
     AgentEvent,
     AnswerDelta,
@@ -31,7 +31,11 @@ from app.modules.chat.domain.entities import (
     ToolCallEntry,
     TurnRequest,
 )
-from app.modules.chat.domain.errors import AgentConfigMissingError, DuplicateMessageError
+from app.modules.chat.domain.errors import (
+    AgentConfigMissingError,
+    DuplicateMessageError,
+    InvalidInputError,
+)
 from app.modules.chat.domain.ports import (
     AgentConfigSource,
     ConversationStore,
@@ -40,6 +44,7 @@ from app.modules.chat.domain.ports import (
     TurnAgent,
 )
 from app.modules.shared.kernel import TenantId
+from app.modules.tools.public import form_values_problem
 
 PROTOCOL_VERSION = "1"
 
@@ -296,21 +301,24 @@ async def start_turn(
     commit: Commit,
     registry: "TurnRegistry",
 ) -> TurnStream:
-    """Записать ввод пользователя (и зафиксировать до начала стрима) и подготовить ход:
-    загрузить версию AgentConfig диалога и историю.
+    """Загрузить версию AgentConfig диалога, проверить и записать ввод пользователя
+    (и зафиксировать до начала стрима) и подготовить ход: загрузить историю.
 
-    Повтор client_message_id — DuplicateMessageError: ход по этому вводу уже запускался,
-    а ответ на него клиент берёт из истории."""
+    Отправка формы, которой нет в конфиге, или с неподходящими значениями —
+    InvalidInputError. Повтор client_message_id — DuplicateMessageError: ход по этому вводу
+    уже запускался, а ответ на него клиент берёт из истории."""
     conversation = await require_conversation(tenant_id, conversation_id, conversations)
+    config = await configs.config(tenant_id, conversation.agent_config_id)
+    if config is None:
+        raise AgentConfigMissingError(f"нет AgentConfig {conversation.agent_config_id}")
+    if isinstance(user_input.root, FormSubmitInput):
+        _check_form_submit(config, user_input.root)
     message, created = await messages.add_once(
         tenant_id, user_message(conversation_id, client_message_id, user_input)
     )
     if not created:
         raise DuplicateMessageError(f"сообщение {client_message_id} уже отправлено")
     await commit()
-    config = await configs.config(tenant_id, conversation.agent_config_id)
-    if config is None:
-        raise AgentConfigMissingError(f"нет AgentConfig {conversation.agent_config_id}")
     request = TurnRequest(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
@@ -324,6 +332,14 @@ async def start_turn(
     return TurnStream(
         conversation, request, agent, conversations, messages, tool_calls, commit, registry
     )
+
+
+def _check_form_submit(config: dict[str, Any], submitted: FormSubmitInput) -> None:
+    form = (AgentConfig.model_validate(config).forms or {}).get(submitted.form_id)
+    if form is None:
+        raise InvalidInputError(f"формы {submitted.form_id!r} нет")
+    if problem := form_values_problem(form, submitted.values):
+        raise InvalidInputError(problem)
 
 
 def _tool_call_entry(finished: ToolFinished) -> ToolCallEntry:

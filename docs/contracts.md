@@ -55,6 +55,10 @@
 }
 ```
 
+`form_submit` проверяется по форме `forms[form_id]` конфига до записи сообщения: неизвестная
+форма, лишнее поле, пустое обязательное, не строка или значение `select` не из `options` —
+422 `invalid_input`, ввод не сохраняется.
+
 `POST .../turns/{turn_id}/cancel` (`turn_id` — из событий хода): 204 — отмена принята, стрим
 хода закончится `done{interrupted}`, частичный ответ сохранится в истории; 404 `not_found` —
 хода нет, он уже завершён или принадлежит другому диалогу/тенанту.
@@ -158,6 +162,9 @@ Discriminated union по полю `type`. Все URL и цены — из дан
   "payload": { }, "url": null }
 ```
 Если `url` задан — это ссылка; иначе нажатие отправляет `input.type = "action"`.
+Кнопки `confirm` создаёт Tool Registry (ADR-0021): `action_id` — `confirm` / `cancel`,
+`payload: {confirm_id}`, подписи — `assistant.confirm_labels`. Форма — из `forms` конфига
+(`show_form`), `form_id` = ключ формы.
 Кнопки `product_card` из `show_entities` — из `knowledge.catalog.card_actions` тенанта
 (`payload: {entity_id}`); у `comparison_table` кнопок нет.
 
@@ -170,7 +177,7 @@ class ToolDefinition(BaseModel):
     parameters: dict               # JSON Schema аргументов
     timeout_s: float = 10
     side_effect: bool = False      # меняет что-то во внешнем мире
-    requires_confirmation: bool = False
+    requires_confirmation: bool = False  # исполняется после confirm пользователя (ADR-0021)
     display_label: str | None      # «Ищу в каталоге…»
 
 class ToolResult(BaseModel):
@@ -189,10 +196,12 @@ class ToolError(BaseModel):
 `state_patch` — частичное обновление DialogState (architecture.md §7):
 ```json
 { "slots": { "budget": 3000, "skin_type": null }, "facts": ["аллергия на отдушки"],
-  "shown_entities": ["e_1"], "active_scenario": "skincare" }
+  "shown_entities": ["e_1"], "active_scenario": "skincare",
+  "pending_confirmation": { "confirm_id": "cf_1", "tool": "create_lead", "arguments": {} } }
 ```
 Все ключи необязательны. `slots` сливаются со слотами состояния, `null` удаляет слот;
-`facts` и `shown_entities` дописываются без повторов; `active_scenario` заменяется. Патчи
+`facts` и `shown_entities` дописываются без повторов; `active_scenario` и
+`pending_confirmation` заменяются (`null` снимает ожидание; ставит его только Registry). Патчи
 неуспешных вызовов не применяются. Аргументы `update_dialog_state` — по слотам сценариев
 AgentConfig (лишний слот или неверный тип — `validation_error`).
 
@@ -206,8 +215,8 @@ AgentConfig (лишний слот или неверный тип — `validatio
 | `show_entities(entity_ids, layout: "cards" \| "carousel" \| "comparison", title?)` | UI-компоненты по id из БД (ADR-0004) |
 | `update_dialog_state(slots?, facts?)` | запись собранной информации |
 | `suggest_replies(options)` | 1–4 быстрых ответа (≤ 40 символов) от лица пользователя → SSE `suggestions` (ADR-0020) |
-| `show_form(form_key)` | форма из конфига тенанта |
-| `create_lead(fields)` | заявка (side_effect, requires_confirmation) |
+| `show_form(form_key)` | компонент `form` из `forms` конфига тенанта |
+| `create_lead(form_key, fields)` | заявка по полям формы (side_effect, requires_confirmation, ADR-0021); поля — строки, проверяются по форме |
 | `handoff_to_human(reason)` | передача оператору (позже) |
 
 Декларативный HTTP-инструмент тенанта (в AgentConfig):
@@ -239,6 +248,7 @@ assistant:
   greeting: "Привет! Помогу подобрать..."
   starter_suggestions: ["Подобрать подарок", "Условия доставки"]
   fallback_message: "Извините, сейчас не получается ответить. Попробуйте ещё раз."
+  confirm_labels: { confirm: "Подтвердить", cancel: "Отмена" }   # кнопки confirm (по умолчанию)
 model:
   primary: { provider: openai, name: "<model>" }
   fallback: { provider: anthropic, name: "<model>" }

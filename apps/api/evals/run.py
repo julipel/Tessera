@@ -20,7 +20,7 @@ from app.settings import Settings
 from evals.dialogs import DIALOGS_DIR, InvalidDialogError, load_dialogs, select_dialogs
 from evals.judge import JUDGE_PROMPT_VERSION, Judge
 from evals.report import REPORTS_DIR, RunInfo, render_summary, totals, write_report
-from evals.runner import TENANTS_DIR, DialogRunner, TenantConfigs, run_dialogs
+from evals.runner import TENANTS_DIR, DialogRunner, MemoryLeads, TenantConfigs, run_dialogs
 from evals.tenant_data import connect_tenant_data
 
 
@@ -67,7 +67,7 @@ async def main_async(args: argparse.Namespace) -> int:
         source = "БД" if tenant in tenants.ids else f"нет данных: {tenants.error or 'нет в БД'}"
         print(f"Тенант {tenant}: знания и каталог — {source}", flush=True)
     agent = builtin_turn_agent(
-        llms.for_provider, knowledge.search if knowledge else None, tenants.catalog
+        llms.for_provider, knowledge.search if knowledge else None, tenants.catalog, MemoryLeads()
     )
     runner = DialogRunner(agent, configs, judge, tenant_ids=tenants.ids)
     started_at = datetime.now(UTC)

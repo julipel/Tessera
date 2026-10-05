@@ -22,13 +22,19 @@ class RegistryToolExecutor:
         self, calls: Sequence[ToolCall], ctx: TurnContext
     ) -> Sequence[ToolResult]:
         """Аргументы уже разобраны: вызовы с `arguments is None` цикл сюда не передаёт."""
-        invocations = [
-            ToolInvocation(id=call.id, name=call.name, arguments=call.arguments or {})
-            for call in calls
-        ]
         return await self._registry.execute_many(
-            invocations,
-            ToolContext(
-                tenant_id=ctx.tenant_id, conversation_id=ctx.conversation_id, turn_id=ctx.turn_id
-            ),
+            [_invocation(call) for call in calls], _tool_context(ctx)
         )
+
+    async def execute_confirmed(self, call: ToolCall, ctx: TurnContext) -> ToolResult:
+        return await self._registry.execute_confirmed(_invocation(call), _tool_context(ctx))
+
+
+def _invocation(call: ToolCall) -> ToolInvocation:
+    return ToolInvocation(id=call.id, name=call.name, arguments=call.arguments or {})
+
+
+def _tool_context(ctx: TurnContext) -> ToolContext:
+    return ToolContext(
+        tenant_id=ctx.tenant_id, conversation_id=ctx.conversation_id, turn_id=ctx.turn_id
+    )

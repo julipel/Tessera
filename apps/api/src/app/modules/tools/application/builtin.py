@@ -1,10 +1,12 @@
 """Встроенные инструменты ядра (contracts.md §4), включаемые тенанту через `tools.builtin`.
 
 Реализованы `update_dialog_state`, `search_knowledge`, `search_catalog`, `get_entity`,
-`show_entities` и `suggest_replies`;
+`show_entities`, `suggest_replies`, `show_form` и `create_lead`;
 остальные имена из конфига пропускаются — их добавят следующие задачи. Инструменты с
 зависимостями подключаются, только если окружение их собрало: `search_knowledge` — поиск
-по знаниям (`knowledge`), каталог — `catalog`; иначе — предупреждение в лог.
+по знаниям (`knowledge`), каталог — `catalog`, `create_lead` — хранилище заявок (`leads`);
+иначе — предупреждение в лог. `show_form` и `create_lead` без `forms` в конфиге
+не подключаются.
 """
 
 from collections.abc import Callable, Iterable, Mapping
@@ -19,11 +21,17 @@ from app.modules.tools.application.catalog import (
     get_entity_tool,
     search_catalog_tool,
 )
+from app.modules.tools.application.forms import (
+    CREATE_LEAD,
+    SHOW_FORM,
+    create_lead_tool,
+    show_form_tool,
+)
 from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
 from app.modules.tools.application.show_entities import SHOW_ENTITIES, show_entities_tool
 from app.modules.tools.application.suggest_replies import SUGGEST_REPLIES, suggest_replies_tool
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition
-from app.modules.tools.domain.ports import Catalog, KnowledgeSearcher
+from app.modules.tools.domain.ports import Catalog, KnowledgeSearcher, LeadStore
 from app.modules.tools.domain.result import ToolResult
 
 logger = structlog.get_logger(__name__)
@@ -42,6 +50,7 @@ def builtin_tools(
     *,
     knowledge: KnowledgeSearcher | None = None,
     catalog: Catalog | None = None,
+    leads: LeadStore | None = None,
 ) -> list[ToolDefinition]:
     """Встроенные инструменты из `config.tools.builtin`, которые уже реализованы и для
     которых есть зависимости."""
@@ -61,7 +70,16 @@ def builtin_tools(
         factories[SHOW_ENTITIES] = lambda c: show_entities_tool(
             catalog, c.knowledge.catalog if c.knowledge else None
         )
+    forms = config.forms or {}
+    if forms:
+        factories[SHOW_FORM] = lambda c: show_form_tool(forms)
+        if leads is not None:
+            factories[CREATE_LEAD] = lambda c: create_lead_tool(forms, leads)
     enabled = config.tools.builtin or []
+    if not forms and {SHOW_FORM, CREATE_LEAD} & set(enabled):
+        logger.warning("tools.forms_unavailable", reason="в конфиге нет forms")
+    if forms and leads is None and CREATE_LEAD in enabled:
+        logger.warning("tools.create_lead_unavailable", reason="хранилище заявок не подключено")
     if knowledge is None and SEARCH_KNOWLEDGE in enabled:
         logger.warning("tools.search_knowledge_unavailable", reason="поиск по знаниям не настроен")
     if catalog is None and {SEARCH_CATALOG, GET_ENTITY, SHOW_ENTITIES} & set(enabled):

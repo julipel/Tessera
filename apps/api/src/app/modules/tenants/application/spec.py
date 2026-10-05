@@ -1,12 +1,15 @@
 """Описание тенанта в YAML (config/tenants/*.yaml): метаданные, виджет, AgentConfig, источники."""
 
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from app.contracts import AgentConfig
 from app.modules.tenants.domain.errors import InvalidTenantSpecError
+from app.modules.tenants.domain.widget_keys import ORIGIN_PATTERN
+
+Origin = Annotated[str, StringConstraints(pattern=ORIGIN_PATTERN)]
 
 
 class TenantInfo(BaseModel):
@@ -19,7 +22,8 @@ class TenantInfo(BaseModel):
 class WidgetSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    allowed_origins: list[str] = Field(default_factory=list)
+    # Сайты, где можно встроить виджет (ADR-0022): `https://shop.example`, без пути.
+    allowed_origins: list[Origin] = Field(default_factory=list)
 
 
 class TenantSpec(BaseModel):

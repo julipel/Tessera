@@ -11,10 +11,13 @@
 ## 1. HTTP API (публичный, для чата/виджета)
 
 Авторизация: заголовок `X-Widget-Key`. Посетитель: `visitor_id` (генерирует клиент, хранит у себя).
+Запрос с `Origin`, которого нет в `allowed_origins` ключа и среди origin своего веб-чата
+(`CORS_ORIGINS`), — 403 `forbidden`; без `Origin` (не браузер) — пропускается (ADR-0022).
 
 | Метод | Путь | Назначение |
 |---|---|---|
 | GET | `/v1/public/config` | брендинг, приветствие, стартовые подсказки |
+| GET | `/v1/public/widget` | `WidgetEmbed {allowed_origins}` — для CSP `frame-ancestors` iframe (ADR-0022) |
 | POST | `/v1/conversations` | создать диалог → `{conversation_id}` |
 | GET | `/v1/conversations/{id}/messages` | история (для восстановления) |
 | POST | `/v1/conversations/{id}/messages` | отправить ввод, ответ — SSE-стрим |
@@ -70,7 +73,8 @@
 ```json
 { "error": { "code": "unauthorized", "message": "неизвестный ключ виджета", "retryable": false } }
 ```
-Статусы: 401 `unauthorized` (нет/неверный `X-Widget-Key`), 404 `not_found` /
+Статусы: 401 `unauthorized` (нет/неверный `X-Widget-Key`), 403 `forbidden` (`Origin` не
+разрешён для ключа), 404 `not_found` /
 `conversation_not_found`, 409 `duplicate_message`, 405/422 `invalid_input`, 429 `rate_limited`, 500 `internal`
 (подробности — только в логе с `trace_id`; `X-Trace-Id` есть в любом ответе).
 
@@ -298,4 +302,5 @@ branding:
 `llm_unavailable` (retryable), `turn_timeout` (retryable), `step_limit`, `invalid_input`,
 `conversation_not_found`, `rate_limited` (retryable), `internal`.
 
-Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `not_found`, `duplicate_message`.
+Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `forbidden`, `not_found`,
+`duplicate_message`.

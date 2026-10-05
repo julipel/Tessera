@@ -105,6 +105,32 @@ def test_valid_branding_is_accepted() -> None:
     assert spec.agent_config.branding.logo_url == "/l.svg"
 
 
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://shop.example/",
+        "https://shop.example/path",
+        "https://*.shop.example",
+        "*",
+        "https://shop.example; script-src *",
+        "HTTPS://Shop.example",
+        "shop.example",
+        "ftp://shop.example",
+    ],
+)
+def test_invalid_allowed_origin_is_rejected(origin: str) -> None:
+    # Origin попадает в CSP frame-ancestors страницы виджета (ADR-0022).
+    source = SPEC_YAML.replace('"https://shop.example"', f'"{origin}"')
+    with pytest.raises(InvalidTenantSpecError):
+        load_tenant_spec(source)
+
+
+def test_valid_allowed_origins_are_accepted() -> None:
+    origins = '["https://shop.example", "http://localhost:3000", "http://127.0.0.2:3001"]'
+    spec = load_tenant_spec(SPEC_YAML.replace('["https://shop.example"]', origins))
+    assert spec.widget.allowed_origins[1] == "http://localhost:3000"
+
+
 def test_config_is_stored_as_written() -> None:
     config = load_tenant_spec(SPEC_YAML).config_json()
     # Значения по умолчанию из схемы не материализуются.

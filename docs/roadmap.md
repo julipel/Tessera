@@ -206,7 +206,13 @@
   reducer'а, e2e (show_form → форма → confirm → заявка через мок модели).
 - [x] **P5-05 Брендинг.** Токены из public config → CSS-переменные, логотип, приветствие.
   DoD: два демо-тенанта выглядят по-разному.
-- [ ] **P5-06 Виджет.** `widget.js` + iframe, allowed_origins, кнопка открытия, мобильная вёрстка.
+- [x] **P5-06a Виджет: бэкенд.** `GET /v1/public/widget` → `WidgetEmbed {allowed_origins}`,
+  проверка `Origin` по ключу (403 `forbidden`, свой чат — `CORS_ORIGINS`), формат origin
+  в YAML тенанта, ADR-0022. DoD: тесты API и spec.
+- [ ] **P5-06b Виджет: фронт.** `widget.js` + iframe `/widget`, CSP `frame-ancestors` из
+  `/v1/public/widget` в Next proxy (`'none'` при ошибке), кнопка открытия и «Свернуть»
+  (postMessage), мобильная вёрстка, демо-страница; e2e-origin в `allowed_origins` демо-тенантов.
+  DoD: unit-тесты CSP, e2e (открыть/свернуть, мобильный, чужой сайт — iframe заблокирован).
 - [ ] **P5-07 UX-полировка.** Статусы действий, прерывание генерации, повтор при ошибке,
   восстановление диалога после перезагрузки, автоскролл.
 

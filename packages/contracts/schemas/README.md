@@ -21,10 +21,12 @@ HTTP-инструмент `HttpToolDefinition` для `check_stock`.
   `SendMessageRequest`, `MessageHistory`, `HistoryMessage` (`input` у user, `blocks` у
   assistant), `MessageBlock` (`TextBlock` / `ComponentBlock`)
 - `http_error.schema.json` — тело любого HTTP-ответа с ошибкой: `{"error": {code, message,
-  retryable}}`; коды SSE-ошибок + `unauthorized`/`not_found`/`duplicate_message`
+  retryable}}`; коды SSE-ошибок + `unauthorized`/`forbidden`/`not_found`/`duplicate_message`
   (docs/contracts.md §1, §6)
 - `public_config.schema.json` — ответ `GET /v1/public/config`: публичная часть активного
   AgentConfig (assistant без fallback_message, branding), без промпта/инструментов/моделей
+- `widget_embed.schema.json` — ответ `GET /v1/public/widget`: `allowed_origins` ключа для CSP
+  `frame-ancestors` страницы iframe виджета (ADR-0022)
 
 Файлы ссылаются друг на друга относительными `$ref` (напр. `events.schema.json` →
 `components.schema.json`, `agent_config.schema.json` → `tools.schema.json#/$defs/HttpToolDefinition`

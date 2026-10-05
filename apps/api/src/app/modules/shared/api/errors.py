@@ -25,6 +25,7 @@ type ErrorCode = Literal[
     "rate_limited",
     "internal",
     "unauthorized",
+    "forbidden",
     "not_found",
     "duplicate_message",
 ]
@@ -36,6 +37,7 @@ RETRYABLE: frozenset[ErrorCode] = frozenset({"llm_unavailable", "turn_timeout", 
 _CODE_BY_STATUS: dict[int, ErrorCode] = {
     status.HTTP_400_BAD_REQUEST: "invalid_input",
     status.HTTP_401_UNAUTHORIZED: "unauthorized",
+    status.HTTP_403_FORBIDDEN: "forbidden",
     status.HTTP_404_NOT_FOUND: "not_found",
     status.HTTP_405_METHOD_NOT_ALLOWED: "invalid_input",
     status.HTTP_422_UNPROCESSABLE_CONTENT: "invalid_input",

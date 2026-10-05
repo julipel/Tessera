@@ -58,7 +58,8 @@ class Settings(BaseSettings):
     # Ключи виджета, которые `make seed` выдаёт новым тенантам: slug=key[,slug=key…] (или key,
     # если тенант один); у тенанта без ключа здесь — сгенерировать.
     seed_widget_key: str | None = None
-    # Origin веб-чата для CORS (env — JSON-список). Origin виджетов тенантов — P5-06.
+    # Origin своего веб-чата (env — JSON-список): CORS и проверка Origin по ключу виджета —
+    # с него ключ работает всегда, сайты тенанта задаёт allowed_origins (ADR-0022).
     cors_origins: list[str] = ["http://localhost:3000"]
     # LLM-провайдеры (ADR-0010); base_url пусто — официальный endpoint.
     openai_api_key: SecretStr | None = None

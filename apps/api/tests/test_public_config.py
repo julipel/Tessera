@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contracts import HttpError, PublicConfig
+from app.contracts import HttpError, PublicConfig, WidgetEmbed
 from app.logs import TRACE_ID_HEADER
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import (
@@ -21,6 +21,9 @@ from app.modules.tenants.public import (
 )
 
 URL = "/v1/public/config"
+WIDGET_URL = "/v1/public/widget"
+SHOP_SITE = "https://shop.example"
+CHAT_ORIGIN = "http://localhost:3000"  # Settings.cors_origins по умолчанию — свой веб-чат
 
 
 def _config(name: str, **branding: Any) -> dict[str, Any]:
@@ -40,10 +43,16 @@ def _config(name: str, **branding: Any) -> dict[str, Any]:
 
 
 async def _tenant(
-    session: AsyncSession, slug: str, key: str, config: dict[str, Any] | None
+    session: AsyncSession,
+    slug: str,
+    key: str,
+    config: dict[str, Any] | None,
+    allowed_origins: list[str] | None = None,
 ) -> TenantId:
     tenant = await SqlTenantDirectory(session).create(slug, slug)
-    await WidgetKeyRepository(session).add_key(tenant.id, hash_widget_key(key), [])
+    await WidgetKeyRepository(session).add_key(
+        tenant.id, hash_widget_key(key), allowed_origins or []
+    )
     if config is not None:
         configs = AgentConfigRepository(session)
         draft = await configs.create_draft(tenant.id, config)
@@ -53,7 +62,13 @@ async def _tenant(
 
 @pytest.fixture
 async def shop(db_session: AsyncSession) -> TenantId:
-    return await _tenant(db_session, "shop", "wk_shop", _config("Shop", logo_url="/shop.svg"))
+    return await _tenant(
+        db_session,
+        "shop",
+        "wk_shop",
+        _config("Shop", logo_url="/shop.svg"),
+        allowed_origins=[SHOP_SITE],
+    )
 
 
 async def test_returns_public_part_of_active_config(db_client: AsyncClient, shop: TenantId) -> None:
@@ -130,3 +145,73 @@ async def test_logs_carry_tenant_id_from_widget_key(db_client: AsyncClient, shop
     [entry] = [e for e in logs if e["event"] == "public_config_served"]
     assert entry["tenant_id"] == str(shop)
     assert entry["trace_id"] == "trace-1"
+
+
+async def test_widget_embed_returns_allowed_origins(db_client: AsyncClient, shop: TenantId) -> None:
+    response = await db_client.get(WIDGET_URL, headers={"X-Widget-Key": "wk_shop"})
+
+    assert response.status_code == 200
+    assert WidgetEmbed.model_validate(response.json()).allowed_origins == [SHOP_SITE]
+
+
+async def test_widget_embed_without_origins_is_empty(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await _tenant(db_session, "closed", "wk_closed", _config("Closed"))
+
+    response = await db_client.get(WIDGET_URL, headers={"X-Widget-Key": "wk_closed"})
+
+    assert response.json() == {"allowed_origins": []}
+
+
+async def test_widget_embed_unknown_key_is_401(db_client: AsyncClient, shop: TenantId) -> None:
+    response = await db_client.get(WIDGET_URL, headers={"X-Widget-Key": "wk_unknown"})
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [SHOP_SITE, CHAT_ORIGIN, None],
+    ids=["tenant-site", "own-chat", "no-origin"],
+)
+async def test_allowed_origin_passes(
+    db_client: AsyncClient, shop: TenantId, origin: str | None
+) -> None:
+    headers = {"X-Widget-Key": "wk_shop"} | ({"Origin": origin} if origin else {})
+
+    response = await db_client.get(URL, headers=headers)
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("origin", ["https://evil.example", "https://shop.example:8443", "null"])
+async def test_foreign_origin_is_403(db_client: AsyncClient, shop: TenantId, origin: str) -> None:
+    response = await db_client.get(URL, headers={"X-Widget-Key": "wk_shop", "Origin": origin})
+
+    assert response.status_code == 403
+    assert HttpError.model_validate(response.json()).error.code == "forbidden"
+
+
+async def test_origin_of_other_tenant_is_403(
+    db_client: AsyncClient, db_session: AsyncSession, shop: TenantId
+) -> None:
+    # allowed_origins — свойство ключа: сайт одного тенанта не открывает доступ к другому.
+    await _tenant(db_session, "other", "wk_other", _config("Other"), ["https://other.example"])
+
+    response = await db_client.get(
+        URL, headers={"X-Widget-Key": "wk_shop", "Origin": "https://other.example"}
+    )
+
+    assert response.status_code == 403
+
+
+async def test_chat_api_checks_origin_too(db_client: AsyncClient, shop: TenantId) -> None:
+    # Проверка — в общей зависимости ключа виджета, ей подчиняется и API диалогов.
+    response = await db_client.post(
+        "/v1/conversations",
+        json={"visitor_id": "v1"},
+        headers={"X-Widget-Key": "wk_shop", "Origin": "https://evil.example"},
+    )
+
+    assert response.status_code == 403

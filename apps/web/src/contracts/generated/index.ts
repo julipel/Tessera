@@ -879,7 +879,7 @@ export interface HttpError {
  */
 export interface HttpErrorBody {
   /**
-   * Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), not_found (404), duplicate_message (409).
+   * Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), forbidden (403), not_found (404), duplicate_message (409).
    */
   code:
     | "llm_unavailable"
@@ -890,6 +890,7 @@ export interface HttpErrorBody {
     | "rate_limited"
     | "internal"
     | "unauthorized"
+    | "forbidden"
     | "not_found"
     | "duplicate_message";
   message: string;
@@ -973,4 +974,16 @@ export interface ToolDefinition {
    * Например «Ищу в каталоге…» — для события tool_started.
    */
   display_label?: string | null;
+}
+/**
+ * Ответ GET /v1/public/widget: где разрешено встраивать виджет. Читает сервер веб-чата, чтобы выставить CSP frame-ancestors на странице iframe (ADR-0022).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "WidgetEmbed".
+ */
+export interface WidgetEmbed {
+  /**
+   * Origin сайтов тенанта (`scheme://host[:port]`). Пустой список — встраивание запрещено.
+   */
+  allowed_origins: string[];
 }

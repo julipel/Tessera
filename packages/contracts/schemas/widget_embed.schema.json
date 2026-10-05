@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "widget_embed.schema.json",
+  "title": "WidgetEmbed",
+  "description": "Ответ GET /v1/public/widget: где разрешено встраивать виджет. Читает сервер веб-чата, чтобы выставить CSP frame-ancestors на странице iframe (ADR-0022).",
+  "type": "object",
+  "properties": {
+    "allowed_origins": {
+      "type": "array",
+      "description": "Origin сайтов тенанта (`scheme://host[:port]`). Пустой список — встраивание запрещено.",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["allowed_origins"],
+  "additionalProperties": false
+}

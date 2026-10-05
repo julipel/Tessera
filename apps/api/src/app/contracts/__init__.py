@@ -77,6 +77,7 @@ from app.contracts.generated.user_input_schema import (
     TextInput,
     UserInput,
 )
+from app.contracts.generated.widget_embed_schema import WidgetEmbed
 
 __all__ = [
     "Action",
@@ -142,4 +143,5 @@ __all__ = [
     "ToolStartedEvent",
     "TurnStartedEvent",
     "UserInput",
+    "WidgetEmbed",
 ]

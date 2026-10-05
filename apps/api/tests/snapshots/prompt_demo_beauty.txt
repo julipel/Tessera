@@ -94,7 +94,7 @@
 - gender_pref (string: female | male | unisex)
 - liked_fragrances (array of string)
 - liked_families (array of string: floral | oriental_amber | woody | fougere | chypre | citrus | gourmand | fresh_aquatic | green | leather)
-- disliked (array of string)
+- disliked (array of string: floral | oriental_amber | woody | fougere | chypre | citrus | gourmand | fresh_aquatic | green | leather)
 - season (string: spring | summer | autumn | winter)
 - occasion (string: daily | office | evening | special)
 - intensity_pref (string: light | moderate | strong)

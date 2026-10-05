@@ -163,6 +163,9 @@ def _turn_json(turn: TurnResult) -> dict[str, Any]:
         "status": turn.status.value,
         "error": turn.error,
         "finish": turn.finish,
+        "steps": turn.steps,
+        "tool_steps": turn.tool_steps,
+        "scenario": turn.scenario,
         "text": turn.outcome.text,
         "tools_called": list(turn.outcome.tools_called),
         "components": list(turn.outcome.components),
@@ -206,6 +209,10 @@ def _render_turn(turn: TurnResult) -> list[str]:
         f"слоты: `{json.dumps(outcome.slots, ensure_ascii=False)}` · "
         f"{turn.finish or '—'}, {turn.duration_ms} мс"
     )
+    if turn.tool_steps:
+        steps = " → ".join(", ".join(step) for step in turn.tool_steps)
+        lines.append(f"Шаги модели: {turn.steps} · по шагам: {steps}")
+    lines.append(f"Сценарий: {turn.scenario or '—'}")
     if turn.checks:
         lines.append("")
         for check in turn.checks:

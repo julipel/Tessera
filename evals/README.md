@@ -9,7 +9,7 @@
 ```bash
 make eval                 # все диалоги
 make eval f=beauty_14     # подстрока id или тег (f=lead)
-cd apps/api && uv run python -m evals.run --concurrency 2 -v   # флаги: --help
+cd apps/api && uv run python -m evals.run --concurrency 1 -v   # флаги: --help
 ```
 
 Раннер (`apps/api/evals/`, ADR-0011) гоняет агента in-process: тот же `LoopTurnAgent`, что и
@@ -20,7 +20,11 @@ chat API, конфиг тенанта — из `config/tenants/<tenant>.yaml`, �
 
 Результат — `reports/<timestamp>.md` (читать) и `reports/<timestamp>.json` (сравнение
 прогонов, `make eval-diff`), сводка — в консоль. Код выхода 1, если есть проваленные или упавшие
-диалоги.
+диалоги. Для диагностики у хода в отчёте — вызовы инструментов по шагам модели (ошибка —
+`имя!код`, напр. `search_catalog!validation_error`), число шагов и активный сценарий.
+
+По умолчанию параллельно идут 2 диалога: при 4 прогон упирается в лимит OpenAI по токенам в
+минуту, и ходы падают с `LLMError` (ретраев пока нет, P7-01).
 
 ### LLM-судья
 

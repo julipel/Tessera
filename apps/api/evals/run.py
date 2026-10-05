@@ -108,7 +108,13 @@ async def main_async(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="evals.run", description="Прогон эталонных диалогов")
     parser.add_argument("--filter", help="подстрока id диалога или тег")
-    parser.add_argument("--concurrency", type=int, default=4, help="диалогов параллельно")
+    parser.add_argument(
+        # 4 параллельных диалога упираются в лимит OpenAI по токенам в минуту (TPM).
+        "--concurrency",
+        type=int,
+        default=2,
+        help="диалогов параллельно",
+    )
     parser.add_argument("--dialogs", type=Path, default=DIALOGS_DIR)
     parser.add_argument("--tenants", type=Path, default=TENANTS_DIR)
     parser.add_argument("--reports", type=Path, default=REPORTS_DIR)

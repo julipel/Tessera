@@ -109,7 +109,11 @@ agent_config:
             items:
               type: string
               enum: [floral, oriental_amber, woody, fougere, chypre, citrus, gourmand, fresh_aquatic, green, leather]
-          disliked: { type: array, items: { type: string } }
+          disliked:
+            type: array
+            items:
+              type: string
+              enum: [floral, oriental_amber, woody, fougere, chypre, citrus, gourmand, fresh_aquatic, green, leather]
           season:
             type: string
             enum: [spring, summer, autumn, winter]

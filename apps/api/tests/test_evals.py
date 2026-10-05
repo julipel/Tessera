@@ -14,16 +14,20 @@ from app.modules.agent.public import (
     AgentEvent,
     AnswerDelta,
     ComponentEmitted,
+    DialogStateUpdated,
     FakeLLM,
     FakeReply,
     FinishReason,
     LLMError,
     ToolCall,
+    ToolFinished,
+    ToolStarted,
     TurnCompleted,
     Usage,
     UserMessage,
 )
 from app.modules.chat.public import TurnRequest, builtin_turn_agent
+from app.modules.memory.public import DialogState
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import SqlTenantDirectory
 from app.settings import Settings
@@ -237,6 +241,14 @@ def done(input_tokens: int = 10, output_tokens: int = 5) -> TurnCompleted:
     return TurnCompleted(FinishReason.ANSWERED, Usage(input_tokens, output_tokens), steps=1)
 
 
+RUN_INFO = RunInfo(
+    started_at=datetime(2026, 10, 3, 12, 0, tzinfo=UTC),
+    finished_at=datetime(2026, 10, 3, 12, 2, tzinfo=UTC),
+    platform_prompt_version="1",
+    judge_prompt_version="1",
+    models={"eval-shop": "openai/test-model"},
+)
+
 FORM = {"type": "form", "form_id": "f_42", "title": "Контакт", "fields": [], "submit_label": "Ок"}
 CONFIRM = {
     "type": "confirm",
@@ -357,6 +369,44 @@ async def test_run_dialogs_keeps_order(configs: TenantConfigs) -> None:
 # --- отчёт ---
 
 
+async def test_turn_records_tool_steps_and_scenario(configs: TenantConfigs) -> None:
+    def started(call_id: str, name: str) -> ToolStarted:
+        return ToolStarted(call_id, name)
+
+    def finished(call_id: str, name: str, code: Any = None) -> ToolFinished:
+        return ToolFinished(call_id, name, ok=code is None, error_code=code)
+
+    agent = ScriptedAgent(
+        [
+            started("c1", "update_dialog_state"),
+            started("c2", "search_catalog"),
+            finished("c1", "update_dialog_state"),
+            finished("c2", "search_catalog", "validation_error"),
+            DialogStateUpdated(DialogState(active_scenario="skincare")),
+            started("c3", "search_catalog"),
+            finished("c3", "search_catalog"),
+            AnswerDelta("Вот варианты."),
+            TurnCompleted(FinishReason.ANSWERED, Usage(10, 5), steps=3),
+        ]
+    )
+
+    result = await DialogRunner(agent, configs).run(dialog({"user": "Крем"}))
+
+    [turn] = result.turns
+    assert turn.tool_steps == [
+        ["update_dialog_state", "search_catalog!validation_error"],
+        ["search_catalog"],
+    ]
+    assert turn.steps == 3
+    assert turn.scenario == "skincare"
+    markdown = render_markdown([result], RUN_INFO)
+    assert (
+        "Шаги модели: 3 · по шагам: update_dialog_state, search_catalog!validation_error"
+        " → search_catalog"
+    ) in markdown
+    assert "Сценарий: skincare" in markdown
+
+
 async def test_report_markdown_json_and_summary(configs: TenantConfigs, tmp_path: Path) -> None:
     agent = ScriptedAgent(
         [AnswerDelta("Ответ без поиска"), done(100, 20)],
@@ -369,14 +419,7 @@ async def test_report_markdown_json_and_summary(configs: TenantConfigs, tmp_path
     passed = await runner.run(dialog({"user": "Спасибо", "expect": {"judge": "Вежлив"}}))
     passed.dialog_id = "d2"
     results = [failed, passed]
-    start = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
-    info = RunInfo(
-        started_at=start,
-        finished_at=start.replace(minute=2),
-        platform_prompt_version="1",
-        judge_prompt_version="1",
-        models={"eval-shop": "openai/test-model"},
-    )
+    info = RUN_INFO
 
     report = write_report(results, info, tmp_path / "reports")
     markdown = render_markdown(results, info)

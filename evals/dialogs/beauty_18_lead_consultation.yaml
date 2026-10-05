@@ -13,9 +13,9 @@ turns:
       form_id: consultation
       values: { name: "Анна", contact: "@anna_test", time: "будни после 18", comment: "кислоты и сыворотки" }
     expect:
+      # ADR-0021: вызов create_lead на этом ходе не создаёт заявку — реестр отдаёт confirm.
       components: [confirm]
-      tools_not_called: [create_lead]
-      judge: "Перед созданием заявки показывает подтверждение с данными"
+      judge: "Перед созданием заявки показывает подтверждение (кнопки подтверждения — компонент confirm; вызов create_lead на этом ходе только готовит заявку и не создаёт её)"
   - input:
       type: action
       action_id: confirm

@@ -58,6 +58,11 @@ class TurnResult:
     outcome: TurnOutcome = field(default_factory=TurnOutcome)
     checks: list[CheckResult] = field(default_factory=list)
     finish: str | None = None
+    # Диагностика хода: вызовы инструментов по шагам модели (ошибка — `имя!код`),
+    # число вызовов модели и активный сценарий после хода.
+    tool_steps: list[list[str]] = field(default_factory=list)
+    steps: int = 0
+    scenario: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     judge_input_tokens: int = 0
@@ -211,6 +216,9 @@ class DialogRunner:
             slots=dict(conversation.state.get("slots") or {}),
         )
         result.finish = collector.finish
+        result.tool_steps = collector.tool_steps
+        result.steps = collector.steps
+        result.scenario = conversation.state.get("active_scenario")
         result.input_tokens = collector.input_tokens
         result.output_tokens = collector.output_tokens
 
@@ -301,6 +309,11 @@ class _TurnCollector:
         self._blocks: list[str] = []
         self._open = False
         self.tools: list[str] = []
+        # Шаг модели — пакет вызовов: все ToolStarted шага приходят раньше его ToolFinished,
+        # поэтому ToolStarted после ToolFinished открывает новый шаг.
+        self.tool_steps: list[list[str]] = []
+        self._step_done = True
+        self.steps = 0
         self.components: list[dict[str, Any]] = []
         self.state: dict[str, Any] | None = None
         self.finish: str | None = None
@@ -316,16 +329,24 @@ class _TurnCollector:
                 self._blocks[-1] += text
             case ToolStarted():
                 self._open = False
-            case ToolFinished(name=name):
+                if self._step_done:
+                    self.tool_steps.append([])
+                    self._step_done = False
+            case ToolFinished(name=name, ok=ok, error_code=code):
                 if name not in self.tools:
                     self.tools.append(name)
+                if not self.tool_steps:
+                    self.tool_steps.append([])  # подтверждённый вызов — без шага модели
+                self.tool_steps[-1].append(name if ok else f"{name}!{code}")
+                self._step_done = True
             case ComponentEmitted(component=component):
                 self._open = False
                 self.components.append(component)
             case DialogStateUpdated(state=state):
                 self.state = state.to_dict()
-            case TurnCompleted(finish=finish, usage=usage):
+            case TurnCompleted(finish=finish, usage=usage, steps=steps):
                 self.finish = finish.value
+                self.steps = steps
                 self.input_tokens = usage.input_tokens
                 self.output_tokens = usage.output_tokens
 

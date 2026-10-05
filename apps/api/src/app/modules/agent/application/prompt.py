@@ -54,14 +54,21 @@ def _layer(tag: str, body: str) -> str:
 def _scenarios(scenarios: Sequence[ScenarioConfig], active_key: str | None) -> str:
     active = next((s for s in scenarios if s.key == active_key), None)
     if active is None:
-        parts = ["Сценарии диалога. Определи подходящий по запросу клиента."]
+        parts = [
+            (
+                "Сценарии диалога. Определи подходящий по запросу клиента и отметь его в "
+                "состоянии диалога."
+            )
+        ]
         parts += [_scenario(s) for s in scenarios]
         return "\n\n".join(parts)
     parts = [f"Активный сценарий: {active.key}.", _scenario(active)]
     others = [s for s in scenarios if s is not active]
     if others:
         listing = "\n".join(f"- {s.key}: {s.description}" for s in others)
-        parts.append(f"Если запрос клиента сменился, доступны другие сценарии:\n{listing}")
+        parts.append(
+            f"Если задача клиента сменилась, отметь в состоянии диалога другой сценарий:\n{listing}"
+        )
     return "\n\n".join(parts)
 
 

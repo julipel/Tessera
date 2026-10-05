@@ -131,6 +131,15 @@ def test_valid_allowed_origins_are_accepted() -> None:
     assert spec.widget.allowed_origins[1] == "http://localhost:3000"
 
 
+def test_duplicate_scenario_keys_are_rejected() -> None:
+    scenario = '{key: gift, description: "Подарок", instructions: "Выясни бюджет."}'
+    prompt = f'prompt: {{tenant: "Ты — консультант.", scenarios: [{scenario}, {scenario}]}}'
+    source = SPEC_YAML.replace('prompt: {tenant: "Ты — консультант."}', prompt)
+
+    with pytest.raises(InvalidTenantSpecError, match="gift"):
+        load_tenant_spec(source)
+
+
 def test_config_is_stored_as_written() -> None:
     config = load_tenant_spec(SPEC_YAML).config_json()
     # Значения по умолчанию из схемы не материализуются.

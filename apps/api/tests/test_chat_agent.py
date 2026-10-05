@@ -300,3 +300,68 @@ def test_confirmation_reply_from_input(
     user_input: dict[str, Any], expected: ConfirmationReply | None
 ) -> None:
     assert confirmation_reply(user_input) == expected
+
+
+# --- Выбор сценария моделью (P6-01) ---
+
+SCENARIO_CONFIG: dict[str, Any] = {
+    **config({"provider": "openai", "name": "m"}),
+    "prompt": {
+        "tenant": "Ты — консультант.",
+        "scenarios": [
+            {
+                "key": "gift",
+                "description": "Подарок",
+                "instructions": "Критично: кому и бюджет.",
+                "slots": {"recipient": {"type": "string"}},
+            },
+            {"key": "support", "description": "Доставка и возврат", "instructions": "По базе."},
+        ],
+    },
+    "tools": {"builtin": ["update_dialog_state"]},
+}
+
+
+def scenario_request(text: str, state: dict[str, Any]) -> TurnRequest:
+    user_input = {"type": "text", "text": text}
+    return TurnRequest(
+        tenant_id=TENANT,
+        conversation_id=uuid4(),
+        agent_config_id=uuid4(),
+        turn_id=uuid4(),
+        input=user_input,
+        agent_config=SCENARIO_CONFIG,
+        history=(message(MessageRole.USER, text, user_input),),
+        dialog_state=state,
+    )
+
+
+async def test_scenario_chosen_by_model_narrows_next_turn_prompt() -> None:
+    choose = ToolCall(
+        id="c1",
+        name="update_dialog_state",
+        arguments={"scenario": "gift", "slots": {"recipient": "мама"}},
+        raw_arguments="{}",
+    )
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(choose,)),
+            FakeReply(text="Какой бюджет?"),
+            FakeReply(text="Вот варианты."),
+        ]
+    )
+    agent = builtin_turn_agent(lambda _: llm)
+
+    first = [e async for e in agent.run_turn(scenario_request("Подарок маме", {}))]
+    [state] = [e.state for e in first if isinstance(e, DialogStateUpdated)]
+    assert state.active_scenario == "gift"
+    # Первый ход — все сценарии целиком, модели нужно выбрать.
+    assert "## support — Доставка и возврат" in llm.requests[0].system
+
+    [e async for e in agent.run_turn(scenario_request("До 3000", state.to_dict()))]
+
+    system = llm.requests[-1].system
+    assert "Активный сценарий: gift." in system
+    assert "## gift — Подарок" in system
+    assert "## support" not in system
+    assert "- support: Доставка и возврат" in system

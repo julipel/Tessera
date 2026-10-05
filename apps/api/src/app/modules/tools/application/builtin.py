@@ -43,6 +43,10 @@ _DESCRIPTION = (
     "факты вне слотов. Вызывай, как только узнал новое, — записанное попадает в состояние "
     "диалога, и переспрашивать его не нужно. Чтобы стереть слот, передай null."
 )
+_SCENARIO_DESCRIPTION = (
+    "Сценарий диалога: отметь, как только понял задачу клиента, и смени, если задача "
+    "сменилась. null — задача не подходит ни под один сценарий."
+)
 
 
 def builtin_tools(
@@ -89,27 +93,36 @@ def builtin_tools(
 
 def update_dialog_state_tool(scenarios: Iterable[ScenarioConfig]) -> ToolDefinition:
     """Схема аргументов — по слотам всех сценариев: лишние слоты и неверные типы отклоняет
-    реестр (`validation_error`), модель исправляется. Слот с одним именем в разных сценариях
-    берётся из первого."""
-    slots: dict[str, Any] = {}
+    реестр (`validation_error`), модель исправляется. Слот с одним именем и разными
+    определениями в разных сценариях принимает значение по любому из них. `scenario` —
+    ключ сценария, есть в схеме, только если сценарии заданы; в состояние он попадает
+    как `active_scenario` и действует со следующего хода."""
+    scenarios = list(scenarios)
+    variants: dict[str, list[dict[str, Any]]] = {}
     for scenario in scenarios:
         for name, slot in (scenario.slots or {}).items():
-            slots.setdefault(name, {"anyOf": [_slot_schema(slot), {"type": "null"}]})
+            schemas = variants.setdefault(name, [])
+            schema = _slot_schema(slot)
+            if not any(_same_slot(schema, known) for known in schemas):
+                schemas.append(schema)
+    slots = {name: {"anyOf": [*schemas, {"type": "null"}]} for name, schemas in variants.items()}
+    properties: dict[str, Any] = {
+        "slots": {"type": "object", "properties": slots, "additionalProperties": False},
+        "facts": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "description": "Короткие факты о пользователе и запросе.",
+        },
+    }
+    if scenarios:
+        properties["scenario"] = {
+            "anyOf": [{"type": "string", "enum": [s.key for s in scenarios]}, {"type": "null"}],
+            "description": _SCENARIO_DESCRIPTION,
+        }
     return ToolDefinition(
         name=UPDATE_DIALOG_STATE,
         description=_DESCRIPTION,
-        parameters={
-            "type": "object",
-            "properties": {
-                "slots": {"type": "object", "properties": slots, "additionalProperties": False},
-                "facts": {
-                    "type": "array",
-                    "items": {"type": "string", "minLength": 1},
-                    "description": "Короткие факты о пользователе и запросе.",
-                },
-            },
-            "additionalProperties": False,
-        },
+        parameters={"type": "object", "properties": properties, "additionalProperties": False},
         handler=_update_dialog_state,
         timeout_s=1,
         display_label="Запоминаю",
@@ -118,7 +131,16 @@ def update_dialog_state_tool(scenarios: Iterable[ScenarioConfig]) -> ToolDefinit
 
 async def _update_dialog_state(arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
     patch = {key: arguments[key] for key in ("slots", "facts") if key in arguments}
+    if "scenario" in arguments:
+        patch["active_scenario"] = arguments["scenario"]
     return ToolResult(content="Записано в состояние диалога.", state_patch=patch)
+
+
+def _same_slot(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+    # Описание на допустимые значения не влияет: «Бюджет, RUB» и «Бюджет» — один слот.
+    return {k: v for k, v in a.items() if k != "description"} == {
+        k: v for k, v in b.items() if k != "description"
+    }
 
 
 def _slot_schema(slot: SlotDefinition) -> dict[str, Any]:

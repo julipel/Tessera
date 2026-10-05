@@ -1,4 +1,5 @@
-"""Встроенные инструменты (P2-09): update_dialog_state — схема по слотам сценариев и state_patch."""
+"""Встроенные инструменты (P2-09, P6-01): update_dialog_state — схема по слотам сценариев,
+выбор сценария и state_patch."""
 
 from typing import Any
 from uuid import uuid4
@@ -37,7 +38,19 @@ SCENARIOS = [
             "key": "gift",
             "description": "Подарок",
             "instructions": "Выясни, кому подарок.",
-            "slots": {"budget": {"type": "string"}, "is_surprise": {"type": "boolean"}},
+            "slots": {
+                "budget": {"type": "number", "description": "Бюджет, RUB"},
+                "occasion": {"type": "string"},
+                "is_surprise": {"type": "boolean"},
+            },
+        }
+    ),
+    ScenarioConfig.model_validate(
+        {
+            "key": "fragrance",
+            "description": "Аромат",
+            "instructions": "Выясни повод.",
+            "slots": {"occasion": {"type": "string", "enum": ["office", "evening"]}},
         }
     ),
 ]
@@ -52,12 +65,51 @@ async def execute(arguments: dict[str, Any]) -> ToolResult:
     return result
 
 
-def test_schema_has_slots_of_all_scenarios_first_definition_wins() -> None:
+def test_schema_has_slots_of_all_scenarios() -> None:
     slots = update_dialog_state_tool(SCENARIOS).parameters["properties"]["slots"]
 
-    assert list(slots["properties"]) == ["skin_type", "budget", "concerns", "is_surprise"]
-    assert slots["properties"]["budget"]["anyOf"][0] == {"type": "number", "description": "Бюджет"}
+    assert list(slots["properties"]) == [
+        "skin_type",
+        "budget",
+        "concerns",
+        "occasion",
+        "is_surprise",
+    ]
+    # Определения, различающиеся только описанием, — один вариант (описание первого).
+    assert slots["properties"]["budget"]["anyOf"] == [
+        {"type": "number", "description": "Бюджет"},
+        {"type": "null"},
+    ]
     assert slots["additionalProperties"] is False
+
+
+@pytest.mark.parametrize("occasion", ["день рождения", "office"])
+async def test_same_slot_with_different_definitions_accepts_any(occasion: str) -> None:
+    # occasion в gift — свободная строка, в fragrance — enum: годится значение по любому.
+    result = await execute({"slots": {"occasion": occasion}})
+
+    assert result.ok
+    assert result.state_patch == {"slots": {"occasion": occasion}}
+
+
+@pytest.mark.parametrize("scenario", ["gift", None])
+async def test_scenario_becomes_active_scenario(scenario: str | None) -> None:
+    result = await execute({"scenario": scenario, "slots": {"budget": 3000}})
+
+    assert result.ok
+    assert result.state_patch == {"slots": {"budget": 3000}, "active_scenario": scenario}
+
+
+def test_scenario_argument_lists_scenario_keys() -> None:
+    properties = update_dialog_state_tool(SCENARIOS).parameters["properties"]
+
+    assert properties["scenario"]["anyOf"][0]["enum"] == ["skincare", "gift", "fragrance"]
+
+
+def test_without_scenarios_there_is_no_scenario_argument() -> None:
+    properties = update_dialog_state_tool([]).parameters["properties"]
+
+    assert "scenario" not in properties
 
 
 async def test_valid_arguments_become_state_patch() -> None:
@@ -80,7 +132,8 @@ async def test_valid_arguments_become_state_patch() -> None:
         {"slots": {"concerns": ["морщины"]}},  # элемент массива вне enum
         {"slots": {"is_surprise": "да"}},  # неверный тип
         {"facts": [""]},
-        {"active_scenario": "gift"},  # модель сценарий не выбирает (contracts.md §4)
+        {"scenario": "support"},  # сценария нет в конфиге
+        {"active_scenario": "gift"},  # сценарий выбирается аргументом scenario
     ],
 )
 async def test_invalid_arguments_are_validation_errors(arguments: dict[str, Any]) -> None:

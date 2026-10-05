@@ -219,7 +219,9 @@ class ToolError(BaseModel):
 `facts` и `shown_entities` дописываются без повторов; `active_scenario` и
 `pending_confirmation` заменяются (`null` снимает ожидание; ставит его только Registry). Патчи
 неуспешных вызовов не применяются. Аргументы `update_dialog_state` — по слотам сценариев
-AgentConfig (лишний слот или неверный тип — `validation_error`).
+AgentConfig (лишний слот или неверный тип — `validation_error`); слот с одним именем и разными
+определениями в разных сценариях принимает значение по любому из них. `scenario` — ключ
+сценария из конфига (или `null`), в патче становится `active_scenario`.
 
 Встроенные инструменты:
 
@@ -229,7 +231,7 @@ AgentConfig (лишний слот или неверный тип — `validatio
 | `search_catalog(query?, filters?, sort?, limit?)` | структурный поиск Entity: фильтры по полям и `filterable_attributes`, `query` — полнотекстовый (ADR-0016) |
 | `get_entity(entity_id)` | детали сущности; неизвестный id — `not_found` |
 | `show_entities(entity_ids, layout: "cards" \| "carousel" \| "comparison", title?)` | UI-компоненты по id из БД (ADR-0004) |
-| `update_dialog_state(slots?, facts?)` | запись собранной информации |
+| `update_dialog_state(slots?, facts?, scenario?)` | запись собранной информации и выбор сценария |
 | `suggest_replies(options)` | 1–4 быстрых ответа (≤ 40 символов) от лица пользователя → SSE `suggestions` (ADR-0020) |
 | `show_form(form_key)` | компонент `form` из `forms` конфига тенанта |
 | `create_lead(form_key, fields)` | заявка по полям формы (side_effect, requires_confirmation, ADR-0021); поля — строки, проверяются по форме |

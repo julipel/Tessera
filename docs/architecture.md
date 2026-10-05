@@ -153,7 +153,9 @@ async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
   `active_scenario`, `pending_confirmation` (вызов, ждущий подтверждения, ADR-0021; в промпт
   не попадает). Обновляется инструментом `update_dialog_state` и результатами инструментов
   (`state_patch`, формат — contracts.md §4). Всегда передаётся модели целиком (Runtime-слой
-  промпта) — поэтому агент не переспрашивает. Тип и слияние — `memory` (`memory.kernel`,
+  промпта) — поэтому агент не переспрашивает. Сценарий выбирает модель аргументом `scenario`
+  `update_dialog_state`; со следующего хода Scenario-слой содержит активный сценарий целиком,
+  остальные — списком (без активного — все целиком). Тип и слияние — `memory` (`memory.kernel`,
   ADR-0008); патчи применяет агентный цикл; хранится в `Conversation.state`, chat записывает
   последнее состояние хода вместе с ответом (в т.ч. `interrupted`).
 

@@ -3,7 +3,14 @@
 from typing import Annotated, Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+)
 
 from app.contracts import AgentConfig
 from app.modules.tenants.domain.errors import InvalidTenantSpecError
@@ -34,6 +41,16 @@ class TenantSpec(BaseModel):
     agent_config: AgentConfig
     # Декларации источников (ADR-0019) разбирает knowledge, здесь — как написаны.
     sources: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("agent_config")
+    @classmethod
+    def _unique_scenario_keys(cls, config: AgentConfig) -> AgentConfig:
+        # Ключ сценария — значение `active_scenario` в состоянии диалога: дубль неоднозначен.
+        keys = [s.key for s in config.prompt.scenarios or []]
+        duplicates = sorted({k for k in keys if keys.count(k) > 1})
+        if duplicates:
+            raise ValueError(f"повторяются ключи сценариев: {', '.join(duplicates)}")
+        return config
 
     def config_json(self) -> dict[str, Any]:
         # exclude_unset: в БД — конфиг в том виде, в каком он написан, без подставленных

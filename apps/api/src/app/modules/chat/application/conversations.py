@@ -59,6 +59,7 @@ def _history_message(message: ChatMessage) -> HistoryMessage:
             "created_at": message.created_at,
             "input": message.input,
             "blocks": message.blocks,
+            "error": message.error,
         }
     )
 

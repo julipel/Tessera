@@ -21,6 +21,7 @@
 | POST | `/v1/conversations` | создать диалог → `{conversation_id}` |
 | GET | `/v1/conversations/{id}/messages` | история (для восстановления) |
 | POST | `/v1/conversations/{id}/messages` | отправить ввод, ответ — SSE-стрим |
+| POST | `/v1/conversations/{id}/messages/{message_id}/retry` | повторить неудачный ответ, ответ — SSE-стрим |
 | POST | `/v1/conversations/{id}/turns/{turn_id}/cancel` | прервать генерацию |
 
 `POST /v1/conversations`: тело `{"visitor_id": "..."}` → 201 `{"conversation_id": "uuid"}`.
@@ -28,8 +29,9 @@
 
 `GET .../messages` → `MessageHistory` (`conversations.schema.json`): сообщения в порядке создания,
 у `user` — исходный `input`, у `assistant` — `blocks` (`text` / `component` с `block_id`, порядок
-как в стриме), `status`: `completed` | `interrupted` | `failed`. Чужой/несуществующий диалог —
-404 `conversation_not_found`.
+как в стриме), `status`: `completed` | `interrupted` | `failed`. У неудачного ответа — `error`
+`{code, message, retryable}` (как SSE-событие `error`). Ответы, заменённые повтором, в историю
+не попадают. Чужой/несуществующий диалог — 404 `conversation_not_found`.
 
 Тело `POST .../messages` (`SendMessageRequest`):
 ```json
@@ -65,6 +67,13 @@
 форма, лишнее поле, пустое обязательное, не строка или значение `select` не из `options` —
 422 `invalid_input`, ввод не сохраняется.
 
+`POST .../messages/{message_id}/retry` (без тела; ADR-0023): `message_id` — неудачный ответ
+ассистента. Новый ход по тому же вводу, без нового сообщения пользователя. Стрим такой же, как
+у `POST .../messages`, с новым `message_id`. Неудачный ответ помечается заменённым: его нет в
+истории и в контексте модели, в БД он остаётся. Повторить можно только последний ответ
+диалога со `status=failed` и `error.retryable=true`, иначе — 409 `not_retryable`. Ответа нет
+в диалоге (или он уже заменён) — 404 `not_found`.
+
 `POST .../turns/{turn_id}/cancel` (`turn_id` — из событий хода): 204 — отмена принята, стрим
 хода закончится `done{interrupted}`, частичный ответ сохранится в истории; 404 `not_found` —
 хода нет, он уже завершён или принадлежит другому диалогу/тенанту.
@@ -75,7 +84,7 @@
 ```
 Статусы: 401 `unauthorized` (нет/неверный `X-Widget-Key`), 403 `forbidden` (`Origin` не
 разрешён для ключа), 404 `not_found` /
-`conversation_not_found`, 409 `duplicate_message`, 405/422 `invalid_input`, 429 `rate_limited`, 500 `internal`
+`conversation_not_found`, 409 `duplicate_message` / `not_retryable`, 405/422 `invalid_input`, 429 `rate_limited`, 500 `internal`
 (подробности — только в логе с `trace_id`; `X-Trace-Id` есть в любом ответе).
 
 ## 2. SSE-протокол
@@ -303,4 +312,4 @@ branding:
 `conversation_not_found`, `rate_limited` (retryable), `internal`.
 
 Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `forbidden`, `not_found`,
-`duplicate_message`.
+`duplicate_message`, `not_retryable`.

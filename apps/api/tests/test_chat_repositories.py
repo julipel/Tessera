@@ -257,3 +257,28 @@ async def test_state_update_is_isolated_by_tenant(
     found = await conversations.find(a, conversation.id)
     assert found is not None and found.state == {"slots": {"budget": 3000}}
     assert conversation.state == {}
+
+
+async def test_replaced_message_is_hidden_and_marked_once(
+    messages: MessageRepository, conversation: Conversation, tenant_b: tuple[TenantId, UUID]
+) -> None:
+    tenant_id = conversation.tenant_id
+    question, _ = await messages.add_once(tenant_id, _text(conversation.id, "вопрос"))
+    failed, _ = await messages.add_once(
+        tenant_id,
+        NewMessage(
+            conversation_id=conversation.id,
+            role=MessageRole.ASSISTANT,
+            status=MessageStatus.FAILED,
+            content="",
+            error={"code": "llm_unavailable", "message": "нет модели", "retryable": True},
+        ),
+    )
+    assert failed.error == {"code": "llm_unavailable", "message": "нет модели", "retryable": True}
+
+    foreign = await messages.mark_replaced(tenant_b[0], failed.id, uuid4())
+    first = await messages.mark_replaced(tenant_id, failed.id, uuid4())
+    second = await messages.mark_replaced(tenant_id, failed.id, uuid4())
+
+    assert (foreign, first, second) == (False, True, False)
+    assert [m.id for m in await messages.list_for(tenant_id, conversation.id)] == [question.id]

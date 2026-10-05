@@ -16,12 +16,14 @@ from app.contracts import (
 from app.modules.agent.public import LLMClients
 from app.modules.chat.api.sse import sse_stream
 from app.modules.chat.application.conversations import get_history, start_conversation
-from app.modules.chat.application.turns import TurnRegistry, start_turn
+from app.modules.chat.application.turns import TurnRegistry, retry_turn, start_turn
 from app.modules.chat.domain.errors import (
     ConversationNotFoundError,
     DuplicateMessageError,
     InvalidInputError,
+    MessageNotFoundError,
     NoActiveConfigError,
+    RetryNotAllowedError,
 )
 from app.modules.chat.domain.ports import TurnAgent
 from app.modules.chat.infrastructure.loop_agent import builtin_turn_agent
@@ -81,7 +83,8 @@ async def create_conversation(
     return CreateConversationResponse(conversation_id=conversation.id)
 
 
-# exclude_none: у сообщения ассистента нет `input` — поле опускается, а не отдаётся null.
+# exclude_none: у сообщения ассистента нет `input`, у успешного ответа — `error`: поле
+# опускается, а не отдаётся null.
 @router.get("/{conversation_id}/messages", response_model_exclude_none=True)
 async def conversation_messages(
     conversation_id: UUID, tenant_id: WidgetTenant, session: DbSession
@@ -135,6 +138,49 @@ async def send_message(
         raise ApiError(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_input", str(e)) from e
     structlog.contextvars.bind_contextvars(turn_id=str(turn.turn_id))
     logger.info("turn_started")
+    return EventSourceResponse(sse_stream(turn))
+
+
+@router.post(
+    "/{conversation_id}/messages/{message_id}/retry",
+    responses={
+        200: {"description": "SSE-стрим нового хода", "content": {"text/event-stream": {}}},
+        404: {"description": "диалога (conversation_not_found) или ответа (not_found) нет"},
+        409: {"description": "ответ нельзя повторить (not_retryable)"},
+    },
+)
+async def retry_message(
+    conversation_id: UUID,
+    message_id: UUID,
+    tenant_id: WidgetTenant,
+    session: StreamDbSession,
+    agent: Agent,
+    registry: Registry,
+) -> EventSourceResponse:
+    """Повтор неудачного ответа `message_id` (ADR-0023): ход по тому же вводу, ответ
+    заменяет неудачный в истории и контексте модели."""
+    structlog.contextvars.bind_contextvars(conversation_id=str(conversation_id))
+    try:
+        turn = await retry_turn(
+            tenant_id,
+            conversation_id,
+            message_id,
+            ConversationRepository(session),
+            MessageRepository(session),
+            ToolCallRepository(session),
+            TenantsAgentConfigs(session),
+            agent,
+            session.commit,
+            registry,
+        )
+    except ConversationNotFoundError as e:
+        raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e
+    except MessageNotFoundError as e:
+        raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", str(e)) from e
+    except RetryNotAllowedError as e:
+        raise ApiError(status.HTTP_409_CONFLICT, "not_retryable", str(e)) from e
+    structlog.contextvars.bind_contextvars(turn_id=str(turn.turn_id))
+    logger.info("turn_started", retry_of=str(message_id))
     return EventSourceResponse(sse_stream(turn))
 
 

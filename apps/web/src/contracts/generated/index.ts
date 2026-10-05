@@ -748,6 +748,7 @@ export interface HistoryMessage {
   created_at: string;
   input?: UserInput;
   blocks: MessageBlock[];
+  error?: MessageError;
 }
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -766,6 +767,39 @@ export interface ComponentBlock {
   type: "component";
   block_id: string;
   component: Component;
+}
+/**
+ * Только у assistant со status=failed: ошибка хода, как в SSE-событии error. retryable — можно повторить (POST .../messages/{message_id}/retry).
+ */
+export interface MessageError {
+  code:
+    | "llm_unavailable"
+    | "turn_timeout"
+    | "step_limit"
+    | "invalid_input"
+    | "conversation_not_found"
+    | "rate_limited"
+    | "internal";
+  message: string;
+  retryable: boolean;
+}
+/**
+ * Ошибка хода — данные SSE-события error (events.schema.json ErrorData).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "MessageError".
+ */
+export interface MessageError1 {
+  code:
+    | "llm_unavailable"
+    | "turn_timeout"
+    | "step_limit"
+    | "invalid_input"
+    | "conversation_not_found"
+    | "rate_limited"
+    | "internal";
+  message: string;
+  retryable: boolean;
 }
 /**
  * SSE-конверт: event: <type> / data: <Envelope JSON>. Форма data для конкретного type описана в events.schema.json.
@@ -879,7 +913,7 @@ export interface HttpError {
  */
 export interface HttpErrorBody {
   /**
-   * Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), forbidden (403), not_found (404), duplicate_message (409).
+   * Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), forbidden (403), not_found (404), duplicate_message (409), not_retryable (409).
    */
   code:
     | "llm_unavailable"
@@ -892,7 +926,8 @@ export interface HttpErrorBody {
     | "unauthorized"
     | "forbidden"
     | "not_found"
-    | "duplicate_message";
+    | "duplicate_message"
+    | "not_retryable";
   message: string;
   retryable: boolean;
 }

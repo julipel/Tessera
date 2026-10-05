@@ -86,6 +86,11 @@ class MessageRecord(TenantScopedBase):
         JSONB, default=list, server_default=text("'[]'::jsonb")
     )
     client_message_id: Mapped[UUID | None]
+    # Ошибка хода у неудачного ответа: {code, message, retryable}.
+    error: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # id ответа, заменившего этот при повторе (ADR-0023). Без FK: новый ответ записывается
+    # в конце хода, а пометка ставится до его начала.
+    replaced_by: Mapped[UUID | None]
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=_CREATED_AT
     )

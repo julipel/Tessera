@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "conversations.schema.json",
   "title": "ConversationsSchema",
-  "description": "HTTP API диалогов (docs/contracts.md §1). Файл без единого корневого типа — экспортируемые типы в $defs: CreateConversationRequest, CreateConversationResponse, SendMessageRequest, MessageHistory, HistoryMessage, MessageBlock.",
+  "description": "HTTP API диалогов (docs/contracts.md §1). Файл без единого корневого типа — экспортируемые типы в $defs: CreateConversationRequest, CreateConversationResponse, SendMessageRequest, MessageHistory, HistoryMessage, MessageError, MessageBlock.",
   "$defs": {
     "CreateConversationRequest": {
       "type": "object",
@@ -54,9 +54,35 @@
         "status": { "type": "string", "enum": ["completed", "interrupted", "failed"] },
         "created_at": { "type": "string", "format": "date-time" },
         "input": { "$ref": "user_input.schema.json" },
-        "blocks": { "type": "array", "items": { "$ref": "#/$defs/MessageBlock" } }
+        "blocks": { "type": "array", "items": { "$ref": "#/$defs/MessageBlock" } },
+        "error": {
+          "$ref": "#/$defs/MessageError",
+          "description": "Только у assistant со status=failed: ошибка хода, как в SSE-событии error. retryable — можно повторить (POST .../messages/{message_id}/retry)."
+        }
       },
       "required": ["message_id", "role", "status", "created_at", "blocks"],
+      "additionalProperties": false
+    },
+    "MessageError": {
+      "type": "object",
+      "description": "Ошибка хода — данные SSE-события error (events.schema.json ErrorData).",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "llm_unavailable",
+            "turn_timeout",
+            "step_limit",
+            "invalid_input",
+            "conversation_not_found",
+            "rate_limited",
+            "internal"
+          ]
+        },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" }
+      },
+      "required": ["code", "message", "retryable"],
       "additionalProperties": false
     },
     "MessageBlock": {

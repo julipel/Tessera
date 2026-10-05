@@ -1,7 +1,7 @@
 """Ход ассистента: события агента → SSE-протокол (docs/contracts.md §2) и запись ответа."""
 
 import asyncio
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -24,6 +24,7 @@ from app.modules.agent.kernel import (
 )
 from app.modules.chat.application.conversations import require_conversation, user_message
 from app.modules.chat.domain.entities import (
+    ChatMessage,
     Conversation,
     MessageRole,
     MessageStatus,
@@ -35,6 +36,8 @@ from app.modules.chat.domain.errors import (
     AgentConfigMissingError,
     DuplicateMessageError,
     InvalidInputError,
+    MessageNotFoundError,
+    RetryNotAllowedError,
 )
 from app.modules.chat.domain.ports import (
     AgentConfigSource,
@@ -79,7 +82,8 @@ type _QueueItem = AgentEvent | _AgentFinished
 class TurnStream:
     """Один ход: `events()` отдаёт события хода, `save()` записывает ответ ассистента.
 
-    message_id назначается заранее, чтобы события до записи сообщения уже несли id сообщения.
+    message_id назначается заранее, чтобы события до записи сообщения уже несли id сообщения
+    (при повторе — тот, которым помечен заменённый ответ).
     Агент работает в отдельной задаче и передаёт события через очередь: так `cancel()` может
     прервать агента, пока стрим ждёт, и стрим всё равно закончится событием `done`.
 
@@ -99,6 +103,7 @@ class TurnStream:
         tool_calls: ToolCallStore,
         commit: Commit,
         registry: "TurnRegistry",
+        message_id: UUID | None = None,
     ) -> None:
         self.conversation = conversation
         self.conversations = conversations
@@ -109,7 +114,7 @@ class TurnStream:
         self.commit = commit
         self.registry = registry
         self.turn_id = request.turn_id
-        self.message_id = uuid4()
+        self.message_id = message_id or uuid4()
         self._seq = 0
         self._blocks: list[dict[str, Any]] = []
         self._open_text: dict[str, Any] | None = None
@@ -136,7 +141,7 @@ class TurnStream:
                     yield event
             finished = item
         if finished.error is not None:
-            await self.save(finished.status)
+            await self.save(finished.status, finished.error)
             yield self._event(
                 "error",
                 {
@@ -242,10 +247,10 @@ class TurnStream:
         finally:
             self.registry.remove(self)
 
-    async def save(self, status: MessageStatus) -> None:
-        """Записать ответ с накопленными блоками и завершёнными вызовами инструментов (вызовы,
-        прерванные отменой, не записываются). Только первый вызов: после `done` повторный
-        вызов (например, при закрытии стрима) ничего не меняет."""
+    async def save(self, status: MessageStatus, error: _TurnError | None = None) -> None:
+        """Записать ответ с накопленными блоками, ошибкой хода и завершёнными вызовами
+        инструментов (вызовы, прерванные отменой, не записываются). Только первый вызов:
+        после `done` повторный вызов (например, при закрытии стрима) ничего не меняет."""
         if self._saved:
             return
         self._saved = True
@@ -259,6 +264,11 @@ class TurnStream:
                 status=status,
                 content="\n\n".join(texts),
                 blocks=tuple(self._blocks),
+                error=(
+                    {"code": error.code, "message": error.message, "retryable": error.retryable}
+                    if error
+                    else None
+                ),
             ),
         )
         if self._finished_calls:
@@ -307,10 +317,9 @@ async def start_turn(
     Отправка формы, которой нет в конфиге, или с неподходящими значениями —
     InvalidInputError. Повтор client_message_id — DuplicateMessageError: ход по этому вводу
     уже запускался, а ответ на него клиент берёт из истории."""
-    conversation = await require_conversation(tenant_id, conversation_id, conversations)
-    config = await configs.config(tenant_id, conversation.agent_config_id)
-    if config is None:
-        raise AgentConfigMissingError(f"нет AgentConfig {conversation.agent_config_id}")
+    conversation, config = await _conversation_with_config(
+        tenant_id, conversation_id, conversations, configs
+    )
     if isinstance(user_input.root, FormSubmitInput):
         _check_form_submit(config, user_input.root)
     message, created = await messages.add_once(
@@ -319,18 +328,100 @@ async def start_turn(
     if not created:
         raise DuplicateMessageError(f"сообщение {client_message_id} уже отправлено")
     await commit()
-    request = TurnRequest(
-        tenant_id=tenant_id,
-        conversation_id=conversation_id,
-        agent_config_id=conversation.agent_config_id,
-        turn_id=uuid4(),
-        input=message.input or {},
-        agent_config=config,
-        history=tuple(await messages.list_for(tenant_id, conversation_id)),
-        dialog_state=conversation.state,
+    request = _turn_request(
+        conversation, config, message, await messages.list_for(tenant_id, conversation_id)
     )
     return TurnStream(
         conversation, request, agent, conversations, messages, tool_calls, commit, registry
+    )
+
+
+async def retry_turn(
+    tenant_id: TenantId,
+    conversation_id: UUID,
+    message_id: UUID,
+    conversations: ConversationStore,
+    messages: MessageStore,
+    tool_calls: ToolCallStore,
+    configs: AgentConfigSource,
+    agent: TurnAgent,
+    commit: Commit,
+    registry: "TurnRegistry",
+) -> TurnStream:
+    """Новый ход для сохранённого ввода вместо неудачного ответа `message_id` (ADR-0023).
+
+    Ответ помечается заменённым новым ответом (и пометка фиксируется до начала стрима):
+    в истории клиента и контексте модели остаётся один ввод и новый ответ. Повторить можно
+    только последний ответ диалога с повторяемой ошибкой — иначе RetryNotAllowedError;
+    ответа нет в диалоге (или он уже заменён) — MessageNotFoundError."""
+    conversation, config = await _conversation_with_config(
+        tenant_id, conversation_id, conversations, configs
+    )
+    history = list(await messages.list_for(tenant_id, conversation_id))
+    failed = next((m for m in history if m.id == message_id), None)
+    if failed is None:
+        raise MessageNotFoundError(f"сообщения {message_id} в диалоге нет")
+    if not _retryable(failed) or failed is not history[-1]:
+        raise RetryNotAllowedError(f"ответ {message_id} нельзя повторить")
+    history.pop()
+    question = next((m for m in reversed(history) if m.role is MessageRole.USER), None)
+    if question is None:
+        raise RetryNotAllowedError(f"у ответа {message_id} нет ввода пользователя")
+    new_message_id = uuid4()
+    if not await messages.mark_replaced(tenant_id, message_id, new_message_id):
+        raise RetryNotAllowedError(f"ответ {message_id} уже повторён")
+    await commit()
+    logger.info("turn_retry", replaced_message_id=str(message_id))
+    request = _turn_request(conversation, config, question, history)
+    return TurnStream(
+        conversation,
+        request,
+        agent,
+        conversations,
+        messages,
+        tool_calls,
+        commit,
+        registry,
+        message_id=new_message_id,
+    )
+
+
+def _retryable(message: ChatMessage) -> bool:
+    return (
+        message.role is MessageRole.ASSISTANT
+        and message.status is MessageStatus.FAILED
+        and bool((message.error or {}).get("retryable"))
+    )
+
+
+async def _conversation_with_config(
+    tenant_id: TenantId,
+    conversation_id: UUID,
+    conversations: ConversationStore,
+    configs: AgentConfigSource,
+) -> tuple[Conversation, dict[str, Any]]:
+    conversation = await require_conversation(tenant_id, conversation_id, conversations)
+    config = await configs.config(tenant_id, conversation.agent_config_id)
+    if config is None:
+        raise AgentConfigMissingError(f"нет AgentConfig {conversation.agent_config_id}")
+    return conversation, config
+
+
+def _turn_request(
+    conversation: Conversation,
+    config: dict[str, Any],
+    question: ChatMessage,
+    history: Sequence[ChatMessage],
+) -> TurnRequest:
+    return TurnRequest(
+        tenant_id=conversation.tenant_id,
+        conversation_id=conversation.id,
+        agent_config_id=conversation.agent_config_id,
+        turn_id=uuid4(),
+        input=question.input or {},
+        agent_config=config,
+        history=tuple(history),
+        dialog_state=conversation.state,
     )
 
 

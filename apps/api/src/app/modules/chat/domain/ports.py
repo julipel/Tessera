@@ -30,7 +30,12 @@ class ConversationStore(Protocol):
 
 class MessageStore(Protocol):
     async def list_for(self, tenant_id: TenantId, conversation_id: UUID) -> Sequence[ChatMessage]:
-        """Сообщения диалога в порядке создания."""
+        """Сообщения диалога в порядке создания, кроме заменённых повтором (ADR-0023)."""
+        ...
+
+    async def mark_replaced(self, tenant_id: TenantId, message_id: UUID, replaced_by: UUID) -> bool:
+        """Пометить сообщение заменённым ответом `replaced_by`. False — сообщения нет или оно
+        уже заменено: из двух одновременных повторов пометку получает только один."""
         ...
 
     async def add_once(self, tenant_id: TenantId, message: NewMessage) -> tuple[ChatMessage, bool]:

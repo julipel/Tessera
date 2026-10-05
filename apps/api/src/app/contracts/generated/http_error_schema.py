@@ -24,9 +24,10 @@ class HttpErrorBody(BaseModel):
         "forbidden",
         "not_found",
         "duplicate_message",
+        "not_retryable",
     ]
     """
-    Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), forbidden (403), not_found (404), duplicate_message (409).
+    Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), forbidden (403), not_found (404), duplicate_message (409), not_retryable (409).
     """
     message: str
     retryable: bool

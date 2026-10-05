@@ -14,7 +14,7 @@ from . import components_schema, user_input_schema
 class ConversationsSchema(RootModel[Any]):
     root: Annotated[Any, Field(title="ConversationsSchema")]
     """
-    HTTP API диалогов (docs/contracts.md §1). Файл без единого корневого типа — экспортируемые типы в $defs: CreateConversationRequest, CreateConversationResponse, SendMessageRequest, MessageHistory, HistoryMessage, MessageBlock.
+    HTTP API диалогов (docs/contracts.md §1). Файл без единого корневого типа — экспортируемые типы в $defs: CreateConversationRequest, CreateConversationResponse, SendMessageRequest, MessageHistory, HistoryMessage, MessageError, MessageBlock.
     """
 
 
@@ -34,6 +34,27 @@ class CreateConversationResponse(BaseModel):
         extra="forbid",
     )
     conversation_id: UUID
+
+
+class MessageError(BaseModel):
+    """
+    Ошибка хода — данные SSE-события error (events.schema.json ErrorData).
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    code: Literal[
+        "llm_unavailable",
+        "turn_timeout",
+        "step_limit",
+        "invalid_input",
+        "conversation_not_found",
+        "rate_limited",
+        "internal",
+    ]
+    message: str
+    retryable: bool
 
 
 class TextBlock(BaseModel):
@@ -87,6 +108,10 @@ class HistoryMessage(BaseModel):
     created_at: AwareDatetime
     input: user_input_schema.UserInput | None = None
     blocks: list[MessageBlock]
+    error: MessageError | None = None
+    """
+    Только у assistant со status=failed: ошибка хода, как в SSE-событии error. retryable — можно повторить (POST .../messages/{message_id}/retry).
+    """
 
 
 class MessageHistory(BaseModel):

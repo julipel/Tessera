@@ -41,7 +41,8 @@ class Conversation:
 @dataclass(frozen=True, slots=True)
 class ChatMessage:
     """`content` — плоский текст для контекста модели; `input` — только у user;
-    `blocks` — только у assistant, в порядке первого появления block_id в стриме."""
+    `blocks` — только у assistant, в порядке первого появления block_id в стриме;
+    `error` — `{code, message, retryable}` у неудачного ответа (как SSE-событие `error`)."""
 
     id: UUID
     tenant_id: TenantId
@@ -53,6 +54,7 @@ class ChatMessage:
     blocks: list[dict[str, Any]]
     client_message_id: UUID | None
     created_at: datetime
+    error: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +69,7 @@ class NewMessage:
     blocks: tuple[dict[str, Any], ...] = ()
     client_message_id: UUID | None = None
     id: UUID | None = None
+    error: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

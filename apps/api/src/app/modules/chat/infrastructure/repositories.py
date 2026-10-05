@@ -48,6 +48,7 @@ def _message(record: MessageRecord) -> ChatMessage:
         blocks=record.blocks,
         client_message_id=record.client_message_id,
         created_at=record.created_at,
+        error=record.error,
     )
 
 
@@ -91,10 +92,28 @@ class MessageRepository(TenantRepository[MessageRecord]):
     async def list_for(self, tenant_id: TenantId, conversation_id: UUID) -> Sequence[ChatMessage]:
         stmt = (
             self._scoped(tenant_id)
-            .where(MessageRecord.conversation_id == conversation_id)
+            .where(
+                MessageRecord.conversation_id == conversation_id,
+                MessageRecord.replaced_by.is_(None),
+            )
             .order_by(MessageRecord.created_at, MessageRecord.id)
         )
         return [_message(r) for r in (await self.session.execute(stmt)).scalars()]
+
+    async def mark_replaced(self, tenant_id: TenantId, message_id: UUID, replaced_by: UUID) -> bool:
+        # Условный UPDATE вместо «прочитать, затем записать»: из двух одновременных повторов
+        # строку обновит только первый.
+        stmt = (
+            update(MessageRecord)
+            .where(
+                MessageRecord.tenant_id == tenant_id,
+                MessageRecord.id == message_id,
+                MessageRecord.replaced_by.is_(None),
+            )
+            .values(replaced_by=replaced_by)
+            .returning(MessageRecord.id)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none() is not None
 
     async def add_once(self, tenant_id: TenantId, message: NewMessage) -> tuple[ChatMessage, bool]:
         # ON CONFLICT DO NOTHING вместо «проверить, затем вставить»: два одновременных
@@ -112,6 +131,7 @@ class MessageRepository(TenantRepository[MessageRecord]):
                 input=message.input,
                 blocks=list(message.blocks),
                 client_message_id=message.client_message_id,
+                error=message.error,
             )
             .on_conflict_do_nothing(index_elements=["conversation_id", "client_message_id"])
             .returning(MessageRecord)

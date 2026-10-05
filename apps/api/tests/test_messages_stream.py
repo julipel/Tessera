@@ -38,6 +38,7 @@ from app.modules.chat.application.turns import TurnRegistry, start_turn
 from app.modules.chat.domain.entities import ToolCallEntry, TurnRequest
 from app.modules.chat.domain.ports import TurnAgent
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent, builtin_turn_agent
+from app.modules.chat.infrastructure.models import MessageRecord
 from app.modules.chat.infrastructure.repositories import (
     ConversationRepository,
     MessageRepository,
@@ -947,3 +948,139 @@ async def test_form_submit_then_confirmed_lead_through_agent_loop(
     assert [e["type"] for e in second][:3] == ["turn_started", "tool_started", "tool_finished"]
     assert second[-1]["data"]["status"] == "completed"
     assert "pending_confirmation" not in await _state(db_session, forms_tenant, form_conversation)
+
+
+# --- Повтор неудачного ответа (P5-08a, ADR-0023) ---
+
+FLAKY = LLMError("503 от провайдера", retryable=True)
+
+
+async def _retry(
+    client: AsyncClient, conversation_id: UUID, message_id: UUID | str, slug: str = "shop"
+) -> Response:
+    return await client.post(
+        f"{URL}/{conversation_id}/messages/{message_id}/retry", headers=_key(slug)
+    )
+
+
+def _loop_agent(llm: FakeLLM) -> LoopTurnAgent:
+    return LoopTurnAgent(lambda _: llm, lambda _: RegistryToolExecutor(ToolRegistry([])))
+
+
+async def test_failed_answer_keeps_error_in_history(
+    db_client: AsyncClient, conversation_id: UUID, use_agent: Any
+) -> None:
+    await _send(db_client, conversation_id)
+    use_agent(FailingAgent(FLAKY))
+    await _send(db_client, conversation_id, {"type": "text", "text": "А до 3000?"})
+
+    response = await db_client.get(f"{URL}/{conversation_id}/messages", headers=_key("shop"))
+
+    _, answer, _, failed = response.json()["messages"]
+    assert "error" not in answer  # у успешного ответа поле опускается
+    assert failed["error"] == {
+        "code": "llm_unavailable",
+        "message": "модель сейчас недоступна",
+        "retryable": True,
+    }
+
+
+async def test_retry_replaces_failed_answer_through_agent_loop(
+    db_client: AsyncClient, db_session: AsyncSession, conversation_id: UUID, use_agent: Any
+) -> None:
+    llm = FakeLLM(
+        [
+            FakeReply(text="Сейчас посмотрю", fail_after_chunks=1, error=FLAKY),
+            FakeReply(text=ANSWER),
+        ]
+    )
+    use_agent(_loop_agent(llm))
+    failed_id = _parse_sse((await _send(db_client, conversation_id)).text)[-1][1].root.message_id
+    assert failed_id is not None
+
+    response = await _retry(db_client, conversation_id, failed_id)
+
+    assert response.status_code == 200
+    events = [e.root for _, e in _parse_sse(response.text)]
+    assert [events[0].type, events[-1].type] == ["turn_started", "done"]
+    new_id = events[-1].message_id
+    assert new_id not in (None, failed_id)
+    # Модель видит вопрос один раз и не видит обрывок неудачного ответа.
+    assert llm.requests[1].messages == (UserMessage(TEXT["text"]),)
+    user, assistant = (await _history(db_client, conversation_id)).messages
+    assert user.input is not None and user.input.model_dump() == TEXT
+    assert (str(assistant.message_id), assistant.status, assistant.error) == (
+        new_id,
+        "completed",
+        None,
+    )
+    # Неудачный ответ остаётся в БД, помеченный заменённым.
+    record = await db_session.get(MessageRecord, UUID(failed_id))
+    assert record is not None and str(record.replaced_by) == new_id
+
+
+async def test_retried_answer_can_fail_and_be_retried_again(
+    db_client: AsyncClient, conversation_id: UUID, use_agent: Any
+) -> None:
+    use_agent(FailingAgent(FLAKY))
+    first = _parse_sse((await _send(db_client, conversation_id)).text)[-1][1].root.message_id
+    second = _parse_sse((await _retry(db_client, conversation_id, str(first))).text)[-1][1]
+    use_agent(ScriptedAgent())
+
+    third = await _retry(db_client, conversation_id, str(second.root.message_id))
+
+    assert third.status_code == 200
+    roles = [(m.role, m.status) for m in (await _history(db_client, conversation_id)).messages]
+    assert roles == [("user", "completed"), ("assistant", "completed")]
+
+
+@pytest.mark.parametrize("case", ["completed", "not_retryable", "not_last", "user_message"])
+async def test_retry_not_allowed_is_409(
+    db_client: AsyncClient, conversation_id: UUID, use_agent: Any, case: str
+) -> None:
+    if case != "completed":
+        use_agent(FailingAgent(FLAKY if case != "not_retryable" else None))
+    events = _parse_sse((await _send(db_client, conversation_id)).text)
+    if case == "not_last":
+        use_agent(ScriptedAgent())
+        await _send(db_client, conversation_id, {"type": "text", "text": "Ладно, другое"})
+    before = (await _history(db_client, conversation_id)).messages
+    target = before[0].message_id if case == "user_message" else events[-1][1].root.message_id
+
+    response = await _retry(db_client, conversation_id, str(target))
+
+    assert response.status_code == 409
+    assert _error_code(response) == "not_retryable"
+    assert (await _history(db_client, conversation_id)).messages == before
+
+
+async def test_retry_of_replaced_unknown_or_foreign_is_404(
+    db_client: AsyncClient, db_session: AsyncSession, conversation_id: UUID, use_agent: Any
+) -> None:
+    await _tenant(db_session, "other")
+    use_agent(FailingAgent(FLAKY))
+    failed_id = str(
+        _parse_sse((await _send(db_client, conversation_id)).text)[-1][1].root.message_id
+    )
+    use_agent(ScriptedAgent())
+    await _retry(db_client, conversation_id, failed_id)
+
+    replaced = await _retry(db_client, conversation_id, failed_id)
+    unknown = await _retry(db_client, conversation_id, uuid4())
+    foreign = await _retry(db_client, conversation_id, failed_id, slug="other")
+    missing = await _retry(db_client, uuid4(), failed_id)
+
+    assert [r.status_code for r in (replaced, unknown, foreign, missing)] == [404] * 4
+    assert [_error_code(r) for r in (replaced, unknown, foreign, missing)] == [
+        "not_found",
+        "not_found",
+        "conversation_not_found",
+        "conversation_not_found",
+    ]
+
+
+async def test_retry_without_key_is_401(db_client: AsyncClient, conversation_id: UUID) -> None:
+    response = await db_client.post(f"{URL}/{conversation_id}/messages/{uuid4()}/retry")
+
+    assert response.status_code == 401
+    assert _error_code(response) == "unauthorized"

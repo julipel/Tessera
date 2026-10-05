@@ -22,3 +22,12 @@ class AgentConfigMissingError(DomainError):
 class InvalidInputError(DomainError):
     """Ввод не подходит диалогу: например, отправлена форма, которой нет в конфиге, или её
     значения не проходят проверку полей."""
+
+
+class MessageNotFoundError(NotFoundError):
+    """Сообщения нет в диалоге (или оно заменено повтором, или чужое)."""
+
+
+class RetryNotAllowedError(DomainError):
+    """Ответ нельзя повторить: он не последний в диалоге, не неудачный, ошибка не
+    повторяемая или его уже заменил другой повтор (ADR-0023)."""

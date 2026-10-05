@@ -9,7 +9,8 @@
 // - отправленная форма consultation → create_lead с её значениями (подтверждение e2e).
 // Ход целиком (UX e2e):
 // - слово «долго» → длинный медленный ответ из LONG_LINES абзацев (остановка, автоскролл);
-// - слово «сбой» → первый запрос с этим текстом — response.failed (повтор после ошибки).
+// - слово «сбой» → первый запрос с этим текстом — response.failed (повтор после ошибки);
+//   если в контексте этот вопрос дважды подряд, ответ начинается с DUPLICATE_MARK.
 import { createServer } from "node:http";
 
 const [host, port] = [process.env.MOCK_LLM_HOST, Number(process.env.MOCK_LLM_PORT)];
@@ -57,6 +58,7 @@ const LONG_TRIGGER = "долго";
 const LONG_LINES = 40;
 const FAIL_TRIGGER = "сбой";
 const failed = new Set();
+const DUPLICATE_MARK = "(дубль в контексте) ";
 
 /** Вызов инструмента по последнему сообщению пользователя или null. */
 function toolFor(last) {
@@ -86,7 +88,9 @@ async function responses(req, res) {
     return;
   }
   const long = !afterTool && last.includes(LONG_TRIGGER);
-  const words = afterTool ? [] : `Вы написали: ${last}`.match(/\S+\s*/g);
+  const repeated = input.filter((m) => m.role === "user" && m.content === last).length > 1;
+  const reply = `${repeated && last.includes(FAIL_TRIGGER) ? DUPLICATE_MARK : ""}Вы написали: ${last}`;
+  const words = afterTool ? [] : reply.match(/\S+\s*/g);
   if (long) {
     for (let i = 1; i <= LONG_LINES; i++) words.push(`\n\nСтрока ${i}.`);
   }

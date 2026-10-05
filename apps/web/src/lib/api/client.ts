@@ -56,14 +56,26 @@ export class ChatApi {
   }
 
   /** Стрим событий хода. Ошибки ввода и доступа — ApiError до первого события. */
-  async sendMessage(
+  sendMessage(
     conversationId: string,
     request: SendMessageRequest,
     signal?: AbortSignal,
   ): Promise<AsyncGenerator<Event>> {
-    const resp = await this.request(`/v1/conversations/${conversationId}/messages`, {
+    return this.stream(`/v1/conversations/${conversationId}/messages`, JSON.stringify(request), signal);
+  }
+
+  /**
+   * Повтор неудачного ответа `messageId` (ADR-0023): стрим нового хода по тому же вводу.
+   * Ответ нельзя повторить — ApiError `not_retryable` (409) или `not_found` (404).
+   */
+  retryMessage(conversationId: string, messageId: string, signal?: AbortSignal): Promise<AsyncGenerator<Event>> {
+    return this.stream(`/v1/conversations/${conversationId}/messages/${messageId}/retry`, undefined, signal);
+  }
+
+  private async stream(path: string, body: string | undefined, signal?: AbortSignal): Promise<AsyncGenerator<Event>> {
+    const resp = await this.request(path, {
       method: "POST",
-      body: JSON.stringify(request),
+      body,
       headers: { Accept: "text/event-stream" },
       signal,
     });

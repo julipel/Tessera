@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { Action, Form, PublicConfig, UserInput } from "@/contracts";
+import type { Action, Event, Form, PublicConfig, UserInput } from "@/contracts";
 import { ApiError, ChatApi } from "@/lib/api/client";
-import { type ChatMessage, chatReducer, initialChatState } from "./state";
+import { type ChatMessage, chatReducer, initialChatState, retryTarget } from "./state";
 
 const VISITOR_KEY = "tessera:visitor_id";
 const conversationKey = (widgetKey: string) => `tessera:conversation:${widgetKey}`;
@@ -26,7 +26,7 @@ export interface UseChat {
   submitForm: (form: Form, values: Record<string, string>) => Promise<void>;
   /** Прервать идущий ход; null — прерывать нечего (ход ещё не начат или не идёт). */
   stop: (() => Promise<void>) | null;
-  /** Повторить последний ввод после ошибки, которую можно повторить; иначе null. */
+  /** Повторить после ошибки, которую можно повторить (неудачный ответ или ввод без ответа); иначе null. */
   retry: (() => Promise<void>) | null;
 }
 
@@ -44,6 +44,10 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
   const loadHistory = useCallback(
     async (id: string) => dispatch({ type: "history", history: await api.getHistory(id) }),
     [api],
+  );
+  const failStream = useCallback(
+    (e: unknown) => dispatch({ type: "stream_failed", message: errorText(e), retryable: isRetryable(e) }),
+    [],
   );
 
   useEffect(() => {
@@ -73,11 +77,16 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
     return () => abort.current?.abort(UNMOUNT);
   }, [widgetKey, loadHistory]);
 
-  const send = useCallback(
-    async (input: UserInput) => {
-      if (state.busy || (input.type === "text" && !input.text.trim())) return;
-      const clientMessageId = crypto.randomUUID();
-      dispatch({ type: "user_sent", id: `local:${clientMessageId}`, input });
+  /**
+   * Читает стрим хода в состояние. `open` открывает стрим (создав диалог, если его ещё нет);
+   * ApiError до первого события передаётся в `onRejected`. Стрим оборвался без `done` —
+   * ответ (возможно, частичный) уже в истории на сервере: берём оттуда.
+   */
+  const runTurn = useCallback(
+    async (
+      open: (conversation: string, signal: AbortSignal) => Promise<AsyncGenerator<Event>>,
+      onRejected: (e: unknown) => Promise<void> | void,
+    ) => {
       abort.current = new AbortController();
       let finished = false;
       try {
@@ -85,30 +94,36 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
           conversationId.current = await api.createConversation(visitorId());
           writeStorage(conversationKey(widgetKey), conversationId.current);
         }
-        const events = await api.sendMessage(
-          conversationId.current,
-          { client_message_id: clientMessageId, input },
-          abort.current.signal,
-        );
-        for await (const event of events) {
+        for await (const event of await open(conversationId.current, abort.current.signal)) {
           dispatch({ type: "event", event });
           if (event.type === "done") finished = true;
         }
       } catch (e) {
         if (e instanceof ApiError || !conversationId.current) {
-          dispatch({ type: "stream_failed", message: errorText(e), retryable: isRetryable(e) });
+          await onRejected(e);
           return;
         }
         // Обрыв сети или стрим закрыт кнопкой «Остановить» — дальше как при стриме без `done`.
       }
       if (!finished && conversationId.current && abort.current.signal.reason !== UNMOUNT) {
-        // Стрим оборвался: ответ (возможно, частичный) уже в истории — берём оттуда.
-        await loadHistory(conversationId.current).catch((e: unknown) =>
-          dispatch({ type: "stream_failed", message: errorText(e), retryable: isRetryable(e) }),
-        );
+        await loadHistory(conversationId.current).catch(failStream);
       }
     },
-    [api, widgetKey, state.busy, loadHistory],
+    [api, widgetKey, loadHistory, failStream],
+  );
+
+  const send = useCallback(
+    async (input: UserInput) => {
+      if (state.busy || (input.type === "text" && !input.text.trim())) return;
+      const clientMessageId = crypto.randomUUID();
+      dispatch({ type: "user_sent", id: `local:${clientMessageId}`, input });
+      await runTurn(
+        (conversation, signal) =>
+          api.sendMessage(conversation, { client_message_id: clientMessageId, input }, signal),
+        failStream,
+      );
+    },
+    [api, state.busy, runTurn, failStream],
   );
 
   const sendText = useCallback((text: string) => send({ type: "text", text }), [send]);
@@ -148,13 +163,25 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
     }
   }, [api, turnId]);
 
-  const last = state.messages.at(-1);
-  const retryInput = state.messages.findLast((m) => m.role === "user")?.input;
-  const retryLast = useCallback(async () => {
-    if (!retryInput) return;
+  const target = state.busy ? null : retryTarget(state.messages);
+  const retry = useCallback(async () => {
+    if (!target) return;
     dispatch({ type: "retry" });
-    await send(retryInput);
-  }, [send, retryInput]);
+    if (target.kind === "resend") {
+      await send(target.input);
+      return;
+    }
+    // Новый ход вместо неудачного ответа (ADR-0023). Отказ (уже повторён, не последний,
+    // сбой до стрима) — неудачный ответ из ленты уже убран: верным состоянием будет история.
+    await runTurn(
+      (conversation, signal) => api.retryMessage(conversation, target.messageId, signal),
+      async (e) => {
+        const id = conversationId.current;
+        if (!id) return failStream(e);
+        await loadHistory(id).catch(failStream);
+      },
+    );
+  }, [api, target, send, runTurn, loadHistory, failStream]);
 
   return {
     messages: state.messages,
@@ -168,7 +195,7 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
     act,
     submitForm,
     stop: turnId ? stopTurn : null,
-    retry: !state.busy && last?.retryable && retryInput ? retryLast : null,
+    retry: target ? retry : null,
   };
 }
 

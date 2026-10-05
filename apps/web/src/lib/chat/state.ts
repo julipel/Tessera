@@ -16,14 +16,14 @@ export interface ChatMessage {
   status: MessageStatus;
   /** Текст пользователя (для user); у assistant — пусто, содержимое в blocks. */
   text: string;
-  /** Исходный ввод (для user) — его повторяет «Повторить». */
+  /** Исходный ввод (для user) — его отправляет заново «Повторить», если ответа нет. */
   input?: UserInput;
   blocks: MessageBlock[];
   /** Быстрые ответы хода (событие `suggestions`); показываются только под последним ответом. */
   suggestions?: SuggestionItem[];
   turnId?: string;
   error?: string;
-  /** Ошибку можно повторить: сеть, `retryable` в `error` или HTTP-ответе. */
+  /** Ошибку можно повторить: сеть, `retryable` в `error` (стрим, история) или HTTP-ответе. */
   retryable?: boolean;
 }
 
@@ -84,9 +84,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ],
       };
     case "retry": {
-      // Неудачная попытка (ввод и ответ с ошибкой) заменяется новой отправкой того же ввода.
-      const from = state.messages.findLastIndex((m) => m.role === "user");
-      return from < 0 ? state : { ...state, messages: state.messages.slice(0, from) };
+      const target = retryTarget(state.messages);
+      if (!target) return state;
+      const messages = state.messages.slice(0, -1);
+      // Неудачный ответ заменяет новый ход по тому же вводу (ADR-0023): ввод остаётся, ход
+      // начат. Ответа нет — убирается и ввод: `send` отправит его заново.
+      return target.kind === "answer" ? { ...state, messages, busy: true, activity: TYPING } : { ...state, messages };
     }
     case "event":
       return applyEvent(state, action.event);
@@ -184,6 +187,22 @@ function upsertBlock(blocks: MessageBlock[], block: MessageBlock): MessageBlock[
   return blocks.map((b, i) => (i === index ? block : b));
 }
 
+export type RetryTarget = { kind: "answer"; messageId: string } | { kind: "resend"; input: UserInput };
+
+/**
+ * Что повторяет «Повторить» после ошибки, которую можно повторить:
+ * неудачный ответ — по его id на сервере (POST …/retry); ошибка под вводом (ответа нет,
+ * сбой до `turn_started`) — повторная отправка ввода; иначе null.
+ */
+export function retryTarget(messages: ChatMessage[]): RetryTarget | null {
+  const last = messages.at(-1);
+  if (!last?.retryable) return null;
+  if (last.role === "user") return last.input ? { kind: "resend", input: last.input } : null;
+  // Временный id `turn:…` — сервер id ответа не прислал, повторять нечего.
+  if (last.status !== "failed" || last.id.startsWith("turn:")) return null;
+  return { kind: "answer", messageId: last.id };
+}
+
 function fromHistory(message: HistoryMessage): ChatMessage {
   return {
     id: message.message_id,
@@ -192,6 +211,8 @@ function fromHistory(message: HistoryMessage): ChatMessage {
     text: message.input ? inputText(message.input) : "",
     input: message.input,
     blocks: message.blocks,
+    error: message.error?.message,
+    retryable: message.error?.retryable,
   };
 }
 

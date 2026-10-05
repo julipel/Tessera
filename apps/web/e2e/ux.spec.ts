@@ -52,7 +52,7 @@ test("перезагрузка во время ответа: диалог вос
   await expect(page.getByRole("group", { name: "Быстрые ответы" })).toHaveCount(0);
 });
 
-test("ошибка модели: «Повторить» отправляет тот же ввод и заменяет неудачную попытку", async ({
+test("ошибка модели: «Повторить» — новый ответ на тот же ввод, вопрос в ленте и у модели один", async ({
   page,
 }) => {
   await page.goto(`/?key=${WIDGET_KEY}`);
@@ -63,8 +63,30 @@ test("ошибка модели: «Повторить» отправляет т�
   await expect(assistant).toContainText("модель сейчас недоступна");
   await page.getByRole("button", { name: "Повторить" }).click();
 
+  // Мок пометил бы ответ, если бы получил вопрос дважды (e2e/mock-llm.mjs).
   await expect(assistant).toHaveText("Вы написали: Проверка сбой номер один");
   await expect(assistant).toHaveAttribute("data-status", "completed");
+  await expect(page.locator('li[data-role="user"]')).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Повторить" })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator('li[data-role="user"]')).toHaveCount(1);
+  await expect(assistant).toHaveCount(1);
+  await expect(assistant).toHaveAttribute("data-status", "completed");
+});
+
+test("ошибка модели: «Повторить» доступна и после перезагрузки", async ({ page }) => {
+  await page.goto(`/?key=${WIDGET_KEY}`);
+  await say(page, "Проверка сбой номер два");
+  const assistant = page.locator('li[data-role="assistant"]');
+  await expect(assistant).toHaveAttribute("data-status", "failed");
+
+  await page.reload();
+  await expect(assistant).toHaveAttribute("data-status", "failed");
+  await expect(assistant).toContainText("модель сейчас недоступна");
+  await page.getByRole("button", { name: "Повторить" }).click();
+
+  await expect(assistant).toHaveText("Вы написали: Проверка сбой номер два");
   await expect(page.locator('li[data-role="user"]')).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Повторить" })).toHaveCount(0);
 });

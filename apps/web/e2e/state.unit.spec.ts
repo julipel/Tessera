@@ -6,6 +6,7 @@ import {
   chatReducer,
   initialChatState,
   inputText,
+  retryTarget,
 } from "../src/lib/chat/state";
 
 const base = { protocol_version: "1", conversation_id: "c", turn_id: "t1", ts: "" } as const;
@@ -230,26 +231,80 @@ test("инструменты: подпись display_label в индикатор
   expect(finished.busy).toBe(true);
 });
 
-test("повтор: retryable из error, retry убирает неудачную пару, ввод сохраняется", () => {
+test("повтор: неудачный ответ повторяется по id, retry убирает только ответ и начинает ход", () => {
   const failed = run(
     sent,
     ev({ type: "turn_started", data: {} }),
-    ev({ type: "error", data: { code: "llm_unavailable", message: "недоступна", retryable: true } }),
-    ev({ type: "done", data: { status: "failed" } }),
+    ev({
+      type: "error",
+      message_id: "a1",
+      data: { code: "llm_unavailable", message: "недоступна", retryable: true },
+    }),
+    ev({ type: "done", message_id: "a1", data: { status: "failed" } }),
   );
   expect(failed.messages.map((m) => [m.role, m.status, m.retryable])).toEqual([
     ["user", "completed", undefined],
     ["assistant", "failed", true],
   ]);
-  expect(failed.messages[0].input).toEqual({ type: "text", text: "привет" });
+  expect(retryTarget(failed.messages)).toEqual({ kind: "answer", messageId: "a1" });
 
   const retried = chatReducer(failed, { type: "retry" });
-  expect(retried.messages).toEqual([]);
+  expect(retried.messages).toEqual(failed.messages.slice(0, 1));
+  expect([retried.busy, retried.activity]).toEqual([true, TYPING]);
+});
 
-  // Ошибка до ответа — повтор убирает только сообщение посетителя.
-  const earlier = chatReducer(failed, { type: "user_sent", id: "local:9", input: { type: "text", text: "ещё" } });
-  const rejected = chatReducer(earlier, { type: "stream_failed", message: "сбой", retryable: true });
-  expect(chatReducer(rejected, { type: "retry" }).messages).toEqual(failed.messages);
+test("повтор: ошибка до ответа — повторная отправка ввода", () => {
+  const rejected = chatReducer(sent, { type: "stream_failed", message: "сбой", retryable: true });
+  expect(retryTarget(rejected.messages)).toEqual({ kind: "resend", input: { type: "text", text: "привет" } });
+
+  const retried = chatReducer(rejected, { type: "retry" });
+  expect(retried.messages).toEqual([]);
+  expect(retried.busy).toBe(false); // ход начнёт повторная отправка
+});
+
+test("повтор: нечего повторять — неповторяемая ошибка, успешный ответ, нет id ответа", () => {
+  const notRetryable = chatReducer(sent, { type: "stream_failed", message: "нет", retryable: false });
+  const answered = run(
+    sent,
+    ev({ type: "turn_started", data: {} }),
+    ev({ type: "done", data: { status: "completed" } }),
+  );
+  // Сервер не прислал id ответа — остался временный `turn:…`.
+  const noId: ChatState = {
+    ...sent,
+    busy: false,
+    messages: [
+      ...sent.messages,
+      { id: "turn:t1", role: "assistant", status: "failed", text: "", blocks: [], retryable: true },
+    ],
+  };
+
+  for (const state of [notRetryable, answered, noId]) {
+    expect(retryTarget(state.messages)).toBeNull();
+    expect(chatReducer(state, { type: "retry" })).toBe(state);
+  }
+});
+
+test("повтор после перезагрузки: error из истории — текст и retryable", () => {
+  const restored = chatReducer(initialChatState, {
+    type: "history",
+    history: {
+      conversation_id: "c",
+      messages: [
+        { message_id: "u1", role: "user", status: "completed", created_at: "", input: { type: "text", text: "a" }, blocks: [] },
+        {
+          message_id: "a1",
+          role: "assistant",
+          status: "failed",
+          created_at: "",
+          blocks: [],
+          error: { code: "llm_unavailable", message: "модель сейчас недоступна", retryable: true },
+        },
+      ],
+    },
+  });
+  expect(restored.messages[1]).toMatchObject({ error: "модель сейчас недоступна", retryable: true });
+  expect(retryTarget(restored.messages)).toEqual({ kind: "answer", messageId: "a1" });
 });
 
 test("восстановление: restoring до загрузки истории, ввод из истории доступен для повтора", () => {

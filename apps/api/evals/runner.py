@@ -214,6 +214,7 @@ class DialogRunner:
             tools_called=tuple(collector.tools),
             components=tuple(c.get("type", "?") for c in collector.components),
             slots=dict(conversation.state.get("slots") or {}),
+            component_data=tuple(collector.components),
         )
         result.finish = collector.finish
         result.tool_steps = collector.tool_steps

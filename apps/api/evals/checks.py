@@ -29,12 +29,14 @@ class CheckResult:
 @dataclass(frozen=True, slots=True)
 class TurnOutcome:
     """Что агент сделал за ход: текст ответа, имена вызванных инструментов и типы
-    UI-компонентов (в порядке появления), слоты DialogState после хода."""
+    UI-компонентов (в порядке появления), слоты DialogState после хода. `component_data` —
+    сами компоненты (для судьи: цены и строки таблиц модель в тексте не пишет, ADR-0004)."""
 
     text: str = ""
     tools_called: tuple[str, ...] = ()
     components: tuple[str, ...] = ()
     slots: dict[str, Any] = field(default_factory=dict)
+    component_data: tuple[dict[str, Any], ...] = ()
 
 
 JUDGE_CHECKS = ("clarifies", "max_questions", "judge")

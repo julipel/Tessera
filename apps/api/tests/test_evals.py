@@ -33,7 +33,7 @@ from app.modules.tenants.public import SqlTenantDirectory
 from app.settings import Settings
 from evals.checks import CheckResult, CheckStatus, TurnOutcome, check_turn
 from evals.dialogs import Dialog, Expect, InvalidDialogError, load_dialogs, select_dialogs
-from evals.judge import Judge, TranscriptTurn, parse_verdict
+from evals.judge import Judge, TranscriptTurn, parse_verdict, render_task
 from evals.report import RunInfo, render_markdown, render_summary, totals, write_report
 from evals.runner import DialogRunner, RunStatus, TenantConfigs, run_dialogs
 from evals.tenant_data import connect_tenant_data, resolve_tenant_ids
@@ -484,6 +484,31 @@ async def test_judge_verdict_becomes_checks(configs: TenantConfigs) -> None:
     for part in ("Посоветуйте крем", "Какой тип кожи?", "Сухая", "Вот крем", "search_catalog"):
         assert part in task.text
     assert task.text.rstrip().endswith("Атрибуты")
+
+
+def test_judge_task_shows_component_contents() -> None:
+    card = {
+        "type": "product_card",
+        "entity_id": "1",
+        "title": "Сыворотка",
+        "price": {"amount": 2490, "currency": "RUB"},
+    }
+    table = {
+        "type": "comparison_table",
+        "columns": ["А", "Б"],
+        "rows": [{"label": "Текстура", "values": ["гель", "крем"]}],
+    }
+    carousel = {"type": "product_carousel", "title": "Подборка", "items": [card]}
+    outcome = TurnOutcome(
+        components=("product_carousel", "comparison_table", "form"),
+        component_data=(carousel, table, {"type": "form", "title": "Консультация"}),
+    )
+
+    task = render_task([], "Сравните", outcome, None)
+
+    assert "- product_carousel «Подборка»:\n  - Сыворотка — 2490 RUB" in task
+    assert "- comparison_table: А | Б\n  - Текстура: гель | крем" in task
+    assert "- form: Консультация" in task
 
 
 async def test_judge_model_override(configs: TenantConfigs) -> None:

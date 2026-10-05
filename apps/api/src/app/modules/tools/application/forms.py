@@ -65,7 +65,10 @@ def create_lead_tool(forms: Mapping[str, FormConfig], leads: LeadStore) -> ToolD
         lead_id = await leads.create(
             ctx.tenant_id, ctx.conversation_id, arguments["form_key"], arguments["fields"]
         )
-        return ToolResult(content=f"Заявка создана, номер {str(lead_id)[:8]}.")
+        return ToolResult(
+            content=f"Заявка создана, номер {str(lead_id)[:8]}. Сообщи номер и что будет "
+            "дальше — по базе знаний, если там это описано; сроки не выдумывай."
+        )
 
     return ToolDefinition(
         name=CREATE_LEAD,

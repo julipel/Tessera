@@ -1,12 +1,12 @@
 """LLM-судья: `clarifies`, `max_questions`, `judge` — один вызов модели на ход.
 
 Судья видит предыдущие ходы, текущую реплику, ответ агента, вызванные инструменты, компоненты
-и слоты, а отвечает JSON. Сбой модели или неразборчивый ответ — `error` у проверок хода,
-прогон продолжается.
+с их содержимым (названия, цены, строки таблиц) и слоты, а отвечает JSON. Сбой модели или
+неразборчивый ответ — `error` у проверок хода, прогон продолжается.
 """
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,13 +25,18 @@ from evals.checks import JUDGE_CHECKS, CheckResult, CheckStatus, TurnOutcome
 from evals.dialogs import Expect
 
 # Меняется вместе с JUDGE_SYSTEM: прогоны с разными версиями судьи сравнивать напрямую нельзя.
-JUDGE_PROMPT_VERSION = "1"
+JUDGE_PROMPT_VERSION = "3"
 
 JUDGE_SYSTEM = """\
 Ты — строгий и беспристрастный оценщик ответов AI-консультанта интернет-магазина.
 На входе история диалога, последнюю реплику пользователя и последний ответ консультанта
-с тем, что консультант сделал за ход (вызванные инструменты, показанные UI-компоненты,
-сохранённые сведения о запросе). Оценивай только последний ответ.
+с тем, что консультант сделал за ход (вызванные инструменты, показанные UI-компоненты
+с их содержимым, сохранённые сведения о запросе). Цены и характеристики товаров консультант
+показывает карточками и таблицами, а не текстом: учитывай их как часть ответа.
+Карточка показывает только название, цену и бейджи, а не все характеристики товара (состав,
+ноты, отдушки), и каталога ты не видишь: не ставь провал за то, что характеристику, названную
+в ответе, нельзя проверить по карточке.
+Оценивай только последний ответ.
 
 Верни только JSON-объект, без текста вокруг:
 {"questions": <int>, "clarifies": <bool>, "rubric": {"pass": <bool>, "reason": "<str>"} | null}
@@ -139,6 +144,7 @@ def render_task(
         "",
         f"Вызванные инструменты: {', '.join(outcome.tools_called) or 'нет'}",
         f"Показанные UI-компоненты: {', '.join(outcome.components) or 'нет'}",
+        *_describe_components(outcome.component_data),
         f"Сохранённые сведения о запросе: {outcome.slots or 'нет'}",
         "",
         "## Рубрика",
@@ -146,6 +152,40 @@ def render_task(
         rubric or "(нет — rubric: null)",
     ]
     return "\n".join(lines)
+
+
+def _describe_components(components: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Содержимое компонентов для судьи: карточки — название, подзаголовок, цена, бейджи;
+    таблица сравнения — колонки и строки; прочие — тип и заголовок."""
+    lines: list[str] = []
+    for component in components:
+        kind = component.get("type", "?")
+        match kind:
+            case "product_card":
+                lines.append(f"- product_card: {_describe_card(component)}")
+            case "product_carousel":
+                title = f" «{component['title']}»" if component.get("title") else ""
+                lines.append(f"- product_carousel{title}:")
+                lines += [f"  - {_describe_card(item)}" for item in component.get("items", [])]
+            case "comparison_table":
+                lines.append(f"- comparison_table: {' | '.join(component.get('columns', []))}")
+                for row in component.get("rows", []):
+                    lines.append(f"  - {row.get('label', '')}: {' | '.join(row.get('values', []))}")
+            case _:
+                name = component.get("title")
+                lines.append(f"- {kind}" + (f": {name}" if name else ""))
+    return lines
+
+
+def _describe_card(card: Mapping[str, Any]) -> str:
+    parts = [str(card.get("title", ""))]
+    if subtitle := card.get("subtitle"):
+        parts.append(str(subtitle))
+    if price := card.get("price"):
+        parts.append(f"{price.get('amount')} {price.get('currency', '')}".strip())
+    if badges := card.get("badges"):
+        parts.append(", ".join(badges))
+    return " — ".join(parts)
 
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)

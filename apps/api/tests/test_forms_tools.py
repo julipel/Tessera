@@ -149,7 +149,8 @@ async def test_confirmed_create_lead_stores_lead_of_context_tenant() -> None:
         lead("consultation", ANNA), CTX
     )
 
-    assert result.content == "Заявка создана, номер 12345678."
+    assert isinstance(result.content, str)
+    assert result.content.startswith("Заявка создана, номер 12345678.")
     assert leads.created == [(CTX.tenant_id, CTX.conversation_id, "consultation", ANNA)]
 
 

@@ -16,11 +16,13 @@ const STATUS_NOTE: Partial<Record<ChatMessage["status"], string>> = {
 /**
  * `onAction`, `onSubmitForm` и `onPick` не заданы, пока идёт ход: кнопки компонентов и отправка
  * форм отключены, подсказки скрыты.
- * Подсказки — под последним ответом ассистента; на пустом чате — стартовые (`starter`).
+ * Подсказки — под последним ответом ассистента; на пустом чате — приветствие тенанта (`greeting`)
+ * и стартовые подсказки (`starter`). Приветствие только показывается: в историю оно не попадает.
  */
 export function MessageList({
   messages,
   activity,
+  greeting,
   starter,
   onAction,
   onSubmitForm,
@@ -28,6 +30,7 @@ export function MessageList({
 }: {
   messages: ChatMessage[];
   activity: string | null;
+  greeting?: string;
   starter: string[];
   onAction?: OnAction;
   onSubmitForm?: OnSubmitForm;
@@ -42,10 +45,18 @@ export function MessageList({
       : [];
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [messages, activity, starter]);
+  }, [messages, activity, greeting, starter]);
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6">
+      {!messages.length && greeting && (
+        <p
+          data-testid="greeting"
+          className="mx-auto mb-3 max-w-2xl rounded-chat border border-chat-border bg-chat-surface px-4 py-3 whitespace-pre-wrap"
+        >
+          {greeting}
+        </p>
+      )}
       <ol className="mx-auto flex max-w-2xl flex-col gap-3" aria-label="Сообщения">
         {messages.map((m) => (
           <li

@@ -61,6 +61,29 @@ async def ensure_database(url: str) -> bool:
         await admin.dispose()
 
 
+def widget_keys_by_slug(value: str | None, slugs: list[str]) -> dict[str, str]:
+    """Ключи виджета для seed: `slug=key[,slug=key…]` или просто `key` при одном тенанте.
+
+    `key_hash` уникален, поэтому один ключ на несколько тенантов не годится. Slug, которых
+    нет среди загружаемых тенантов, пропускаются: SEED_WIDGET_KEY из .env может описывать всех.
+    """
+    if not value:
+        return {}
+    if "=" not in value:
+        if len(slugs) != 1:
+            raise ValueError(
+                "один ключ виджета на несколько тенантов: задайте slug=key[,slug=key…]"
+            )
+        return {slugs[0]: value}
+    keys: dict[str, str] = {}
+    for pair in value.split(","):
+        slug, sep, key = (part.strip() for part in pair.partition("="))
+        if not sep or not slug or not key:
+            raise ValueError(f"ключ виджета не в формате slug=key: {pair!r}")
+        keys[slug] = key
+    return {slug: key for slug, key in keys.items() if slug in slugs}
+
+
 def load_specs(paths: list[Path]) -> list[tuple[TenantSpec, list[SourceDeclaration]]]:
     """Все описания разбираются до записи в БД: ошибка в любом — ничего не записано."""
     specs = []
@@ -71,9 +94,11 @@ def load_specs(paths: list[Path]) -> list[tuple[TenantSpec, list[SourceDeclarati
 
 
 async def seed(
-    paths: list[Path], widget_key: str | None, reset_widget_key: bool, settings: Settings
+    specs: list[tuple[TenantSpec, list[SourceDeclaration]]],
+    widget_keys: dict[str, str],
+    reset_widget_key: bool,
+    settings: Settings,
 ) -> None:
-    specs = load_specs(paths)
     engine = create_engine(settings.database_url)
     try:
         async with create_session_factory(engine)() as session, session.begin():
@@ -83,7 +108,7 @@ async def seed(
                     tenants=SqlTenantDirectory(session),
                     configs=AgentConfigRepository(session),
                     widget_keys=WidgetKeyRepository(session),
-                    widget_key=widget_key,
+                    widget_key=widget_keys.get(spec.tenant.slug),
                     reset_widget_key=reset_widget_key,
                 )
                 state = "новая версия" if result.config_changed else "без изменений"
@@ -192,7 +217,10 @@ def main(argv: list[str] | None = None) -> int:
     seed_cmd.add_argument("paths", nargs="*", type=Path, help="по умолчанию config/tenants/*.yaml")
     seed_cmd.add_argument(
         "--widget-key",
-        help="ключ виджета для нового тенанта (иначе SEED_WIDGET_KEY из env/.env или случайный)",
+        help=(
+            "ключи виджета новых тенантов: slug=key[,slug=key…] или key при одном тенанте "
+            "(иначе SEED_WIDGET_KEY из env/.env; нет ключа — случайный)"
+        ),
     )
     seed_cmd.add_argument(
         "--reset-widget-key",
@@ -233,12 +261,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         settings = Settings()
+        specs = load_specs(paths)
         # Settings читает и env, и .env — os.environ один .env не видит.
-        widget_key = args.widget_key or settings.seed_widget_key or None
-        asyncio.run(seed(paths, widget_key, args.reset_widget_key, settings))
+        widget_keys = widget_keys_by_slug(
+            args.widget_key or settings.seed_widget_key,
+            [spec.tenant.slug for spec, _ in specs],
+        )
     except (InvalidTenantSpecError, InvalidSourceDeclarationError) as e:
         print(f"невалидное описание тенанта: {e}", file=sys.stderr)
         return 1
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
+    asyncio.run(seed(specs, widget_keys, args.reset_widget_key, settings))
     return 0
 
 

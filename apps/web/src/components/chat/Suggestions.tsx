@@ -21,7 +21,7 @@ export function Suggestions({
           key={item.label}
           type="button"
           onClick={() => onPick(item.input)}
-          className="min-h-9 rounded-full border border-chat-primary bg-chat-surface px-3 text-sm text-chat-primary hover:bg-chat-bg"
+          className="min-h-9 rounded-chat border border-chat-primary bg-chat-surface px-3 text-sm text-chat-primary hover:bg-chat-bg"
         >
           {item.label}
         </button>

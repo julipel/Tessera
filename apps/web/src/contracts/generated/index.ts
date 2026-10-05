@@ -463,9 +463,14 @@ export interface CardAction {
  */
 export interface BrandingConfig {
   tokens?: BrandingTokens;
+  /**
+   * Логотип в шапке чата: https://… или путь от корня веб-приложения.
+   */
   logo_url?: string | null;
 }
 /**
+ * Дизайн-токены чата: значения попадают в CSS-переменные, поэтому форматы строгие.
+ *
  * This interface was referenced by `AgentConfig`'s JSON-Schema
  * via the `definition` "BrandingTokens".
  *
@@ -473,8 +478,17 @@ export interface BrandingConfig {
  * via the `definition` "BrandingTokens".
  */
 export interface BrandingTokens {
+  /**
+   * Основной цвет (кнопки, сообщения посетителя): #RGB или #RRGGBB.
+   */
   primary?: string;
+  /**
+   * Радиус скругления: 0 или число с px / rem / em.
+   */
   radius?: string;
+  /**
+   * Имя семейства шрифта (без загрузки: нет у посетителя — системный).
+   */
   font?: string;
   [k: string]: unknown;
 }

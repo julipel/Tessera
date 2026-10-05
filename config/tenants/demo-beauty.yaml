@@ -1,5 +1,5 @@
 # Демо-тенант пилота (docs/pilot.md). Загрузка: `make seed`.
-# Секретов здесь нет: ключ виджета задаётся через SEED_WIDGET_KEY или генерируется при seed.
+# Секретов здесь нет: ключ виджета задаётся через SEED_WIDGET_KEY (demo-beauty=…) или генерируется при seed.
 tenant:
   slug: demo-beauty
   name: "Lumière"
@@ -203,7 +203,7 @@ agent_config:
 
   branding:
     tokens: { primary: "#8C5A6B", radius: "12px", font: "Inter" }
-    logo_url: null
+    logo_url: "/demo/lumiere.svg"
 
 # Источники пилота (ADR-0019): `make pilot` — seed и индексация. Данные демо — data/pilot/demo-beauty.
 # Каталог — три таблицы: у источника table один entity_type, набор атрибутов у типов разный.

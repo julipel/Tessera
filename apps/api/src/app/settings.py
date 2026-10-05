@@ -55,7 +55,8 @@ class Settings(BaseSettings):
     # Приватные подсети, к которым можно подключать источники `database` (ADR-0018), JSON-список
     # CIDR. Публичные адреса разрешены всегда; локально — ["127.0.0.0/8"].
     source_db_allowed_networks: list[str] = []
-    # Ключ виджета, который `make seed` выдаёт новому тенанту; пусто — сгенерировать.
+    # Ключи виджета, которые `make seed` выдаёт новым тенантам: slug=key[,slug=key…] (или key,
+    # если тенант один); у тенанта без ключа здесь — сгенерировать.
     seed_widget_key: str | None = None
     # Origin веб-чата для CORS (env — JSON-список). Origin виджетов тенантов — P5-06.
     cors_origins: list[str] = ["http://localhost:3000"]

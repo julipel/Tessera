@@ -286,8 +286,11 @@ knowledge:
     attribute_labels: { color: "Цвет", size: "Размер" }   # строки comparison в show_entities
     card_actions: [{ action_id: ask_about, label: "Подробнее", style: secondary }]  # ≤ 3
 branding:
+  # Токены → CSS-переменные чата (apps/web/src/lib/branding.ts), форматы строгие (схема):
+  # primary — #RGB/#RRGGBB (цвет текста на нём выбирается по яркости), radius — 0 или
+  # число с px/rem/em, font — имя семейства (веб-шрифты не загружаются, иначе системный).
   tokens: { primary: "#1F4FFF", radius: "12px", font: "Inter" }
-  logo_url: "..."
+  logo_url: "https://…"   # или путь от корня веб-приложения ("/demo/logo.svg"); шапка чата
 ```
 
 ## 6. Коды ошибок (`error.code`)

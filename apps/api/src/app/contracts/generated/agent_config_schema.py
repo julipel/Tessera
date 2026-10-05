@@ -141,12 +141,25 @@ class CardAction(BaseModel):
 
 
 class BrandingTokens(BaseModel):
+    """
+    Дизайн-токены чата: значения попадают в CSS-переменные, поэтому форматы строгие.
+    """
+
     model_config = ConfigDict(
         extra="allow",
     )
-    primary: str | None = None
-    radius: str | None = None
-    font: str | None = None
+    primary: Annotated[str | None, Field(pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")] = None
+    """
+    Основной цвет (кнопки, сообщения посетителя): #RGB или #RRGGBB.
+    """
+    radius: Annotated[str | None, Field(pattern="^(0|[0-9]+(\\.[0-9]+)?(px|rem|em))$")] = None
+    """
+    Радиус скругления: 0 или число с px / rem / em.
+    """
+    font: Annotated[str | None, Field(pattern="^[A-Za-z0-9][A-Za-z0-9 -]{0,63}$")] = None
+    """
+    Имя семейства шрифта (без загрузки: нет у посетителя — системный).
+    """
 
 
 class BrandingConfig(BaseModel):
@@ -154,7 +167,10 @@ class BrandingConfig(BaseModel):
         extra="forbid",
     )
     tokens: BrandingTokens | None = None
-    logo_url: str | None = None
+    logo_url: Annotated[str | None, Field(pattern="^(https?://|/)[^\\s\"'<>()\\\\]*$")] = None
+    """
+    Логотип в шапке чата: https://… или путь от корня веб-приложения.
+    """
 
 
 class AssistantConfig(BaseModel):

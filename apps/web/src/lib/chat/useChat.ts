@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { Action, Form, UserInput } from "@/contracts";
+import type { Action, Form, PublicConfig, UserInput } from "@/contracts";
 import { ApiError, ChatApi } from "@/lib/api/client";
 import { type ChatMessage, chatReducer, initialChatState } from "./state";
 
@@ -13,8 +13,8 @@ export interface UseChat {
   busy: boolean;
   activity: string | null;
   loadError: string | null;
-  /** Стартовые подсказки тенанта (public config) — для пустого чата. */
-  starterSuggestions: string[];
+  /** Публичный конфиг тенанта: имя, приветствие, стартовые подсказки, брендинг. */
+  config: PublicConfig | null;
   send: (input: UserInput) => Promise<void>;
   sendText: (text: string) => Promise<void>;
   /** Нажатие кнопки компонента: `input.type=action` с подписью выбора для истории. */
@@ -30,7 +30,7 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
   const api = useMemo(() => new ChatApi(apiUrl, widgetKey), [apiUrl, widgetKey]);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [starterSuggestions, setStarterSuggestions] = useState<string[]>([]);
+  const [config, setConfig] = useState<PublicConfig | null>(null);
   const conversationId = useRef<string | null>(null);
   const abort = useRef<AbortController | null>(null);
 
@@ -40,11 +40,11 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
   );
 
   useEffect(() => {
-    // Без конфига чат работает, просто без стартовых подсказок.
+    // Без конфига чат работает: нейтральная тема, без приветствия и стартовых подсказок.
     api
       .getPublicConfig()
-      .then((config) => setStarterSuggestions(config.assistant.starter_suggestions))
-      .catch(() => setStarterSuggestions([]));
+      .then(setConfig)
+      .catch(() => setConfig(null));
   }, [api]);
 
   useEffect(() => {
@@ -126,7 +126,7 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
     [send],
   );
 
-  return { ...state, loadError, starterSuggestions, send, sendText, act, submitForm };
+  return { ...state, loadError, config, send, sendText, act, submitForm };
 }
 
 function visitorId(): string {

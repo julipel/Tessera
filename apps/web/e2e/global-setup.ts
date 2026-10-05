@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { E2E_ENV, WIDGET_KEY } from "./env";
+import { E2E_ENV, GARDEN_WIDGET_KEY, WIDGET_KEY } from "./env";
 
-/** База e2e: создать, применить миграции, засеять демо-тенанта с известным ключом виджета. */
+/** База e2e: создать, применить миграции, засеять демо-тенантов с известными ключами виджета. */
 export default function globalSetup(): void {
   const run = (...args: string[]) =>
     execFileSync("uv", ["run", ...args], {
@@ -11,5 +11,6 @@ export default function globalSetup(): void {
     });
   run("python", "-m", "app.cli", "ensure-db");
   run("alembic", "upgrade", "head");
-  run("python", "-m", "app.cli", "seed", "--widget-key", WIDGET_KEY, "--reset-widget-key");
+  const keys = `demo-beauty=${WIDGET_KEY},demo-garden=${GARDEN_WIDGET_KEY}`;
+  run("python", "-m", "app.cli", "seed", "--widget-key", keys, "--reset-widget-key");
 }

@@ -256,10 +256,23 @@
     },
     "BrandingTokens": {
       "type": "object",
+      "description": "Дизайн-токены чата: значения попадают в CSS-переменные, поэтому форматы строгие.",
       "properties": {
-        "primary": { "type": "string" },
-        "radius": { "type": "string" },
-        "font": { "type": "string" }
+        "primary": {
+          "type": "string",
+          "description": "Основной цвет (кнопки, сообщения посетителя): #RGB или #RRGGBB.",
+          "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+        },
+        "radius": {
+          "type": "string",
+          "description": "Радиус скругления: 0 или число с px / rem / em.",
+          "pattern": "^(0|[0-9]+(\\.[0-9]+)?(px|rem|em))$"
+        },
+        "font": {
+          "type": "string",
+          "description": "Имя семейства шрифта (без загрузки: нет у посетителя — системный).",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9 -]{0,63}$"
+        }
       },
       "additionalProperties": true
     },
@@ -267,7 +280,12 @@
       "type": "object",
       "properties": {
         "tokens": { "$ref": "#/$defs/BrandingTokens" },
-        "logo_url": { "type": ["string", "null"], "default": null }
+        "logo_url": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Логотип в шапке чата: https://… или путь от корня веб-приложения.",
+          "pattern": "^(https?://|/)[^\\s\"'<>()\\\\]*$"
+        }
       },
       "additionalProperties": false
     }

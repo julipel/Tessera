@@ -80,6 +80,31 @@ def test_invalid_spec_is_rejected(source: str) -> None:
         load_tenant_spec(source)
 
 
+@pytest.mark.parametrize(
+    "branding",
+    [
+        '{tokens: {primary: "red; background: url(x)"}}',
+        '{tokens: {primary: "#12345"}}',
+        '{tokens: {radius: "12"}}',
+        '{tokens: {font: "Inter; color: red"}}',
+        '{logo_url: "javascript:alert(1)"}',
+        '{logo_url: "/logo.svg) url(x"}',
+    ],
+)
+def test_invalid_branding_is_rejected(branding: str) -> None:
+    # Токены попадают в CSS-переменные чата — форматы проверяются уже при загрузке YAML.
+    with pytest.raises(InvalidTenantSpecError):
+        load_tenant_spec(SPEC_YAML + f"  branding: {branding}\n")
+
+
+def test_valid_branding_is_accepted() -> None:
+    tokens = '{primary: "#2E6B3F", radius: "0.5rem", font: "PT Serif"}'
+    branding = f'{{tokens: {tokens}, logo_url: "/l.svg"}}'
+    spec = load_tenant_spec(SPEC_YAML + f"  branding: {branding}\n")
+    assert spec.agent_config.branding is not None
+    assert spec.agent_config.branding.logo_url == "/l.svg"
+
+
 def test_config_is_stored_as_written() -> None:
     config = load_tenant_spec(SPEC_YAML).config_json()
     # Значения по умолчанию из схемы не материализуются.

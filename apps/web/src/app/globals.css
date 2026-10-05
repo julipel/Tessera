@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
-/* Нейтральная тема чата; токены брендинга тенанта переопределят её в P5-05. */
+/* Нейтральная тема чата. Токены брендинга тенанта переопределяют переменные на корне чата
+   (lib/branding.ts): --chat-primary, --chat-on-primary, --chat-radius, --chat-font. */
 :root {
   --chat-bg: #f7f7f8;
   --chat-surface: #ffffff;
@@ -11,6 +12,7 @@
   --chat-on-primary: #ffffff;
   --chat-danger: #b42318;
   --chat-radius: 0.75rem;
+  --chat-font: ui-sans-serif, system-ui, sans-serif;
 }
 
 @theme inline {
@@ -23,6 +25,7 @@
   --color-chat-on-primary: var(--chat-on-primary);
   --color-chat-danger: var(--chat-danger);
   --radius-chat: var(--chat-radius);
+  --font-chat: var(--chat-font);
 }
 
 body {

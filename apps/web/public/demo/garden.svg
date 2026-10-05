@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Зелёный угол">
+  <rect width="32" height="32" rx="2" fill="#2E6B3F"/>
+  <path d="M16 25V13" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <path d="M16 16c-5 0-7-3-7-7 5 0 7 3 7 7zM16 19c4 0 7-2 7-6-4 0-7 2-7 6z" fill="#BFE3B4"/>
+</svg>

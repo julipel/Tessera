@@ -53,7 +53,7 @@ async def _tenant(
 
 @pytest.fixture
 async def shop(db_session: AsyncSession) -> TenantId:
-    return await _tenant(db_session, "shop", "wk_shop", _config("Shop"))
+    return await _tenant(db_session, "shop", "wk_shop", _config("Shop", logo_url="/shop.svg"))
 
 
 async def test_returns_public_part_of_active_config(db_client: AsyncClient, shop: TenantId) -> None:
@@ -67,6 +67,7 @@ async def test_returns_public_part_of_active_config(db_client: AsyncClient, shop
     assert config.assistant.starter_suggestions == ["Подобрать"]
     assert config.branding.tokens is not None
     assert config.branding.tokens.primary == "#123456"
+    assert config.branding.logo_url == "/shop.svg"
     assert set(body) == {"assistant", "branding"}
     assert "СЕКРЕТНЫЙ ПРОМПТ" not in response.text
     assert "fallback_message" not in body["assistant"]

@@ -1,6 +1,7 @@
 import type { MessageBlock, ProductCard as ProductCardData } from "@/contracts";
 import type { OnAction } from "../rich/ActionButton";
 import { ComponentView } from "../rich/ComponentView";
+import type { OnSubmitForm } from "../rich/Forms";
 import { CardRow } from "../rich/ProductCarousel";
 import { Markdown } from "./Markdown";
 
@@ -23,7 +24,15 @@ function group(blocks: MessageBlock[]): Group[] {
   return groups;
 }
 
-export function MessageBlocks({ blocks, onAction }: { blocks: MessageBlock[]; onAction?: OnAction }) {
+export function MessageBlocks({
+  blocks,
+  onAction,
+  onSubmitForm,
+}: {
+  blocks: MessageBlock[];
+  onAction?: OnAction;
+  onSubmitForm?: OnSubmitForm;
+}) {
   return group(blocks).map((g) => {
     if (g.kind === "cards") {
       return (
@@ -46,7 +55,7 @@ export function MessageBlocks({ blocks, onAction }: { blocks: MessageBlock[]; on
     }
     return (
       <div key={block.block_id} data-block="component" data-component={block.component.type}>
-        <ComponentView component={block.component} onAction={onAction} />
+        <ComponentView component={block.component} onAction={onAction} onSubmitForm={onSubmitForm} />
       </div>
     );
   });

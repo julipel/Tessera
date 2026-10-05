@@ -154,6 +154,6 @@ export function inputText(input: UserInput): string {
     case "action":
       return input.label ?? input.action_id;
     case "form_submit":
-      return "Форма отправлена";
+      return input.label ?? "Форма отправлена";
   }
 }

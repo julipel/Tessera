@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { UserInput } from "@/contracts";
 import type { ChatMessage } from "@/lib/chat/state";
 import type { OnAction } from "../rich/ActionButton";
+import type { OnSubmitForm } from "../rich/Forms";
 import { MessageBlocks } from "./MessageBlocks";
 import { type Suggestion, Suggestions } from "./Suggestions";
 
@@ -13,7 +14,8 @@ const STATUS_NOTE: Partial<Record<ChatMessage["status"], string>> = {
 };
 
 /**
- * `onAction` и `onPick` не заданы, пока идёт ход: кнопки компонентов отключены, подсказки скрыты.
+ * `onAction`, `onSubmitForm` и `onPick` не заданы, пока идёт ход: кнопки компонентов и отправка
+ * форм отключены, подсказки скрыты.
  * Подсказки — под последним ответом ассистента; на пустом чате — стартовые (`starter`).
  */
 export function MessageList({
@@ -21,12 +23,14 @@ export function MessageList({
   activity,
   starter,
   onAction,
+  onSubmitForm,
   onPick,
 }: {
   messages: ChatMessage[];
   activity: string | null;
   starter: string[];
   onAction?: OnAction;
+  onSubmitForm?: OnSubmitForm;
   onPick?: (input: UserInput) => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
@@ -55,7 +59,7 @@ export function MessageList({
                 {m.text}
               </div>
             ) : (
-              <MessageBlocks blocks={m.blocks} onAction={onAction} />
+              <MessageBlocks blocks={m.blocks} onAction={onAction} onSubmitForm={onSubmitForm} />
             )}
             {(m.error || STATUS_NOTE[m.status]) && (
               <p className="mt-1 text-sm text-chat-danger">{m.error ?? STATUS_NOTE[m.status]}</p>

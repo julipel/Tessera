@@ -201,8 +201,9 @@
   requires_confirmation — ожидающий вызов в DialogState, исполнение по кнопке `confirm` без
   модели, `assistant.confirm_labels`, модуль `leads`, проверка `form_submit` (422), ADR-0021.
   DoD: тесты на FakeLLM, SSE и Postgres.
-- [ ] **P5-04b Формы и подтверждения: фронт.** Отправка формы (`form_submit`, подпись
-  в истории), кнопки confirm, блокировка во время хода. DoD: unit-тесты reducer'а, e2e.
+- [x] **P5-04b Формы и подтверждения: фронт.** Отправка формы (`form_submit` с `label` —
+  заголовок формы в истории), кнопки confirm, блокировка во время хода. DoD: unit-тесты
+  reducer'а, e2e (show_form → форма → confirm → заявка через мок модели).
 - [ ] **P5-05 Брендинг.** Токены из public config → CSS-переменные, логотип, приветствие.
   DoD: два демо-тенанта выглядят по-разному.
 - [ ] **P5-06 Виджет.** `widget.js` + iframe, allowed_origins, кнопка открытия, мобильная вёрстка.

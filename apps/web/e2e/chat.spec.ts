@@ -64,3 +64,43 @@ test("быстрые ответы от suggest_replies: под последни�
   // У нового ответа подсказок нет — старые не показываются.
   await expect(quick).toHaveCount(0);
 });
+
+test("форма и подтверждение: show_form → отправка формы → confirm → заявка создана", async ({
+  page,
+}) => {
+  await page.goto(`/?key=${WIDGET_KEY}`);
+  // Мок модели на «консультацию» вызывает show_form(consultation) из конфига демо-тенанта,
+  // на отправленную форму — create_lead с её значениями.
+  await page.getByLabel("Сообщение").fill("Хочу консультацию косметолога");
+  await page.getByLabel("Сообщение").press("Enter");
+
+  const user = page.locator('li[data-role="user"]');
+  const assistant = page.locator('li[data-role="assistant"]');
+  const form = page.getByRole("form", { name: "Консультация косметолога" });
+  const submit = form.getByRole("button", { name: "Отправить" });
+  await expect(assistant.last()).toHaveAttribute("data-status", "completed");
+  await expect(submit).toBeEnabled();
+
+  // Обязательные поля не заполнены — браузер не даёт отправить.
+  await submit.click();
+  await expect(user).toHaveCount(1);
+
+  await form.getByLabel("Имя").fill("Анна");
+  await form.getByLabel("Телефон или Telegram").fill("@anna");
+  await submit.click();
+
+  // В истории — заголовок формы, а не значения; пока идёт ход, форма не отправляется.
+  await expect(user.last()).toHaveText("Консультация косметолога");
+  await expect(submit).toBeDisabled();
+
+  const confirm = page.getByRole("group", { name: "Подтверждение" });
+  await expect(confirm).toContainText("Имя: Анна; Телефон или Telegram: @anna");
+  await expect(assistant.last()).toHaveAttribute("data-status", "completed");
+
+  await confirm.getByRole("button", { name: "Подтвердить" }).click();
+
+  await expect(user.last()).toHaveText("Подтвердить");
+  // Заявку создаёт бэкенд по нажатию, модель получает итог вместе с нажатием.
+  await expect(assistant.last()).toContainText("Подтверждено, create_lead: Заявка создана");
+  await expect(assistant.last()).toHaveAttribute("data-status", "completed");
+});

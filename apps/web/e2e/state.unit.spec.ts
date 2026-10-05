@@ -142,6 +142,22 @@ test("нажатие кнопки: в истории подпись выбора
 
   // Старые сообщения истории — без label.
   expect(inputText({ type: "action", action_id: "select_product" })).toBe("select_product");
+});
+
+test("отправка формы: в истории заголовок формы, без подписи — общая надпись", () => {
+  const submit = {
+    type: "form_submit",
+    form_id: "consultation",
+    label: "Консультация косметолога",
+    values: { name: "Анна", contact: "@anna" },
+  } as const;
+  const state = chatReducer(initialChatState, { type: "user_sent", id: "local:3", input: submit });
+  // Значения формы в подпись не попадают.
+  expect(state.messages).toEqual([
+    expect.objectContaining({ role: "user", text: "Консультация косметолога" }),
+  ]);
+  expect(state.busy).toBe(true);
+
   expect(inputText({ type: "form_submit", form_id: "f", values: {} })).toBe("Форма отправлена");
 });
 

@@ -5,11 +5,9 @@ import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 
 export function Chat({ apiUrl, widgetKey }: { apiUrl: string; widgetKey: string }) {
-  const { messages, busy, activity, loadError, starterSuggestions, send, sendText, act } = useChat(
-    apiUrl,
-    widgetKey,
-  );
-  // Во время хода кнопки и подсказки неактивны: ввод — один за раз.
+  const { messages, busy, activity, loadError, starterSuggestions, send, sendText, act, submitForm } =
+    useChat(apiUrl, widgetKey);
+  // Во время хода кнопки, формы и подсказки неактивны: ввод — один за раз.
   const idle = !busy;
 
   return (
@@ -27,6 +25,7 @@ export function Chat({ apiUrl, widgetKey }: { apiUrl: string; widgetKey: string 
         activity={activity}
         starter={starterSuggestions}
         onAction={idle ? (action, subject) => void act(action, subject) : undefined}
+        onSubmitForm={idle ? (form, values) => void submitForm(form, values) : undefined}
         onPick={idle ? (input) => void send(input) : undefined}
       />
       <Composer disabled={busy} onSend={(text) => void sendText(text)} />

@@ -705,6 +705,10 @@ export interface ActionInput {
 export interface FormSubmitInput {
   type: "form_submit";
   form_id: string;
+  /**
+   * Что увидел пользователь (заголовок формы): показывается в истории вместо form_id. Модели не передаётся — она получает form_id и values.
+   */
+  label?: string;
   values: {};
 }
 /**

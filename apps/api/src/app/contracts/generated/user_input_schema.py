@@ -43,6 +43,10 @@ class FormSubmitInput(BaseModel):
     )
     type: Literal["form_submit"]
     form_id: Annotated[str, Field(min_length=1)]
+    label: Annotated[str | None, Field(max_length=200, min_length=1)] = None
+    """
+    Что увидел пользователь (заголовок формы): показывается в истории вместо form_id. Модели не передаётся — она получает form_id и values.
+    """
     values: dict[str, Any]
 
 

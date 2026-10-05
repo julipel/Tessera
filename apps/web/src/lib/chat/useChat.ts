@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { Action, UserInput } from "@/contracts";
+import type { Action, Form, UserInput } from "@/contracts";
 import { ApiError, ChatApi } from "@/lib/api/client";
 import { type ChatMessage, chatReducer, initialChatState } from "./state";
 
@@ -19,9 +19,11 @@ export interface UseChat {
   sendText: (text: string) => Promise<void>;
   /** Нажатие кнопки компонента: `input.type=action` с подписью выбора для истории. */
   act: (action: Action, subject?: string) => Promise<void>;
+  /** Отправка формы: `input.type=form_submit`, в истории — заголовок формы. */
+  submitForm: (form: Form, values: Record<string, string>) => Promise<void>;
 }
 
-const LABEL_MAX = 200; // ActionInput.label в user_input.schema.json
+const LABEL_MAX = 200; // ActionInput.label и FormSubmitInput.label в user_input.schema.json
 
 /** Диалог посетителя: восстановление из истории, отправка и стрим хода. */
 export function useChat(apiUrl: string, widgetKey: string): UseChat {
@@ -113,7 +115,18 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
     [send],
   );
 
-  return { ...state, loadError, starterSuggestions, send, sendText, act };
+  const submitForm = useCallback(
+    (form: Form, values: Record<string, string>) =>
+      send({
+        type: "form_submit",
+        form_id: form.form_id,
+        label: form.title.slice(0, LABEL_MAX) || undefined,
+        values,
+      }),
+    [send],
+  );
+
+  return { ...state, loadError, starterSuggestions, send, sendText, act, submitForm };
 }
 
 function visitorId(): string {

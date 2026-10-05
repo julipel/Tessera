@@ -1,7 +1,11 @@
-// form и confirm: пока только вёрстка; отправка формы и подтверждение — P5-04.
-// Кнопка отправки отключена — неявная отправка по Enter тоже не срабатывает.
+// form и confirm. Без обработчика (идёт ход, витрина компонентов) кнопки отключены —
+// неявная отправка формы по Enter тоже не срабатывает.
+import type { FormEvent } from "react";
 import type { Confirm, Form, FormField } from "@/contracts";
 import { ActionButton, type OnAction } from "./ActionButton";
+
+/** Отправка формы: значения непустых полей по `FormField.name`. */
+export type OnSubmitForm = (form: Form, values: Record<string, string>) => void;
 
 const INPUT_TYPE: Record<Exclude<FormField["kind"], "textarea" | "select">, string> = {
   text: "text",
@@ -42,10 +46,21 @@ function Field({ formId, field }: { formId: string; field: FormField }) {
   );
 }
 
-export function FormView({ data }: { data: Form }) {
+export function FormView({ data, onSubmit }: { data: Form; onSubmit?: OnSubmitForm }) {
+  const submit = (e: FormEvent<HTMLFormElement>, send: OnSubmitForm) => {
+    e.preventDefault();
+    // Обязательность и формат (email, tel) уже проверил браузер; пустые необязательные — не шлём.
+    const values: Record<string, string> = {};
+    for (const [name, value] of new FormData(e.currentTarget)) {
+      if (typeof value === "string" && value.trim()) values[name] = value.trim();
+    }
+    send(data, values);
+  };
   return (
     <form
       aria-label={data.title}
+      // Без обработчика — серверный рендер (витрина): обработчик событий в props нельзя.
+      onSubmit={onSubmit && ((e) => submit(e, onSubmit))}
       className="flex flex-col gap-3 rounded-chat border border-chat-border bg-chat-surface p-3"
     >
       <h3 className="font-medium">{data.title}</h3>
@@ -54,7 +69,7 @@ export function FormView({ data }: { data: Form }) {
       ))}
       <button
         type="submit"
-        disabled
+        disabled={!onSubmit}
         className="min-h-10 rounded-chat bg-chat-primary px-4 font-medium text-chat-on-primary disabled:opacity-50"
       >
         {data.submit_label ?? "Отправить"}

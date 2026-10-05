@@ -2,8 +2,11 @@
 // OPENAI_BASE_URL) и Chat Completions (provider openai_compatible).
 // Отвечает стримом «Вы написали: <последнее сообщение пользователя>» по словам — так e2e
 // детерминирован и проходит весь путь: агентный цикл, адаптер OpenAI, SSE, история.
-// Responses API: на сообщение со словом «варианты» дополнительно вызывает suggest_replies,
-// а следующий шаг (после результата инструмента) завершает пустым ответом — быстрые ответы e2e.
+// Responses API: дополнительно вызывает инструмент, а следующий шаг (после результата
+// инструмента) завершает пустым ответом:
+// - слово «варианты» → suggest_replies (быстрые ответы e2e);
+// - слово «консультация» → show_form(consultation) (форма e2e);
+// - отправленная форма consultation → create_lead с её значениями (подтверждение e2e).
 import { createServer } from "node:http";
 
 const [host, port] = [process.env.MOCK_LLM_HOST, Number(process.env.MOCK_LLM_PORT)];
@@ -45,6 +48,19 @@ function event(body) {
 
 const SUGGEST_TRIGGER = "варианты";
 const SUGGESTIONS = ["Сухая", "Жирная"];
+const FORM_TRIGGER = "консультац";
+const FORM_SUBMITTED = "[Отправлена форма consultation: ";
+
+/** Вызов инструмента по последнему сообщению пользователя или null. */
+function toolFor(last) {
+  if (last.includes(SUGGEST_TRIGGER)) return ["suggest_replies", { options: SUGGESTIONS }];
+  if (last.startsWith(FORM_SUBMITTED)) {
+    const fields = JSON.parse(last.slice(FORM_SUBMITTED.length, last.lastIndexOf("]")));
+    return ["create_lead", { form_key: "consultation", fields }];
+  }
+  if (last.toLowerCase().includes(FORM_TRIGGER)) return ["show_form", { form_key: "consultation" }];
+  return null;
+}
 
 async function responses(req, res) {
   const input = (await readJson(req)).input;
@@ -61,13 +77,15 @@ async function responses(req, res) {
     await sleep(30);
     send({ type: "response.output_text.delta", item_id: "msg_e2e", output_index: 0, content_index: 0, delta: word });
   }
-  if (!afterTool && last.includes(SUGGEST_TRIGGER)) {
+  const tool = afterTool ? null : toolFor(last);
+  if (tool) {
+    const [name, args] = tool;
     const call = {
       type: "function_call",
       id: "fc_e2e",
       call_id: "call_e2e",
-      name: "suggest_replies",
-      arguments: JSON.stringify({ options: SUGGESTIONS }),
+      name,
+      arguments: JSON.stringify(args),
       status: "completed",
     };
     send({ type: "response.output_item.added", output_index: 1, item: { ...call, arguments: "" } });

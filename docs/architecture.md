@@ -447,7 +447,12 @@ AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSON
 ## 14. Frontend
 
 - `apps/web`: Next.js. Страницы: чат (полноэкранный), демо-страница виджета, админка (позже).
-- Встраиваемый виджет: `widget.js` → iframe с чатом, конфиг по ключу виджета, тема из токенов.
+- Встраиваемый виджет (P5-06, ADR-0022): `<script src="…/widget.js" data-key="wk_…">` на сайте
+  тенанта рисует кнопку и по первому открытию — iframe `/widget?key=…` (тот же чат, в шапке
+  «Свернуть» → `postMessage {type: "tessera:collapse"}`; `widget.js` принимает его только от
+  своего iframe и origin чата). Десктоп — панель 400×640 в углу, < 640 px — на весь экран.
+  `src/proxy.ts` ставит на `/widget` `Content-Security-Policy: frame-ancestors` из
+  `GET /v1/public/widget`, при ошибке — `'none'`. Демо-сайт — `/demo/widget?key=…` (только dev).
 - Рендер сообщения — список блоков: текст (markdown через react-markdown, без сырого HTML и
   картинок — их приносят только компоненты) + компоненты из discriminated union `type`
   (см. contracts). Неизвестный тип игнорируется. Витрина всех вариантов — `/demo/components`

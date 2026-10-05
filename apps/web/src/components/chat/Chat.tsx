@@ -5,7 +5,16 @@ import { useChat } from "@/lib/chat/useChat";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 
-export function Chat({ apiUrl, widgetKey }: { apiUrl: string; widgetKey: string }) {
+export function Chat({
+  apiUrl,
+  widgetKey,
+  onCollapse,
+}: {
+  apiUrl: string;
+  widgetKey: string;
+  /** Чат во фрейме виджета: кнопка «Свернуть» в шапке. */
+  onCollapse?: () => void;
+}) {
   const { messages, busy, activity, loadError, config, send, sendText, act, submitForm } = useChat(
     apiUrl,
     widgetKey,
@@ -27,7 +36,20 @@ export function Chat({ apiUrl, widgetKey }: { apiUrl: string; widgetKey: string 
             // eslint-disable-next-line @next/next/no-img-element
             <img src={logo} alt="" className="size-8 shrink-0 object-contain" />
           )}
-          <h1 className="text-lg font-semibold">{config?.assistant.name ?? "AI-консультант"}</h1>
+          <h1 className="flex-1 text-lg font-semibold">{config?.assistant.name ?? "AI-консультант"}</h1>
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              aria-label="Свернуть"
+              title="Свернуть"
+              className="flex size-9 shrink-0 items-center justify-center rounded-chat text-chat-muted hover:bg-chat-bg focus:outline-2 focus:outline-chat-primary"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5 fill-none stroke-current stroke-2">
+                <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
         </div>
       </header>
       {loadError && (

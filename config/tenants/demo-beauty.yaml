@@ -7,6 +7,8 @@ tenant:
 widget:
   allowed_origins:
     - "http://localhost:3000"
+    # e2e: демо-страница виджета на сервере e2e (apps/web/e2e/env.ts, widget.spec.ts)
+    - "http://127.0.0.2:3001"
 
 agent_config:
   assistant:

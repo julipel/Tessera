@@ -1,6 +1,6 @@
 import { Chat } from "@/components/chat/Chat";
 
-// Полноэкранный чат. Ключ виджета — `?key=` (так его передаст iframe виджета в P5-06),
+// Полноэкранный чат (во фрейме виджета — `/widget`). Ключ виджета — `?key=`,
 // для локальной разработки — NEXT_PUBLIC_WIDGET_KEY.
 export default async function Home({ searchParams }: PageProps<"/">) {
   const { key } = await searchParams;

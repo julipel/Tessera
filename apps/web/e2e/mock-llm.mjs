@@ -7,6 +7,9 @@
 // - слово «варианты» → suggest_replies (быстрые ответы e2e);
 // - слово «консультация» → show_form(consultation) (форма e2e);
 // - отправленная форма consultation → create_lead с её значениями (подтверждение e2e).
+// Ход целиком (UX e2e):
+// - слово «долго» → длинный медленный ответ из LONG_LINES абзацев (остановка, автоскролл);
+// - слово «сбой» → первый запрос с этим текстом — response.failed (повтор после ошибки).
 import { createServer } from "node:http";
 
 const [host, port] = [process.env.MOCK_LLM_HOST, Number(process.env.MOCK_LLM_PORT)];
@@ -50,6 +53,10 @@ const SUGGEST_TRIGGER = "варианты";
 const SUGGESTIONS = ["Сухая", "Жирная"];
 const FORM_TRIGGER = "консультац";
 const FORM_SUBMITTED = "[Отправлена форма consultation: ";
+const LONG_TRIGGER = "долго";
+const LONG_LINES = 40;
+const FAIL_TRIGGER = "сбой";
+const failed = new Set();
 
 /** Вызов инструмента по последнему сообщению пользователя или null. */
 function toolFor(last) {
@@ -72,9 +79,21 @@ async function responses(req, res) {
 
   res.writeHead(200, { "content-type": "text/event-stream" });
   send({ type: "response.created", response: { ...response, status: "in_progress" } });
+  if (!afterTool && last.includes(FAIL_TRIGGER) && !failed.has(last)) {
+    failed.add(last);
+    const error = { code: "server_error", message: "e2e: сбой модели" };
+    res.end(event({ type: "response.failed", sequence_number: sequence, response: { ...response, status: "failed", error } }));
+    return;
+  }
+  const long = !afterTool && last.includes(LONG_TRIGGER);
   const words = afterTool ? [] : `Вы написали: ${last}`.match(/\S+\s*/g);
+  if (long) {
+    for (let i = 1; i <= LONG_LINES; i++) words.push(`\n\nСтрока ${i}.`);
+  }
   for (const word of words) {
-    await sleep(30);
+    await sleep(long ? 100 : 30);
+    // Ход прерван (отмена или закрытый стрим) — API закрыл соединение.
+    if (res.destroyed) return;
     send({ type: "response.output_text.delta", item_id: "msg_e2e", output_index: 0, content_index: 0, delta: word });
   }
   const tool = afterTool ? null : toolFor(last);

@@ -101,7 +101,7 @@
 | `text_delta` | `{ "block_id": "b1", "delta": "..." }` | кусок текста (markdown) |
 | `text_done` | `{ "block_id": "b1" }` | текстовый блок завершён |
 | `status` | `{ "kind": "searching" \| "thinking" \| "calling_api", "label": "Ищу в каталоге…" }` | индикатор действия |
-| `tool_started` | `{ "tool_call_id", "name", "display_label" }` | инструмент начал работу |
+| `tool_started` | `{ "tool_call_id", "name", "display_label" }` | инструмент начал работу; `display_label` — подпись из `ToolDefinition` или `null` |
 | `tool_finished` | `{ "tool_call_id", "ok": true, "duration_ms" }` | инструмент завершился (без сырых данных) |
 | `component` | `{ "block_id": "b2", "component": Component }` | UI-компонент (см. §3) |
 | `suggestions` | `{ "items": [{ "label", "input": UserInput }] }` | быстрые ответы под сообщением |

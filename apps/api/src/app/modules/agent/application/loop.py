@@ -78,7 +78,7 @@ class AgentLoop:
                     case TextDelta(text=text):
                         yield AnswerDelta(text)
                     case ToolCallStarted(id=call_id, name=name):
-                        yield ToolStarted(tool_call_id=call_id, name=name)
+                        yield ToolStarted(call_id, name, self._tools.display_label(name))
                     case ResponseCompleted(response=completed):
                         response = completed
             if response is None:
@@ -148,7 +148,7 @@ class AgentLoop:
                 arguments=arguments,
                 raw_arguments=json.dumps(arguments, ensure_ascii=False),
             )
-            yield ToolStarted(tool_call_id=call.id, name=call.name)
+            yield ToolStarted(call.id, call.name, self._tools.display_label(call.name))
             started = time.perf_counter()
             result = await self._tools.execute_confirmed(call, ctx)
             for event in _reported(call, result, round((time.perf_counter() - started) * 1000)):

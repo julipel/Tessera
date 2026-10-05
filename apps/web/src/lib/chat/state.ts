@@ -16,59 +16,94 @@ export interface ChatMessage {
   status: MessageStatus;
   /** Текст пользователя (для user); у assistant — пусто, содержимое в blocks. */
   text: string;
+  /** Исходный ввод (для user) — его повторяет «Повторить». */
+  input?: UserInput;
   blocks: MessageBlock[];
   /** Быстрые ответы хода (событие `suggestions`); показываются только под последним ответом. */
   suggestions?: SuggestionItem[];
   turnId?: string;
   error?: string;
+  /** Ошибку можно повторить: сеть, `retryable` в `error` или HTTP-ответе. */
+  retryable?: boolean;
 }
 
 export interface ChatState {
   messages: ChatMessage[];
   /** Ход идёт: от отправки до `done` или сбоя стрима. */
   busy: boolean;
-  /** Подпись индикатора: «печатает» до первого текста или метка `status`. */
+  /** Подпись индикатора: «печатает» до первого текста, метка `status` или инструмента. */
   activity: string | null;
+  /** Идёт загрузка сохранённого диалога: приветствие и стартовые подсказки не показываются. */
+  restoring: boolean;
 }
 
 export type ChatAction =
   | { type: "history"; history: MessageHistory }
+  | { type: "restoring"; value: boolean }
   | { type: "user_sent"; id: string; input: UserInput }
+  | { type: "retry" }
   | { type: "event"; event: Event }
-  | { type: "stream_failed"; message: string };
+  | { type: "stream_failed"; message: string; retryable: boolean };
 
 export const TYPING = "Печатает…";
 
-export const initialChatState: ChatState = { messages: [], busy: false, activity: null };
+export const initialChatState: ChatState = {
+  messages: [],
+  busy: false,
+  activity: null,
+  restoring: false,
+};
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "history":
       // Загрузка и восстановление после обрыва стрима: история — источник истины, ход окончен.
-      return { busy: false, activity: null, messages: action.history.messages.map(fromHistory) };
+      return {
+        busy: false,
+        activity: null,
+        restoring: false,
+        messages: action.history.messages.map(fromHistory),
+      };
+    case "restoring":
+      return { ...state, restoring: action.value };
     case "user_sent":
       return {
+        ...state,
         busy: true,
         activity: TYPING,
         messages: [
           ...state.messages,
-          { id: action.id, role: "user", status: "completed", text: inputText(action.input), blocks: [] },
+          {
+            id: action.id,
+            role: "user",
+            status: "completed",
+            text: inputText(action.input),
+            input: action.input,
+            blocks: [],
+          },
         ],
       };
+    case "retry": {
+      // Неудачная попытка (ввод и ответ с ошибкой) заменяется новой отправкой того же ввода.
+      const from = state.messages.findLastIndex((m) => m.role === "user");
+      return from < 0 ? state : { ...state, messages: state.messages.slice(0, from) };
+    }
     case "event":
       return applyEvent(state, action.event);
     case "stream_failed": {
       // Ответ ассистента ещё не начат (401/404 до turn_started) — ошибка под сообщением посетителя.
       const streaming = state.messages.some((m) => m.status === "streaming");
       const last = state.messages.length - 1;
+      const { message: error, retryable } = action;
       return {
+        ...state,
         busy: false,
         activity: null,
         messages: state.messages.map((m, i) =>
           m.status === "streaming"
-            ? { ...m, status: "failed", error: action.message }
+            ? { ...m, status: "failed", error, retryable }
             : !streaming && i === last
-              ? { ...m, error: action.message }
+              ? { ...m, error, retryable }
               : m,
         ),
       };
@@ -107,19 +142,31 @@ function applyEvent(state: ChatState, event: Event): ChatState {
     }
     case "status":
       return { ...state, activity: event.data.label };
+    case "tool_started":
+      // Инструмент без подписи не меняет индикатор: имя инструмента посетителю не показываем.
+      return event.data.display_label
+        ? { ...state, activity: `${event.data.display_label}…` }
+        : state;
+    case "tool_finished":
+      // Дальше модель продолжает ответ.
+      return { ...state, activity: TYPING };
     case "suggestions":
       // Несколько событий за ход — действует последнее.
       return { ...state, messages: update((m) => ({ ...m, suggestions: event.data.items })) };
     case "error":
-      return { ...state, messages: update((m) => ({ ...m, error: event.data.message })) };
+      return {
+        ...state,
+        messages: update((m) => ({ ...m, error: event.data.message, retryable: event.data.retryable })),
+      };
     case "done":
       return {
+        ...state,
         busy: false,
         activity: null,
         messages: update((m) => ({ ...m, status: event.data.status })),
       };
     default:
-      // text_done и инструменты — с P5-07.
+      // text_done: блок уже собран из дельт.
       return state;
   }
 }
@@ -143,6 +190,7 @@ function fromHistory(message: HistoryMessage): ChatMessage {
     role: message.role,
     status: message.status,
     text: message.input ? inputText(message.input) : "",
+    input: message.input,
     blocks: message.blocks,
   };
 }

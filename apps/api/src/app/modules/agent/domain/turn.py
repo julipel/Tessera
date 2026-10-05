@@ -54,6 +54,10 @@ class ToolExecutor(Protocol):
 
     def schemas(self) -> tuple[ToolSchema, ...]: ...
 
+    def display_label(self, name: str) -> str | None:
+        """Подпись инструмента для статуса в чате; None — нет подписи или инструмента."""
+        ...
+
     async def execute_many(
         self, calls: Sequence[ToolCall], ctx: TurnContext
     ) -> Sequence[ToolResult]: ...

@@ -161,11 +161,11 @@ class TurnStream:
                 yield self._event(
                     "text_delta", {"block_id": self._open_text["block_id"], "delta": text}
                 )
-            case ToolStarted(tool_call_id=call_id, name=name):
+            case ToolStarted(tool_call_id=call_id, name=name, display_label=label):
                 yield from self._close_text()
                 self._tools_started += 1
                 yield self._event(
-                    "tool_started", {"tool_call_id": call_id, "name": name, "display_label": None}
+                    "tool_started", {"tool_call_id": call_id, "name": name, "display_label": label}
                 )
             case ToolFinished() as finished:
                 self._finished_calls.append(_tool_call_entry(finished))

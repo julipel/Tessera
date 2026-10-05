@@ -20,10 +20,12 @@ class AnswerDelta:
 
 @dataclass(frozen=True, slots=True)
 class ToolStarted:
-    """Модель начала вызов инструмента (по `ToolCallStarted` из стрима, до исполнения)."""
+    """Модель начала вызов инструмента (по `ToolCallStarted` из стрима, до исполнения).
+    `display_label` — подпись для посетителя («Ищу в каталоге»), если она у инструмента есть."""
 
     tool_call_id: str
     name: str
+    display_label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

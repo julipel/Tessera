@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UserInput } from "@/contracts";
 import type { ChatMessage } from "@/lib/chat/state";
 import type { OnAction } from "../rich/ActionButton";
@@ -13,11 +13,18 @@ const STATUS_NOTE: Partial<Record<ChatMessage["status"], string>> = {
   failed: "Не удалось ответить",
 };
 
+// Ближе этого к низу ленты — считаем, что посетитель внизу и следит за ответом.
+const STICK_PX = 80;
+
 /**
  * `onAction`, `onSubmitForm` и `onPick` не заданы, пока идёт ход: кнопки компонентов и отправка
  * форм отключены, подсказки скрыты.
  * Подсказки — под последним ответом ассистента; на пустом чате — приветствие тенанта (`greeting`)
  * и стартовые подсказки (`starter`). Приветствие только показывается: в историю оно не попадает.
+ * `onRetry` задан, если последний ввод можно повторить, — кнопка под последним сообщением.
+ *
+ * Автоскролл: лента едет за ответом, только пока посетитель внизу; прокрутил вверх — лента
+ * стоит, появляется кнопка «К новым сообщениям». Своя отправка всегда возвращает вниз.
  */
 export function MessageList({
   messages,
@@ -27,6 +34,7 @@ export function MessageList({
   onAction,
   onSubmitForm,
   onPick,
+  onRetry,
 }: {
   messages: ChatMessage[];
   activity: string | null;
@@ -35,62 +43,106 @@ export function MessageList({
   onAction?: OnAction;
   onSubmitForm?: OnSubmitForm;
   onPick?: (input: UserInput) => void;
+  onRetry?: () => void;
 }) {
-  const end = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const lastUser = useRef<string | undefined>(undefined);
   const last = messages.at(-1);
   const suggestions: Suggestion[] = !messages.length
     ? starter.map((text) => ({ label: text, input: { type: "text", text } }))
     : last?.role === "assistant"
       ? (last.suggestions ?? [])
       : [];
+
+  const scrollToEnd = () => {
+    const el = scroller.current;
+    // Не scrollIntoView: во фрейме виджета он прокрутил бы и страницу сайта.
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+  const onScroll = () => {
+    const el = scroller.current;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
+    setAtBottom(stick.current);
+  };
   useEffect(() => {
-    end.current?.scrollIntoView({ block: "end" });
-  }, [messages, activity, greeting, starter]);
+    const userId = messages.findLast((m) => m.role === "user")?.id;
+    if (userId !== lastUser.current) {
+      lastUser.current = userId;
+      stick.current = true;
+    }
+    if (stick.current) scrollToEnd();
+  }, [messages, activity, greeting, starter, onRetry]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6">
-      {!messages.length && greeting && (
-        <p
-          data-testid="greeting"
-          className="mx-auto mb-3 max-w-2xl rounded-chat border border-chat-border bg-chat-surface px-4 py-3 whitespace-pre-wrap"
-        >
-          {greeting}
-        </p>
-      )}
-      <ol className="mx-auto flex max-w-2xl flex-col gap-3" aria-label="Сообщения">
-        {messages.map((m) => (
-          <li
-            key={m.id}
-            data-role={m.role}
-            data-status={m.status}
-            className={m.role === "user" ? "self-end max-w-[85%]" : "flex w-full flex-col gap-2"}
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-6">
+        {!messages.length && greeting && (
+          <p
+            data-testid="greeting"
+            className="mx-auto mb-3 max-w-2xl rounded-chat border border-chat-border bg-chat-surface px-4 py-3 whitespace-pre-wrap"
           >
-            {m.role === "user" ? (
-              <div className="rounded-chat bg-chat-primary px-4 py-2 text-chat-on-primary whitespace-pre-wrap">
-                {m.text}
-              </div>
-            ) : (
-              <MessageBlocks blocks={m.blocks} onAction={onAction} onSubmitForm={onSubmitForm} />
-            )}
-            {(m.error || STATUS_NOTE[m.status]) && (
-              <p className="mt-1 text-sm text-chat-danger">{m.error ?? STATUS_NOTE[m.status]}</p>
-            )}
-          </li>
-        ))}
-      </ol>
-      {onPick && (
-        <div className="mx-auto mt-3 max-w-2xl">
-          <Suggestions items={suggestions} onPick={onPick} />
-        </div>
-      )}
-      <div aria-live="polite" className="mx-auto max-w-2xl">
-        {activity && (
-          <p role="status" className="mt-3 text-sm text-chat-muted animate-pulse">
-            {activity}
+            {greeting}
           </p>
         )}
+        <ol className="mx-auto flex max-w-2xl flex-col gap-3" aria-label="Сообщения">
+          {messages.map((m) => (
+            <li
+              key={m.id}
+              data-role={m.role}
+              data-status={m.status}
+              className={m.role === "user" ? "self-end max-w-[85%]" : "flex w-full flex-col gap-2"}
+            >
+              {m.role === "user" ? (
+                <div className="rounded-chat bg-chat-primary px-4 py-2 text-chat-on-primary whitespace-pre-wrap">
+                  {m.text}
+                </div>
+              ) : (
+                <MessageBlocks blocks={m.blocks} onAction={onAction} onSubmitForm={onSubmitForm} />
+              )}
+              {(m.error || STATUS_NOTE[m.status]) && (
+                <p className="mt-1 text-sm text-chat-danger">{m.error ?? STATUS_NOTE[m.status]}</p>
+              )}
+              {onRetry && m === last && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="mt-1 self-start rounded-chat border border-chat-border bg-chat-surface px-3 py-1 text-sm hover:bg-chat-bg focus:outline-2 focus:outline-chat-primary"
+                >
+                  Повторить
+                </button>
+              )}
+            </li>
+          ))}
+        </ol>
+        {onPick && (
+          <div className="mx-auto mt-3 max-w-2xl">
+            <Suggestions items={suggestions} onPick={onPick} />
+          </div>
+        )}
+        <div aria-live="polite" className="mx-auto max-w-2xl">
+          {activity && (
+            <p role="status" className="mt-3 text-sm text-chat-muted animate-pulse">
+              {activity}
+            </p>
+          )}
+        </div>
       </div>
-      <div ref={end} />
+      {!atBottom && (
+        <button
+          type="button"
+          onClick={scrollToEnd}
+          aria-label="К новым сообщениям"
+          title="К новым сообщениям"
+          className="absolute bottom-3 left-1/2 flex size-10 -translate-x-1/2 items-center justify-center rounded-full border border-chat-border bg-chat-surface text-chat-muted shadow hover:bg-chat-bg focus:outline-2 focus:outline-chat-primary"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5 fill-none stroke-current stroke-2">
+            <path d="M12 5v14M6 13l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

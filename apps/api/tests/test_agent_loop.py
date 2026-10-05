@@ -46,6 +46,8 @@ SCHEMAS = (
         parameters={"type": "object", "properties": {"query": {"type": "string"}}},
     ),
 )
+# Подпись есть только у search_catalog и create_lead — у остальных инструментов её нет.
+LABELS = {"search_catalog": "Ищу в каталоге", "create_lead": "Оформляю заявку"}
 CARD = {"type": "product_card", "entity_id": "e_1"}
 
 
@@ -85,6 +87,9 @@ class FakeTools:
 
     def schemas(self) -> tuple[ToolSchema, ...]:
         return SCHEMAS
+
+    def display_label(self, name: str) -> str | None:
+        return LABELS.get(name)
 
     async def execute_many(self, calls: Sequence[ToolCall], ctx: TurnContext) -> list[ToolResult]:
         self.batches.append(tuple(calls))
@@ -179,7 +184,7 @@ async def test_single_tool_call_then_answer() -> None:
 
     assert events[:-1] == [
         AnswerDelta("Ищу. "),
-        ToolStarted(tool_call_id="call_1", name="search_catalog"),
+        ToolStarted("call_1", "search_catalog", "Ищу в каталоге"),
         ToolFinished(
             tool_call_id="call_1",
             name="search_catalog",
@@ -490,7 +495,7 @@ async def test_approved_confirmation_runs_pending_call_before_model() -> None:
         {"form_key": "consultation", "fields": {}},
     )
     assert tools.batches == []
-    assert events[0] == ToolStarted(tool_call_id="cf_1", name="create_lead")
+    assert events[0] == ToolStarted("cf_1", "create_lead", "Оформляю заявку")
     finished = next(e for e in events if isinstance(e, ToolFinished))
     assert (finished.ok, finished.content) == (True, "Заявка создана.")
     [updated] = [e for e in events if isinstance(e, DialogStateUpdated)]

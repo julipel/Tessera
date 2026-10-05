@@ -482,7 +482,7 @@ async def test_tool_and_component_split_text_into_blocks(
         ScriptedAgent(
             [
                 AnswerDelta("Смотрю. "),
-                ToolStarted("call_1", "get_delivery"),
+                ToolStarted("call_1", "get_delivery", "Уточняю доставку"),
                 ToolFinished(
                     "call_1",
                     "get_delivery",
@@ -514,7 +514,7 @@ async def test_tool_and_component_split_text_into_blocks(
     assert events[3]["data"] == {
         "tool_call_id": "call_1",
         "name": "get_delivery",
-        "display_label": None,
+        "display_label": "Уточняю доставку",
     }
     # Аргументы и результат инструмента в клиент не уходят.
     assert events[4]["data"] == {"tool_call_id": "call_1", "ok": True, "duration_ms": 17}

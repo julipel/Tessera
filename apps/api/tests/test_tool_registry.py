@@ -289,6 +289,15 @@ async def test_executor_exposes_schemas() -> None:
     )
 
 
+async def test_executor_exposes_display_labels() -> None:
+    labelled = replace(tool("search_catalog"), display_label="Ищу в каталоге")
+    executor = RegistryToolExecutor(ToolRegistry([tool(), labelled]))
+
+    assert executor.display_label("search_catalog") == "Ищу в каталоге"
+    assert executor.display_label("check_availability") is None
+    assert executor.display_label("unknown") is None
+
+
 async def test_agent_recovers_from_validation_error_via_registry() -> None:
     async def handler(arguments: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
         assert ctx == CTX

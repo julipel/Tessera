@@ -48,6 +48,13 @@ export class ChatApi {
     return (await resp.json()) as MessageHistory;
   }
 
+  /** Прервать ход: стрим закончится `done{interrupted}`. 404 — ход уже завершён. */
+  async cancelTurn(conversationId: string, turnId: string): Promise<void> {
+    await this.request(`/v1/conversations/${conversationId}/turns/${turnId}/cancel`, {
+      method: "POST",
+    });
+  }
+
   /** Стрим событий хода. Ошибки ввода и доступа — ApiError до первого события. */
   async sendMessage(
     conversationId: string,

@@ -2,12 +2,24 @@
 
 import { type FormEvent, type KeyboardEvent, useState } from "react";
 
-export function Composer({ disabled, onSend }: { disabled: boolean; onSend: (text: string) => void }) {
+/**
+ * Пока идёт ход (`busy`), вместо «Отправить» — «Остановить»; она неактивна, пока ход
+ * не начался на сервере (`onStop` не задан). Поле ввода остаётся доступным.
+ */
+export function Composer({
+  busy,
+  onSend,
+  onStop,
+}: {
+  busy: boolean;
+  onSend: (text: string) => void;
+  onStop?: () => void;
+}) {
   const [text, setText] = useState("");
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
-    if (disabled || !text.trim()) return;
+    if (busy || !text.trim()) return;
     onSend(text.trim());
     setText("");
   };
@@ -35,13 +47,24 @@ export function Composer({ disabled, onSend }: { disabled: boolean; onSend: (tex
           placeholder="Напишите сообщение…"
           className="max-h-40 min-h-11 flex-1 resize-none rounded-chat border border-chat-border bg-chat-surface px-3 py-2 text-base focus:outline-2 focus:outline-chat-primary"
         />
-        <button
-          type="submit"
-          disabled={disabled || !text.trim()}
-          className="min-h-11 rounded-chat bg-chat-primary px-4 font-medium text-chat-on-primary disabled:opacity-50"
-        >
-          Отправить
-        </button>
+        {busy ? (
+          <button
+            type="button"
+            onClick={onStop}
+            disabled={!onStop}
+            className="min-h-11 rounded-chat border border-chat-border bg-chat-surface px-4 font-medium text-chat-text disabled:opacity-50"
+          >
+            Остановить
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!text.trim()}
+            className="min-h-11 rounded-chat bg-chat-primary px-4 font-medium text-chat-on-primary disabled:opacity-50"
+          >
+            Отправить
+          </button>
+        )}
       </div>
     </form>
   );

@@ -14,9 +14,13 @@ class RegistryToolExecutor:
             ToolSchema(name=d.name, description=d.description, parameters=d.parameters)
             for d in registry.definitions()
         )
+        self._labels = {d.name: d.display_label for d in registry.definitions()}
 
     def schemas(self) -> tuple[ToolSchema, ...]:
         return self._schemas
+
+    def display_label(self, name: str) -> str | None:
+        return self._labels.get(name)
 
     async def execute_many(
         self, calls: Sequence[ToolCall], ctx: TurnContext

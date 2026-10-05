@@ -86,9 +86,14 @@ test("сбой стрима помечает незавершённый отве
   const broken = chatReducer(run(sent, ev({ type: "turn_started", data: {} })), {
     type: "stream_failed",
     message: "нет связи",
+    retryable: true,
   });
   expect(broken).toMatchObject({ busy: false, activity: null });
-  expect(broken.messages.at(-1)).toMatchObject({ status: "failed", error: "нет связи" });
+  expect(broken.messages.at(-1)).toMatchObject({
+    status: "failed",
+    error: "нет связи",
+    retryable: true,
+  });
 
   const restored = chatReducer(broken, {
     type: "history",
@@ -120,10 +125,19 @@ test("сбой стрима помечает незавершённый отве
 });
 
 test("ошибка до начала ответа (например, 401) показывается под сообщением посетителя", () => {
-  const failed = chatReducer(sent, { type: "stream_failed", message: "неизвестный ключ виджета" });
+  const failed = chatReducer(sent, {
+    type: "stream_failed",
+    message: "неизвестный ключ виджета",
+    retryable: false,
+  });
   expect(failed).toMatchObject({ busy: false, activity: null });
   expect(failed.messages).toEqual([
-    expect.objectContaining({ role: "user", status: "completed", error: "неизвестный ключ виджета" }),
+    expect.objectContaining({
+      role: "user",
+      status: "completed",
+      error: "неизвестный ключ виджета",
+      retryable: false,
+    }),
   ]);
 });
 
@@ -197,4 +211,61 @@ test("история: ввод action показывается подписью"
     },
   });
   expect(restored.messages[0].text).toBe("Подробнее — Сыворотка");
+});
+
+test("инструменты: подпись display_label в индикаторе, без подписи индикатор не меняется", () => {
+  const started = run(sent, ev({ type: "turn_started", data: {} }));
+  const tool = (name: string, label: string | null) =>
+    ev({ type: "tool_started", data: { tool_call_id: name, name, display_label: label } });
+
+  const searching = run(started, tool("search_catalog", "Ищу в каталоге"));
+  expect(searching.activity).toBe("Ищу в каталоге…");
+  expect(run(searching, tool("suggest_replies", null)).activity).toBe("Ищу в каталоге…");
+
+  const finished = run(
+    searching,
+    ev({ type: "tool_finished", data: { tool_call_id: "search_catalog", ok: true, duration_ms: 5 } }),
+  );
+  expect(finished.activity).toBe(TYPING);
+  expect(finished.busy).toBe(true);
+});
+
+test("повтор: retryable из error, retry убирает неудачную пару, ввод сохраняется", () => {
+  const failed = run(
+    sent,
+    ev({ type: "turn_started", data: {} }),
+    ev({ type: "error", data: { code: "llm_unavailable", message: "недоступна", retryable: true } }),
+    ev({ type: "done", data: { status: "failed" } }),
+  );
+  expect(failed.messages.map((m) => [m.role, m.status, m.retryable])).toEqual([
+    ["user", "completed", undefined],
+    ["assistant", "failed", true],
+  ]);
+  expect(failed.messages[0].input).toEqual({ type: "text", text: "привет" });
+
+  const retried = chatReducer(failed, { type: "retry" });
+  expect(retried.messages).toEqual([]);
+
+  // Ошибка до ответа — повтор убирает только сообщение посетителя.
+  const earlier = chatReducer(failed, { type: "user_sent", id: "local:9", input: { type: "text", text: "ещё" } });
+  const rejected = chatReducer(earlier, { type: "stream_failed", message: "сбой", retryable: true });
+  expect(chatReducer(rejected, { type: "retry" }).messages).toEqual(failed.messages);
+});
+
+test("восстановление: restoring до загрузки истории, ввод из истории доступен для повтора", () => {
+  const restoring = chatReducer(initialChatState, { type: "restoring", value: true });
+  expect(restoring.restoring).toBe(true);
+
+  const input = { type: "text", text: "привет" } as const;
+  const restored = chatReducer(restoring, {
+    type: "history",
+    history: {
+      conversation_id: "c",
+      messages: [
+        { message_id: "u1", role: "user", status: "completed", created_at: "", input, blocks: [] },
+      ],
+    },
+  });
+  expect(restored.restoring).toBe(false);
+  expect(restored.messages[0].input).toEqual(input);
 });

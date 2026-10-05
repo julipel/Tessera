@@ -15,10 +15,20 @@ export function Chat({
   /** Чат во фрейме виджета: кнопка «Свернуть» в шапке. */
   onCollapse?: () => void;
 }) {
-  const { messages, busy, activity, loadError, config, send, sendText, act, submitForm } = useChat(
-    apiUrl,
-    widgetKey,
-  );
+  const {
+    messages,
+    busy,
+    activity,
+    restoring,
+    loadError,
+    config,
+    send,
+    sendText,
+    act,
+    submitForm,
+    stop,
+    retry,
+  } = useChat(apiUrl, widgetKey);
   // Во время хода кнопки, формы и подсказки неактивны: ввод — один за раз.
   const idle = !busy;
   // Пока конфиг не загружен (или недоступен) — нейтральная тема и общее название.
@@ -60,13 +70,18 @@ export function Chat({
       <MessageList
         messages={messages}
         activity={activity}
-        greeting={config?.assistant.greeting}
-        starter={config?.assistant.starter_suggestions ?? []}
+        greeting={restoring ? undefined : config?.assistant.greeting}
+        starter={restoring ? [] : (config?.assistant.starter_suggestions ?? [])}
         onAction={idle ? (action, subject) => void act(action, subject) : undefined}
         onSubmitForm={idle ? (form, values) => void submitForm(form, values) : undefined}
         onPick={idle ? (input) => void send(input) : undefined}
+        onRetry={retry ? () => void retry() : undefined}
       />
-      <Composer disabled={busy} onSend={(text) => void sendText(text)} />
+      <Composer
+        busy={busy}
+        onSend={(text) => void sendText(text)}
+        onStop={stop ? () => void stop() : undefined}
+      />
     </main>
   );
 }

@@ -16,7 +16,7 @@
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| GET | `/v1/public/config` | брендинг, приветствие, стартовые подсказки |
+| GET | `/v1/public/config?locale=` | брендинг, приветствие, стартовые подсказки на языке диалога (ADR-0025) |
 | GET | `/v1/public/widget` | `WidgetEmbed {allowed_origins}` — для CSP `frame-ancestors` iframe (ADR-0022) |
 | POST | `/v1/conversations` | создать диалог → `{conversation_id}` |
 | GET | `/v1/conversations/{id}/messages` | история (для восстановления) |
@@ -24,8 +24,14 @@
 | POST | `/v1/conversations/{id}/messages/{message_id}/retry` | повторить неудачный ответ, ответ — SSE-стрим |
 | POST | `/v1/conversations/{id}/turns/{turn_id}/cancel` | прервать генерацию |
 
-`POST /v1/conversations`: тело `{"visitor_id": "..."}` → 201 `{"conversation_id": "uuid"}`.
-Диалог запоминает активную версию AgentConfig; нет активной → 404 `not_found`.
+`POST /v1/conversations`: тело `{"visitor_id": "...", "locale": "en-US"}` → 201
+`{"conversation_id": "uuid"}`. Диалог запоминает активную версию AgentConfig; нет активной →
+404 `not_found`. `locale` (необязательный, BCP 47, `navigator.language`) выбирает язык диалога
+один раз (ADR-0025): фиксированный `assistant.language` или, при `auto`, основной язык `locale`,
+если он поддерживается (ru / en / sv), иначе `assistant.default_language`. На языке диалога —
+тексты тенанта, подписи платформы (`display_label`, кнопки confirm по умолчанию) и запасной язык
+ответа; `GET /v1/public/config?locale=` выбирает язык тем же правилом и отдаёт его
+в `assistant.language` (без `auto`).
 
 `GET .../messages` → `MessageHistory` (`conversations.schema.json`): сообщения в порядке создания,
 у `user` — исходный `input`, у `assistant` — `blocks` (`text` / `component` с `block_id`, порядок
@@ -262,11 +268,15 @@ AgentConfig (лишний слот или неверный тип — `validatio
 ```yaml
 assistant:
   name: "Ассистент Example"
-  language: auto              # или ru / en / sv
+  language: auto              # или ru / en / sv; auto — по locale клиента (ADR-0025)
+  default_language: ru        # язык текстов ниже; язык диалога при auto без поддерживаемого locale
   greeting: "Привет! Помогу подобрать..."
   starter_suggestions: ["Подобрать подарок", "Условия доставки"]
   fallback_message: "Извините, сейчас не получается ответить. Попробуйте ещё раз."
   confirm_labels: { confirm: "Подтвердить", cancel: "Отмена" }   # кнопки confirm (по умолчанию)
+  translations:               # тексты на других языках диалога; нет поля — базовое значение
+    en: { greeting: "Hi! I can help you choose...", starter_suggestions: ["Find a gift"],
+          fallback_message: "Sorry, something went wrong.", confirm_labels: { confirm: "Send" } }
 model:
   primary: { provider: openai, name: "<model>" }
   fallback: { provider: anthropic, name: "<model>" }

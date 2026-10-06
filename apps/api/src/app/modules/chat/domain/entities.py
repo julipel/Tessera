@@ -28,7 +28,8 @@ class MessageStatus(StrEnum):
 class Conversation:
     """`agent_config_id` — версия конфига, с которой диалог начат (architecture.md §10);
     `state` — DialogState в JSON (architecture.md §7); `summary` — сводка ранней истории,
-    `summary_message_id` — последнее свёрнутое в неё сообщение (P6-02)."""
+    `summary_message_id` — последнее свёрнутое в неё сообщение (P6-02); `language` — язык
+    диалога, выбранный при создании (ADR-0025; None — диалог создан до P6-04)."""
 
     id: UUID
     tenant_id: TenantId
@@ -39,6 +40,15 @@ class Conversation:
     state: dict[str, Any] = field(default_factory=dict)
     summary: str | None = None
     summary_message_id: UUID | None = None
+    language: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveConfig:
+    """Активная версия AgentConfig тенанта: id и JSON конфига."""
+
+    id: UUID
+    config: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +106,8 @@ class TurnRequest:
     """Вход хода агента: `input` — ввод пользователя по контракту UserInput, `agent_config` —
     версия AgentConfig диалога, `history` — сообщения диалога после сводки, включая этот
     ввод, `history_summary` — сводка более ранних сообщений, `dialog_state` — состояние
-    диалога на начало хода. Всё загружено до запуска агента:
+    диалога на начало хода, `language` — язык диалога (None — выбрать по конфигу).
+    Всё загружено до запуска агента:
     задача агента отменяема и в БД не ходит."""
 
     tenant_id: TenantId
@@ -108,3 +119,4 @@ class TurnRequest:
     history: tuple[ChatMessage, ...]
     dialog_state: dict[str, Any] = field(default_factory=dict)
     history_summary: str | None = None
+    language: str | None = None

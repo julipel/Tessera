@@ -370,7 +370,7 @@ async def test_agent_loop_passes_catalog_items_to_model() -> None:
     llm = FakeLLM([FakeReply(tool_calls=(lookup,)), FakeReply(text="Есть крем за 1990 ₽.")])
     agent = LoopTurnAgent(
         lambda _: llm,
-        lambda c: RegistryToolExecutor(ToolRegistry(builtin_tools(c, catalog=catalog))),
+        lambda c, _: RegistryToolExecutor(ToolRegistry(builtin_tools(c, catalog=catalog))),
     )
     request = TurnRequest(
         tenant_id=TENANT,

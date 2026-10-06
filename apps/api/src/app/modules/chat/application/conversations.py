@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from app.contracts import HistoryMessage, MessageHistory, TextInput, UserInput
+from app.contracts import AgentConfig, HistoryMessage, MessageHistory, TextInput, UserInput
 from app.modules.chat.domain.entities import (
     Channel,
     ChatMessage,
@@ -14,6 +14,7 @@ from app.modules.chat.domain.entities import (
 from app.modules.chat.domain.errors import ConversationNotFoundError, NoActiveConfigError
 from app.modules.chat.domain.ports import ActiveConfigLookup, ConversationStore, MessageStore
 from app.modules.shared.kernel import TenantId
+from app.modules.tenants.kernel import resolve_language
 
 
 async def start_conversation(
@@ -21,11 +22,14 @@ async def start_conversation(
     visitor_id: str,
     conversations: ConversationStore,
     configs: ActiveConfigLookup,
+    locale: str | None = None,
 ) -> Conversation:
-    config_id = await configs.active_config_id(tenant_id)
-    if config_id is None:
+    """Язык диалога выбирается здесь, один раз: по конфигу и `locale` клиента (ADR-0025)."""
+    active = await configs.active_config(tenant_id)
+    if active is None:
         raise NoActiveConfigError(f"у тенанта {tenant_id} нет активного AgentConfig")
-    return await conversations.create(tenant_id, config_id, Channel.WEB, visitor_id)
+    language = resolve_language(AgentConfig.model_validate(active.config).assistant, locale)
+    return await conversations.create(tenant_id, active.id, Channel.WEB, visitor_id, language)
 
 
 async def require_conversation(

@@ -28,6 +28,7 @@ from app.modules.tools.application.forms import (
     show_form_tool,
 )
 from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
+from app.modules.tools.application.labels import localize_display_labels
 from app.modules.tools.application.show_entities import SHOW_ENTITIES, show_entities_tool
 from app.modules.tools.application.suggest_replies import SUGGEST_REPLIES, suggest_replies_tool
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition
@@ -56,9 +57,10 @@ def builtin_tools(
     knowledge: KnowledgeSearcher | None = None,
     catalog: Catalog | None = None,
     leads: LeadStore | None = None,
+    language: str = "ru",
 ) -> list[ToolDefinition]:
     """Встроенные инструменты из `config.tools.builtin`, которые уже реализованы и для
-    которых есть зависимости."""
+    которых есть зависимости; подписи tool_started — на языке диалога `language`."""
     factories: dict[str, Callable[[AgentConfig], ToolDefinition]] = {
         UPDATE_DIALOG_STATE: lambda c: update_dialog_state_tool(c.prompt.scenarios or []),
         SUGGEST_REPLIES: lambda c: suggest_replies_tool(),
@@ -89,7 +91,8 @@ def builtin_tools(
         logger.warning("tools.search_knowledge_unavailable", reason="поиск по знаниям не настроен")
     if catalog is None and {SEARCH_CATALOG, GET_ENTITY, SHOW_ENTITIES} & set(enabled):
         logger.warning("tools.catalog_unavailable", reason="каталог не подключён")
-    return [factories[name](config) for name in enabled if name in factories]
+    tools = [factories[name](config) for name in enabled if name in factories]
+    return localize_display_labels(tools, language)
 
 
 def update_dialog_state_tool(scenarios: Iterable[ScenarioConfig]) -> ToolDefinition:

@@ -194,7 +194,7 @@ async def test_summary_model_from_config(
 async def test_turn_prompt_contains_history_summary() -> None:
     llm = FakeLLM([FakeReply(text="Продолжим.")])
     agent = LoopTurnAgent(
-        lambda _: llm, lambda _: RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW
+        lambda _: llm, lambda *_: RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW
     )
     request = TurnRequest(
         tenant_id=TenantId(uuid4()),

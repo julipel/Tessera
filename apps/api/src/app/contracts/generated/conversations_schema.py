@@ -27,6 +27,10 @@ class CreateConversationRequest(BaseModel):
         extra="forbid",
     )
     visitor_id: Annotated[str, Field(max_length=128, min_length=1)]
+    locale: Annotated[str | None, Field(max_length=35, min_length=1)] = None
+    """
+    Язык клиента, BCP 47 (navigator.language). При assistant.language=auto выбирает язык диалога (ADR-0025).
+    """
 
 
 class CreateConversationResponse(BaseModel):

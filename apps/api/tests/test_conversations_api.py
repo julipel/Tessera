@@ -33,12 +33,21 @@ CARD: dict[str, Any] = {
 }
 
 
-async def _tenant(session: AsyncSession, slug: str, *, active: bool = True) -> TenantId:
+async def _tenant(
+    session: AsyncSession, slug: str, *, active: bool = True, **assistant: Any
+) -> TenantId:
     tenant = await SqlTenantDirectory(session).create(slug, slug)
     await WidgetKeyRepository(session).add_key(tenant.id, hash_widget_key(f"wk_{slug}"), [])
     if active:
         configs = AgentConfigRepository(session)
-        draft = await configs.create_draft(tenant.id, {"assistant": {"name": slug}})
+        config = {
+            "assistant": {"name": slug, "greeting": "", "fallback_message": "", **assistant},
+            "model": {"primary": {"provider": "openai", "name": "m"}},
+            "limits": {},
+            "prompt": {"tenant": "t"},
+            "tools": {},
+        }
+        draft = await configs.create_draft(tenant.id, config)
         await configs.activate(tenant.id, draft.id)
     return tenant.id
 
@@ -56,8 +65,8 @@ async def shop(db_session: AsyncSession) -> TenantId:
     return await _tenant(db_session, "shop")
 
 
-async def _create(client: AsyncClient, slug: str = "shop") -> UUID:
-    response = await client.post(URL, json={"visitor_id": "v-1"}, headers=_key(slug))
+async def _create(client: AsyncClient, slug: str = "shop", **body: Any) -> UUID:
+    response = await client.post(URL, json={"visitor_id": "v-1", **body}, headers=_key(slug))
     assert response.status_code == 201, response.text
     return CreateConversationResponse.model_validate(response.json()).conversation_id
 
@@ -71,6 +80,33 @@ async def test_create_remembers_active_config_version(
     active = await AgentConfigRepository(db_session).get_active(shop)
     assert found is not None and active is not None
     assert (found.agent_config_id, found.channel, found.visitor_id) == (active.id, "web", "v-1")
+
+
+@pytest.mark.parametrize(
+    ("assistant", "locale", "expected"),
+    [
+        ({}, "en-US", "en"),
+        ({}, "sv_SE", "sv"),
+        ({}, "de-DE", "ru"),  # не поддерживается — default_language
+        ({}, None, "ru"),
+        ({"default_language": "en"}, "fi", "en"),
+        ({"language": "sv"}, "en-US", "sv"),  # фиксированный язык важнее locale
+    ],
+)
+async def test_create_fixes_conversation_language(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    assistant: dict[str, Any],
+    locale: str | None,
+    expected: str,
+) -> None:
+    tenant = await _tenant(db_session, "intl", **assistant)
+    body = {"locale": locale} if locale else {}
+
+    conversation_id = await _create(db_client, "intl", **body)
+
+    found = await ConversationRepository(db_session).find(tenant, conversation_id)
+    assert found is not None and found.language == expected
 
 
 async def test_create_without_key_is_401(db_client: AsyncClient, shop: TenantId) -> None:
@@ -92,7 +128,13 @@ async def test_create_without_active_config_is_404(
 
 
 @pytest.mark.parametrize(
-    "body", [{}, {"visitor_id": ""}, {"visitor_id": "v-1", "channel": "telegram"}]
+    "body",
+    [
+        {},
+        {"visitor_id": ""},
+        {"visitor_id": "v-1", "channel": "telegram"},
+        {"visitor_id": "v-1", "locale": ""},
+    ],
 )
 async def test_create_with_invalid_body_is_422(
     db_client: AsyncClient, shop: TenantId, body: dict[str, Any]

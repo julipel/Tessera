@@ -15,14 +15,17 @@ class PublicAssistant(BaseModel):
         extra="forbid",
     )
     name: Annotated[str, Field(min_length=1)]
-    language: Literal["auto", "ru", "en", "sv"]
+    language: Literal["ru", "en", "sv"]
+    """
+    Выбранный язык диалога (ADR-0025): тексты assistant — на нём.
+    """
     greeting: str
     starter_suggestions: list[str]
 
 
 class PublicConfig(BaseModel):
     """
-    Ответ GET /v1/public/config: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.
+    Ответ GET /v1/public/config?locale=: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.
     """
 
     model_config = ConfigDict(

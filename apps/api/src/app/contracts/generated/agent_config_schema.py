@@ -195,15 +195,13 @@ class BrandingConfig(BaseModel):
     """
 
 
-class AssistantConfig(BaseModel):
+class AssistantTranslation(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    name: Annotated[str, Field(min_length=1)]
-    language: Literal["auto", "ru", "en", "sv"] | None = "auto"
-    greeting: str
-    starter_suggestions: list[str] | None = []
-    fallback_message: str
+    greeting: str | None = None
+    starter_suggestions: list[str] | None = None
+    fallback_message: str | None = None
     confirm_labels: ConfirmLabels | None = None
 
 
@@ -270,6 +268,42 @@ class KnowledgeConfig(BaseModel):
     )
     search_knowledge: KnowledgeSearchConfig | None = None
     catalog: CatalogConfig | None = None
+
+
+class Translations(BaseModel):
+    """
+    Переводы текстов тенанта по языку диалога; поле без перевода — базовое значение (ADR-0025).
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    ru: AssistantTranslation | None = None
+    en: AssistantTranslation | None = None
+    sv: AssistantTranslation | None = None
+
+
+class AssistantConfig(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    name: Annotated[str, Field(min_length=1)]
+    language: Literal["auto", "ru", "en", "sv"] | None = "auto"
+    """
+    Язык диалога (ADR-0025): фиксированный или auto — по locale клиента, если язык поддерживается, иначе default_language.
+    """
+    default_language: Literal["ru", "en", "sv"] | None = "ru"
+    """
+    Язык текстов тенанта в assistant (greeting, starter_suggestions, fallback_message, confirm_labels) и язык диалога при auto без поддерживаемого locale.
+    """
+    translations: Translations | None = None
+    """
+    Переводы текстов тенанта по языку диалога; поле без перевода — базовое значение (ADR-0025).
+    """
+    greeting: str
+    starter_suggestions: list[str] | None = []
+    fallback_message: str
+    confirm_labels: ConfirmLabels | None = None
 
 
 class AgentConfig(BaseModel):

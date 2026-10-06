@@ -78,7 +78,7 @@ async def test_returns_public_part_of_active_config(db_client: AsyncClient, shop
     body = response.json()
     config = PublicConfig.model_validate(body)
     assert config.assistant.name == "Shop"
-    assert config.assistant.language == "auto"
+    assert config.assistant.language == "ru"  # auto без locale — default_language
     assert config.assistant.starter_suggestions == ["Подобрать"]
     assert config.branding.tokens is not None
     assert config.branding.tokens.primary == "#123456"
@@ -86,6 +86,25 @@ async def test_returns_public_part_of_active_config(db_client: AsyncClient, shop
     assert set(body) == {"assistant", "branding"}
     assert "СЕКРЕТНЫЙ ПРОМПТ" not in response.text
     assert "fallback_message" not in body["assistant"]
+
+
+async def test_locale_selects_language_and_translated_texts(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    config = _config("Shop")
+    config["assistant"]["translations"] = {
+        "en": {"greeting": "Hi from Shop", "starter_suggestions": ["Find a gift"]}
+    }
+    await _tenant(db_session, "intl", "wk_intl", config)
+
+    response = await db_client.get(
+        URL, params={"locale": "en-US"}, headers={"X-Widget-Key": "wk_intl"}
+    )
+
+    assert response.status_code == 200
+    assistant = PublicConfig.model_validate(response.json()).assistant
+    assert (assistant.language, assistant.greeting) == ("en", "Hi from Shop")
+    assert assistant.starter_suggestions == ["Find a gift"]
 
 
 @pytest.mark.parametrize("headers", [{}, {"X-Widget-Key": ""}, {"X-Widget-Key": "wk_unknown"}])

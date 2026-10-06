@@ -30,7 +30,24 @@
         "language": {
           "type": "string",
           "enum": ["auto", "ru", "en", "sv"],
-          "default": "auto"
+          "default": "auto",
+          "description": "Язык диалога (ADR-0025): фиксированный или auto — по locale клиента, если язык поддерживается, иначе default_language."
+        },
+        "default_language": {
+          "type": "string",
+          "enum": ["ru", "en", "sv"],
+          "default": "ru",
+          "description": "Язык текстов тенанта в assistant (greeting, starter_suggestions, fallback_message, confirm_labels) и язык диалога при auto без поддерживаемого locale."
+        },
+        "translations": {
+          "type": "object",
+          "description": "Переводы текстов тенанта по языку диалога; поле без перевода — базовое значение (ADR-0025).",
+          "properties": {
+            "ru": { "$ref": "#/$defs/AssistantTranslation" },
+            "en": { "$ref": "#/$defs/AssistantTranslation" },
+            "sv": { "$ref": "#/$defs/AssistantTranslation" }
+          },
+          "additionalProperties": false
         },
         "greeting": { "type": "string" },
         "starter_suggestions": {
@@ -42,6 +59,16 @@
         "confirm_labels": { "$ref": "#/$defs/ConfirmLabels" }
       },
       "required": ["name", "greeting", "fallback_message"],
+      "additionalProperties": false
+    },
+    "AssistantTranslation": {
+      "type": "object",
+      "properties": {
+        "greeting": { "type": "string" },
+        "starter_suggestions": { "type": "array", "items": { "type": "string" } },
+        "fallback_message": { "type": "string" },
+        "confirm_labels": { "$ref": "#/$defs/ConfirmLabels" }
+      },
       "additionalProperties": false
     },
     "ConfirmLabels": {

@@ -28,6 +28,7 @@ from app.modules.agent.public import (
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, TurnRequest
 from app.modules.memory.public import DialogState
+from app.modules.tenants.kernel import Language, assistant_texts, resolve_language
 from app.modules.tools.public import (
     CANCEL_ACTION_ID,
     CONFIRM_ACTION_ID,
@@ -37,16 +38,17 @@ from app.modules.tools.public import (
     LeadStore,
     ToolRegistry,
     builtin_tools,
+    confirm_labels,
 )
 
 type LLMForProvider = Callable[[Provider], LLMClient]
-type ToolsForConfig = Callable[[AgentConfig], ToolExecutor]
+type ToolsForConfig = Callable[[AgentConfig, Language], ToolExecutor]
 
 
 class LoopTurnAgent:
     """`llm_for` — клиент по провайдеру из AgentConfig (в приложении — `LLMClients.for_provider`),
-    `tools_for` — инструменты хода по AgentConfig, `now` — часы для Runtime-слоя промпта
-    (в тестах фиксированные)."""
+    `tools_for` — инструменты хода по AgentConfig и языку диалога, `now` — часы для
+    Runtime-слоя промпта (в тестах фиксированные)."""
 
     def __init__(
         self,
@@ -63,6 +65,8 @@ class LoopTurnAgent:
         primary = config.model.primary
         limits = config.limits
         state = DialogState.from_dict(request.dialog_state)
+        # Диалог без языка (создан до P6-04) — язык по конфигу, как без locale (ADR-0025).
+        language = resolve_language(config.assistant, request.language)
         # Ожидающий вызов — не знание о пользователе: о нём модель узнаёт из результата
         # инструмента и пометки к ответу на подтверждение.
         known = {k: v for k, v in state.to_dict().items() if k != "pending_confirmation"}
@@ -71,6 +75,7 @@ class LoopTurnAgent:
             dialog_state=known,
             active_scenario=state.active_scenario,
             history_summary=request.history_summary,
+            language=language,
         )
         prompt = build_system_prompt(config, runtime)
         ctx = TurnContext(
@@ -85,12 +90,12 @@ class LoopTurnAgent:
                 max_steps=limits.max_steps or 6,
                 max_tool_retries=2 if limits.max_tool_retries is None else limits.max_tool_retries,
             ),
-            fallback_message=config.assistant.fallback_message,
+            fallback_message=assistant_texts(config.assistant, language).fallback_message,
             temperature=primary.temperature,  # подсказка: применяет адаптер (ADR-0009)
             state=state,
             confirmation=confirmation_reply(request.input),
         )
-        loop = AgentLoop(self._llm_for(primary.provider), self._tools_for(config))
+        loop = AgentLoop(self._llm_for(primary.provider), self._tools_for(config, language))
         async for event in loop.run_turn(ctx):
             yield event
 
@@ -107,10 +112,12 @@ def builtin_turn_agent(
     `create_lead`."""
     return LoopTurnAgent(
         llm_for,
-        lambda config: RegistryToolExecutor(
+        lambda config, language: RegistryToolExecutor(
             ToolRegistry(
-                builtin_tools(config, knowledge=knowledge, catalog=catalog, leads=leads),
-                _confirm_labels(config),
+                builtin_tools(
+                    config, knowledge=knowledge, catalog=catalog, leads=leads, language=language
+                ),
+                _confirm_labels(config, language),
             )
         ),
     )
@@ -127,14 +134,9 @@ def confirmation_reply(user_input: dict[str, Any]) -> ConfirmationReply | None:
     return ConfirmationReply(confirm_id=confirm_id, approved=action_id == CONFIRM_ACTION_ID)
 
 
-def _confirm_labels(config: AgentConfig) -> ConfirmLabels:
-    labels = config.assistant.confirm_labels
-    if labels is None:
-        return ConfirmLabels()
-    default = ConfirmLabels()
-    return ConfirmLabels(
-        confirm=labels.confirm or default.confirm, cancel=labels.cancel or default.cancel
-    )
+def _confirm_labels(config: AgentConfig, language: Language) -> ConfirmLabels:
+    texts = assistant_texts(config.assistant, language)
+    return confirm_labels(language, texts.confirm, texts.cancel)
 
 
 def to_llm_messages(history: Iterable[ChatMessage]) -> Iterable[LLMMessage]:

@@ -8,8 +8,6 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from app.contracts import AgentConfig
 from app.modules.agent.public import (
     PLATFORM_PROMPT_VERSION,
@@ -131,16 +129,27 @@ def test_array_slot_with_enum() -> None:
     assert "- concerns (array of string: a | b)" in text
 
 
-@pytest.mark.parametrize(
-    ("language", "expected"),
-    [("auto", "Отвечай на языке клиента."), ("en", "Отвечай на английском языке.")],
-)
-def test_reply_language(language: str, expected: str) -> None:
+def test_fixed_reply_language_ignores_conversation_language() -> None:
     config = _config()
-    config.assistant.language = language  # type: ignore[assignment]
-    text = build_system_prompt(config, RuntimeContext(now=NOW)).text
+    config.assistant.language = "en"
+    text = build_system_prompt(config, RuntimeContext(now=NOW, language="sv")).text
 
-    assert expected in text
+    assert "Отвечай на английском языке." in text
+    assert "шведском" not in text
+
+
+def test_auto_reply_language_follows_client_with_conversation_fallback() -> None:
+    text = build_system_prompt(_config(), RuntimeContext(now=NOW, language="en")).text
+
+    assert "Отвечай на языке последнего сообщения клиента" in text
+    assert "короткий ответ) — отвечай на английском языке." in text
+
+
+def test_auto_reply_language_without_conversation_language() -> None:
+    text = build_system_prompt(_config(), RuntimeContext(now=NOW)).text
+
+    assert "Отвечай на языке последнего сообщения клиента" in text
+    assert "Если по сообщению язык не определить" not in text
 
 
 def test_runtime_context() -> None:

@@ -448,6 +448,7 @@ def _turn_request(
         history=tuple(recent),
         dialog_state=conversation.state,
         history_summary=summary,
+        language=conversation.language,
     )
 
 

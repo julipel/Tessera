@@ -1,6 +1,7 @@
 """Подключение агента к chat (P2-08): TurnRequest → TurnContext, история для модели, LLMClients."""
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -8,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.modules.agent.public import (
+    AnswerDelta,
     AnthropicLLM,
     AssistantMessage,
     ComponentEmitted,
@@ -23,6 +25,7 @@ from app.modules.agent.public import (
     RegistryToolExecutor,
     ToolCall,
     ToolFinished,
+    ToolStarted,
     UserMessage,
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, MessageStatus, TurnRequest
@@ -112,7 +115,7 @@ async def run(
         return llm
 
     agent = LoopTurnAgent(
-        llm_for, lambda _: RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW
+        llm_for, lambda *_: RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW
     )
     request = TurnRequest(
         tenant_id=TENANT,
@@ -278,6 +281,74 @@ async def test_lead_is_created_only_after_confirm_button() -> None:
     assert any(isinstance(e, ToolFinished) and e.ok for e in second)
     # Ожидающий вызов — не знание о пользователе: в Runtime-слой промпта не попадает.
     assert "pending_confirmation" not in llm.requests[-1].system
+
+
+async def test_english_conversation_gets_translated_and_platform_labels() -> None:
+    """Язык диалога en (ADR-0025): подпись тенанта — из translations, без перевода —
+    подпись платформы на en, статус инструмента — на en."""
+    lead_call = ToolCall(
+        id="c1",
+        name="create_lead",
+        arguments={"form_key": "contact", "fields": {"phone": "+7900"}},
+        raw_arguments="{}",
+    )
+    llm = FakeLLM([FakeReply(text="Please check.", tool_calls=(lead_call,)), FakeReply()])
+    agent_config = {
+        **LEAD_CONFIG,
+        "assistant": {
+            **LEAD_CONFIG["assistant"],
+            "translations": {"en": {"confirm_labels": {"confirm": "Yes, send"}}},
+        },
+    }
+    request = replace(
+        lead_request({"type": "text", "text": "Yes"}, {}),
+        agent_config=agent_config,
+        language="en",
+    )
+
+    events = [
+        e async for e in builtin_turn_agent(lambda _: llm, leads=RecordingLeads()).run_turn(request)
+    ]
+
+    [confirm] = [e.component for e in events if isinstance(e, ComponentEmitted)]
+    assert (confirm["confirm_action"]["label"], confirm["cancel_action"]["label"]) == (
+        "Yes, send",
+        "Cancel",
+    )
+    [started] = [e for e in events if isinstance(e, ToolStarted)]
+    assert started.display_label == "Preparing your request"
+    assert "отвечай на английском языке" in llm.requests[0].system
+
+
+async def test_fallback_message_in_conversation_language() -> None:
+    state_call = ToolCall(
+        id="c1", name="update_dialog_state", arguments={"facts": ["x"]}, raw_arguments="{}"
+    )
+    llm = FakeLLM([FakeReply(tool_calls=(state_call,))])
+    agent_config = {
+        **config({"provider": "openai", "name": "m"}, {"max_steps": 1}),
+        "tools": {"builtin": ["update_dialog_state"]},
+    }
+    agent_config["assistant"] = {
+        **agent_config["assistant"],
+        "language": "auto",
+        "translations": {"sv": {"fallback_message": "Något gick fel."}},
+    }
+    user_input = {"type": "text", "text": "Hej"}
+    request = TurnRequest(
+        tenant_id=TENANT,
+        conversation_id=uuid4(),
+        agent_config_id=uuid4(),
+        turn_id=uuid4(),
+        input=user_input,
+        agent_config=agent_config,
+        history=(message(MessageRole.USER, "Hej", user_input),),
+        language="sv",
+    )
+
+    events = [e async for e in builtin_turn_agent(lambda _: llm).run_turn(request)]
+
+    assert [e.text for e in events if isinstance(e, AnswerDelta)] == ["Något gick fel."]
 
 
 @pytest.mark.parametrize(

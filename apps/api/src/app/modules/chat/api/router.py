@@ -85,11 +85,16 @@ async def create_conversation(
             body.visitor_id,
             ConversationRepository(session),
             TenantsActiveConfig(session),
+            body.locale,
         )
     except NoActiveConfigError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", str(e)) from e
     structlog.contextvars.bind_contextvars(conversation_id=str(conversation.id))
-    logger.info("conversation_created", agent_config_id=str(conversation.agent_config_id))
+    logger.info(
+        "conversation_created",
+        agent_config_id=str(conversation.agent_config_id),
+        language=conversation.language,
+    )
     return CreateConversationResponse(conversation_id=conversation.id)
 
 

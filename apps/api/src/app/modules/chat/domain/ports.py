@@ -6,6 +6,7 @@ from uuid import UUID
 
 from app.modules.agent.kernel import AgentEvent
 from app.modules.chat.domain.entities import (
+    ActiveConfig,
     Channel,
     ChatMessage,
     Conversation,
@@ -20,7 +21,12 @@ type Commit = Callable[[], Awaitable[None]]
 
 class ConversationStore(Protocol):
     async def create(
-        self, tenant_id: TenantId, agent_config_id: UUID, channel: Channel, visitor_id: str
+        self,
+        tenant_id: TenantId,
+        agent_config_id: UUID,
+        channel: Channel,
+        visitor_id: str,
+        language: str | None = None,
     ) -> Conversation: ...
 
     async def find(self, tenant_id: TenantId, conversation_id: UUID) -> Conversation | None: ...
@@ -72,7 +78,7 @@ class ToolCallStore(Protocol):
 class ActiveConfigLookup(Protocol):
     """Активная версия AgentConfig тенанта (данные модуля tenants)."""
 
-    async def active_config_id(self, tenant_id: TenantId) -> UUID | None: ...
+    async def active_config(self, tenant_id: TenantId) -> ActiveConfig | None: ...
 
 
 class AgentConfigSource(Protocol):

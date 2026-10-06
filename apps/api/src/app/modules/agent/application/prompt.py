@@ -20,13 +20,16 @@ _LANGUAGES = {"ru": "русском", "en": "английском", "sv": "шв�
 @dataclass(frozen=True, slots=True)
 class RuntimeContext:
     """Runtime-слой хода. `now` — с часовым поясом. `active_scenario` — ключ сценария из
-    AgentConfig; None или неизвестный ключ — в промпт идут все сценарии."""
+    AgentConfig; None или неизвестный ключ — в промпт идут все сценарии. `language` — язык
+    диалога (ADR-0025): при `assistant.language: auto` — язык ответа, когда по сообщению
+    клиента его не определить."""
 
     now: datetime
     channel: str = "web"
     dialog_state: Mapping[str, Any] = field(default_factory=dict)
     active_scenario: str | None = None
     history_summary: str | None = None
+    language: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,22 +95,33 @@ def _slot_type(slot: SlotDefinition) -> str:
 
 
 def _runtime(config: AgentConfig, runtime: RuntimeContext) -> str:
-    language = config.assistant.language or "auto"
-    reply_in = (
-        f"Отвечай на {_LANGUAGES[language]} языке."
-        if language in _LANGUAGES
-        else "Отвечай на языке клиента."
-    )
     state = _json_data(runtime.dialog_state) if runtime.dialog_state else "пока ничего не известно"
     lines = [
         f"Текущие дата и время: {runtime.now.isoformat(timespec='minutes')}",
         f"Канал: {runtime.channel}",
-        reply_in,
+        _reply_language(config, runtime),
         f"Состояние диалога (уже известно, не переспрашивай):\n{state}",
     ]
     if runtime.history_summary:
         lines.append(f"Сводка ранней части диалога:\n{runtime.history_summary.strip()}")
     return "\n".join(lines)
+
+
+def _reply_language(config: AgentConfig, runtime: RuntimeContext) -> str:
+    fixed = config.assistant.language or "auto"
+    if fixed in _LANGUAGES:
+        return f"Отвечай на {_LANGUAGES[fixed]} языке."
+    # Инструкции и данные обычно на языке тенанта и тянут ответ к нему — правило явное.
+    text = (
+        "Отвечай на языке последнего сообщения клиента, даже если инструкции, данные "
+        "и прошлые ответы — на другом языке. Названия товаров и брендов не переводи."
+    )
+    if runtime.language in _LANGUAGES:
+        text += (
+            " Если по сообщению язык не определить (нажатие кнопки, отправка формы, короткий "
+            f"ответ) — отвечай на {_LANGUAGES[runtime.language]} языке."
+        )
+    return text
 
 
 def _json_data(data: Mapping[str, Any]) -> str:

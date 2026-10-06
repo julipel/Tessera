@@ -11,6 +11,7 @@ from app.modules.tenants.domain.errors import (
     NoActiveConfigError,
     OriginNotAllowedError,
 )
+from app.modules.tenants.domain.language import assistant_texts, resolve_language
 from app.modules.tenants.domain.ports import AgentConfigStore, WidgetKeyResolver
 from app.modules.tenants.domain.widget_keys import hash_widget_key, origin_allowed
 
@@ -33,18 +34,23 @@ async def authenticate_widget(
     return access
 
 
-async def get_public_config(tenant_id: TenantId, configs: AgentConfigStore) -> PublicConfig:
+async def get_public_config(
+    tenant_id: TenantId, configs: AgentConfigStore, locale: str | None = None
+) -> PublicConfig:
+    """Публичная часть конфига на языке, который получит диалог с этим `locale` (ADR-0025)."""
     active = await configs.get_active(tenant_id)
     if active is None:
         raise NoActiveConfigError(f"у тенанта {tenant_id} нет активного AgentConfig")
     config = AgentConfig.model_validate(active.config)
     assistant = config.assistant
+    language = resolve_language(assistant, locale)
+    texts = assistant_texts(assistant, language)
     return PublicConfig(
         assistant=PublicAssistant(
             name=assistant.name,
-            language=assistant.language or "auto",
-            greeting=assistant.greeting,
-            starter_suggestions=assistant.starter_suggestions or [],
+            language=language,
+            greeting=texts.greeting,
+            starter_suggestions=list(texts.starter_suggestions),
         ),
         branding=config.branding or BrandingConfig(),
     )

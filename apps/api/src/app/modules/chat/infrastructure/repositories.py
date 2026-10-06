@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.chat.domain.entities import (
+    ActiveConfig,
     Channel,
     ChatMessage,
     Conversation,
@@ -35,6 +36,7 @@ def _conversation(record: ConversationRecord) -> Conversation:
         state=record.state,
         summary=record.summary,
         summary_message_id=record.summary_message_id,
+        language=record.language,
     )
 
 
@@ -58,13 +60,19 @@ class ConversationRepository(TenantRepository[ConversationRecord]):
     model = ConversationRecord
 
     async def create(
-        self, tenant_id: TenantId, agent_config_id: UUID, channel: Channel, visitor_id: str
+        self,
+        tenant_id: TenantId,
+        agent_config_id: UUID,
+        channel: Channel,
+        visitor_id: str,
+        language: str | None = None,
     ) -> Conversation:
         record = ConversationRecord(
             tenant_id=tenant_id,
             agent_config_id=agent_config_id,
             channel=channel,
             visitor_id=visitor_id,
+            language=language,
         )
         await self.add(tenant_id, record)
         await self.session.refresh(record)  # created_at задаёт БД
@@ -222,9 +230,9 @@ class TenantsActiveConfig:
     def __init__(self, session: AsyncSession) -> None:
         self.configs = AgentConfigRepository(session)
 
-    async def active_config_id(self, tenant_id: TenantId) -> UUID | None:
+    async def active_config(self, tenant_id: TenantId) -> ActiveConfig | None:
         active = await self.configs.get_active(tenant_id)
-        return active.id if active else None
+        return ActiveConfig(id=active.id, config=active.config) if active else None
 
 
 class TenantsAgentConfigs:

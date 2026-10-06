@@ -639,7 +639,7 @@ async def test_dialog_through_agent_loop_keeps_history(
         providers.append(provider)
         return llm
 
-    use_agent(LoopTurnAgent(llm_for, lambda _: RegistryToolExecutor(ToolRegistry([]))))
+    use_agent(LoopTurnAgent(llm_for, lambda *_: RegistryToolExecutor(ToolRegistry([]))))
 
     first = _parse_sse((await _send(db_client, conversation_id)).text)
     await _send(db_client, conversation_id, {"type": "text", "text": "До 3000"})
@@ -683,7 +683,7 @@ async def test_action_with_label_and_suggestions_through_agent_loop(
     llm = FakeLLM([FakeReply(text="Какой у вас тип кожи?", tool_calls=(suggest,)), FakeReply()])
     use_agent(
         LoopTurnAgent(
-            lambda _: llm, lambda _: RegistryToolExecutor(ToolRegistry([suggest_replies_tool()]))
+            lambda _: llm, lambda *_: RegistryToolExecutor(ToolRegistry([suggest_replies_tool()]))
         )
     )
     action = {
@@ -757,7 +757,7 @@ async def test_agent_does_not_reask_known_slot(
     use_agent(
         LoopTurnAgent(
             lambda _: llm,
-            lambda c: RegistryToolExecutor(ToolRegistry(builtin_tools(c))),
+            lambda c, _: RegistryToolExecutor(ToolRegistry(builtin_tools(c))),
         )
     )
 
@@ -964,7 +964,7 @@ async def _retry(
 
 
 def _loop_agent(llm: FakeLLM) -> LoopTurnAgent:
-    return LoopTurnAgent(lambda _: llm, lambda _: RegistryToolExecutor(ToolRegistry([])))
+    return LoopTurnAgent(lambda _: llm, lambda *_: RegistryToolExecutor(ToolRegistry([])))
 
 
 async def test_failed_answer_keeps_error_in_history(

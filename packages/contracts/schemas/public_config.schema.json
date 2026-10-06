@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "public_config.schema.json",
   "title": "PublicConfig",
-  "description": "Ответ GET /v1/public/config: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.",
+  "description": "Ответ GET /v1/public/config?locale=: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.",
   "type": "object",
   "properties": {
     "assistant": { "$ref": "#/$defs/PublicAssistant" },
@@ -15,7 +15,11 @@
       "type": "object",
       "properties": {
         "name": { "type": "string", "minLength": 1 },
-        "language": { "type": "string", "enum": ["auto", "ru", "en", "sv"] },
+        "language": {
+          "type": "string",
+          "enum": ["ru", "en", "sv"],
+          "description": "Выбранный язык диалога (ADR-0025): тексты assistant — на нём."
+        },
         "greeting": { "type": "string" },
         "starter_suggestions": { "type": "array", "items": { "type": "string" } }
       },

@@ -134,7 +134,10 @@ async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
 2. **Tenant** — роль, тон, о компании, ограничения, что можно/нельзя обещать. Из AgentConfig.
 3. **Scenario** — инструкции активного сценария (подбор товара, поддержка, запись). Из AgentConfig.
 4. **Runtime context** — дата/время, язык, канал, состояние диалога (слоты), краткая сводка
-   ранней истории. Генерируется на каждом ходе.
+   ранней истории. Генерируется на каждом ходе. Язык (ADR-0025): фиксированный
+   `assistant.language` — отвечать на нём; `auto` — на языке последнего сообщения клиента,
+   а если его не определить (кнопка, форма, короткий ответ) — на языке диалога
+   (`Conversation.language`, выбран при создании по `locale` клиента).
 
 Политика уточнений (в Platform-слое): спрашивать, если не хватает критичного параметра или
 запрос неоднозначен так, что ответы сильно различаются; не больше одного вопроса за раз;
@@ -428,7 +431,7 @@ Entity(id, tenant_id, source_id, external_id, type, title, price, currency, in_s
        category, url, image_url, attributes JSONB, content_hash, updated_at)
 # external_id уникален в пределах source_id (Document, Entity); удаление Source/Entity/Document
 # каскадно удаляет зависимые строки.
-Conversation(id, tenant_id, agent_config_id, channel, visitor_id, state JSONB, summary, created_at)
+Conversation(id, tenant_id, agent_config_id, channel, visitor_id, state JSONB, summary, language, created_at)
 Message(id, conversation_id, tenant_id, role, status, content, input JSONB, blocks JSONB,
         client_message_id, created_at)  # input — UserInput (user); blocks — текст/компоненты
                                         # в порядке стрима (assistant); content — плоский текст

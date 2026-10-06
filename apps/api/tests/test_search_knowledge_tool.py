@@ -248,7 +248,7 @@ async def test_agent_loop_emits_sources_and_passes_fragments_to_model() -> None:
     llm = FakeLLM([FakeReply(tool_calls=(lookup,)), FakeReply(text="Доставка — 300 рублей.")])
     agent = LoopTurnAgent(
         lambda _: llm,
-        lambda c: RegistryToolExecutor(ToolRegistry(builtin_tools(c, knowledge=search))),
+        lambda c, _: RegistryToolExecutor(ToolRegistry(builtin_tools(c, knowledge=search))),
     )
     request = TurnRequest(
         tenant_id=TENANT,

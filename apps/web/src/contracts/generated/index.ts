@@ -161,10 +161,38 @@ export interface AgentConfig {
  */
 export interface AssistantConfig {
   name: string;
+  /**
+   * Язык диалога (ADR-0025): фиксированный или auto — по locale клиента, если язык поддерживается, иначе default_language.
+   */
   language?: "auto" | "ru" | "en" | "sv";
+  /**
+   * Язык текстов тенанта в assistant (greeting, starter_suggestions, fallback_message, confirm_labels) и язык диалога при auto без поддерживаемого locale.
+   */
+  default_language?: "ru" | "en" | "sv";
+  /**
+   * Переводы текстов тенанта по языку диалога; поле без перевода — базовое значение (ADR-0025).
+   */
+  translations?: {
+    ru?: AssistantTranslation;
+    en?: AssistantTranslation;
+    sv?: AssistantTranslation;
+  };
   greeting: string;
   starter_suggestions?: string[];
   fallback_message: string;
+  confirm_labels?: ConfirmLabels;
+}
+/**
+ * This interface was referenced by `AgentConfig`'s JSON-Schema
+ * via the `definition` "AssistantTranslation".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AssistantTranslation".
+ */
+export interface AssistantTranslation {
+  greeting?: string;
+  starter_suggestions?: string[];
+  fallback_message?: string;
   confirm_labels?: ConfirmLabels;
 }
 /**
@@ -690,6 +718,10 @@ export interface Confirm {
  */
 export interface CreateConversationRequest {
   visitor_id: string;
+  /**
+   * Язык клиента, BCP 47 (navigator.language). При assistant.language=auto выбирает язык диалога (ADR-0025).
+   */
+  locale?: string;
 }
 /**
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -956,7 +988,7 @@ export interface HttpErrorBody {
   retryable: boolean;
 }
 /**
- * Ответ GET /v1/public/config: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.
+ * Ответ GET /v1/public/config?locale=: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
  * via the `definition` "PublicConfig".
@@ -974,7 +1006,10 @@ export interface PublicConfig {
  */
 export interface PublicAssistant {
   name: string;
-  language: "auto" | "ru" | "en" | "sv";
+  /**
+   * Выбранный язык диалога (ADR-0025): тексты assistant — на нём.
+   */
+  language: "ru" | "en" | "sv";
   greeting: string;
   starter_suggestions: string[];
 }

@@ -8,7 +8,13 @@
       "type": "object",
       "description": "Тело POST /v1/conversations. visitor_id генерирует и хранит клиент.",
       "properties": {
-        "visitor_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "visitor_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "locale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 35,
+          "description": "Язык клиента, BCP 47 (navigator.language). При assistant.language=auto выбирает язык диалога (ADR-0025)."
+        }
       },
       "required": ["visitor_id"],
       "additionalProperties": false

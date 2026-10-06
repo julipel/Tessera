@@ -23,7 +23,11 @@ from app.modules.agent.kernel import (
     TurnCompleted,
 )
 from app.modules.chat.application.conversations import require_conversation, user_message
-from app.modules.chat.application.summaries import after_summary
+from app.modules.chat.application.summaries import (
+    SummaryScheduler,
+    after_summary,
+    needs_summary,
+)
 from app.modules.chat.domain.entities import (
     ChatMessage,
     Conversation,
@@ -91,6 +95,7 @@ class TurnStream:
     блок, текст после — новый. `tool_started` и `component` закрывают открытый текстовый блок.
     Завершённые вызовы инструментов и последнее состояние диалога записываются вместе
     с ответом; аргументы, результаты инструментов и состояние в клиент не уходят.
+    После записи ответа длинная история сворачивается в сводку в фоне (`summaries`).
     """
 
     def __init__(
@@ -104,6 +109,7 @@ class TurnStream:
         commit: Commit,
         registry: "TurnRegistry",
         message_id: UUID | None = None,
+        summaries: SummaryScheduler | None = None,
     ) -> None:
         self.conversation = conversation
         self.conversations = conversations
@@ -113,6 +119,7 @@ class TurnStream:
         self.tool_calls = tool_calls
         self.commit = commit
         self.registry = registry
+        self.summaries = summaries
         self.turn_id = request.turn_id
         self.message_id = message_id or uuid4()
         self._seq = 0
@@ -255,6 +262,7 @@ class TurnStream:
             return
         self._saved = True
         texts = [b["text"] for b in self._blocks if b["type"] == "text"]
+        content = "\n\n".join(texts)
         await self.messages.add_once(
             self.conversation.tenant_id,
             NewMessage(
@@ -262,7 +270,7 @@ class TurnStream:
                 conversation_id=self.conversation.id,
                 role=MessageRole.ASSISTANT,
                 status=status,
-                content="\n\n".join(texts),
+                content=content,
                 blocks=tuple(self._blocks),
                 error=(
                     {"code": error.code, "message": error.message, "retryable": error.retryable}
@@ -281,6 +289,10 @@ class TurnStream:
             )
         await self.commit()
         logger.info("turn_finished", turn_id=str(self.turn_id), status=status)
+        if self.summaries is not None and needs_summary(
+            self.request.agent_config, self.request.history, content
+        ):
+            self.summaries.schedule(self.conversation.tenant_id, self.conversation.id)
 
     def _event(self, type_: str, data: dict[str, Any]) -> Event:
         self._seq += 1
@@ -310,6 +322,7 @@ async def start_turn(
     agent: TurnAgent,
     commit: Commit,
     registry: "TurnRegistry",
+    summaries: SummaryScheduler | None = None,
 ) -> TurnStream:
     """Загрузить версию AgentConfig диалога, проверить и записать ввод пользователя
     (и зафиксировать до начала стрима) и подготовить ход: загрузить историю.
@@ -332,7 +345,15 @@ async def start_turn(
         conversation, config, message, await messages.list_for(tenant_id, conversation_id)
     )
     return TurnStream(
-        conversation, request, agent, conversations, messages, tool_calls, commit, registry
+        conversation,
+        request,
+        agent,
+        conversations,
+        messages,
+        tool_calls,
+        commit,
+        registry,
+        summaries=summaries,
     )
 
 
@@ -347,6 +368,7 @@ async def retry_turn(
     agent: TurnAgent,
     commit: Commit,
     registry: "TurnRegistry",
+    summaries: SummaryScheduler | None = None,
 ) -> TurnStream:
     """Новый ход для сохранённого ввода вместо неудачного ответа `message_id` (ADR-0023).
 
@@ -383,6 +405,7 @@ async def retry_turn(
         commit,
         registry,
         message_id=new_message_id,
+        summaries=summaries,
     )
 
 

@@ -1,7 +1,9 @@
 """Сводка ранней истории диалога (architecture.md §7): что идёт в контекст модели и когда
 сворачивать старую часть истории."""
 
-from collections.abc import Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
 from uuid import UUID
 
 import structlog
@@ -38,10 +40,25 @@ def after_summary(
 
 def summary_fold(config: AgentConfig, messages: Sequence[ChatMessage]) -> int | None:
     """Сколько первых сообщений свернуть в сводку по `memory` конфига; None — не нужно."""
+    return _fold(config, [_item(m) for m in messages])
+
+
+def needs_summary(config: dict[str, Any], history: Sequence[ChatMessage], answer: str) -> bool:
+    """Нужна ли сводка после хода: `history` — сообщения после прошлой сводки (как их видела
+    модель хода), `answer` — текст записанного ответа."""
+    items = [*(_item(m) for m in history), HistoryItem(from_user=False, text=answer)]
+    return _fold(AgentConfig.model_validate(config), items) is not None
+
+
+def _item(message: ChatMessage) -> HistoryItem:
+    return HistoryItem(from_user=message.role is MessageRole.USER, text=message.content)
+
+
+def _fold(config: AgentConfig, items: Sequence[HistoryItem]) -> int | None:
     memory = config.memory or MemoryConfig()
     default = MemoryConfig()
     return fold_point(
-        [HistoryItem(from_user=m.role is MessageRole.USER, text=m.content) for m in messages],
+        items,
         threshold_tokens=memory.summary_threshold_tokens or default.summary_threshold_tokens or 0,
         keep_recent_turns=memory.keep_recent_turns or default.keep_recent_turns or 1,
     )
@@ -85,3 +102,48 @@ async def summarize_conversation(
         folded_messages=len(folded),
     )
     return saved
+
+
+type SummaryRun = Callable[[TenantId, UUID], Awaitable[bool]]
+
+
+class SummaryScheduler:
+    """Сводка в фоне после хода (ADR-0024): asyncio-задача в процессе API, одна на диалог.
+
+    `run` — `summarize_conversation` со своей сессией БД (infrastructure). Ошибка сводки
+    только логируется: ход уже записан. Задача, потерянная при рестарте, не восстанавливается —
+    следующий ход снова увидит длинную историю и запустит её.
+    """
+
+    def __init__(self, run: SummaryRun) -> None:
+        self._run = run
+        self._tasks: dict[UUID, asyncio.Task[None]] = {}
+
+    def schedule(self, tenant_id: TenantId, conversation_id: UUID) -> bool:
+        """Запустить сводку диалога. False — по диалогу уже идёт сводка."""
+        if conversation_id in self._tasks:
+            return False
+        # Контекст structlog (tenant_id, conversation_id, trace_id) копируется в задачу.
+        task = asyncio.create_task(self._summarize(tenant_id, conversation_id))
+        self._tasks[conversation_id] = task
+        task.add_done_callback(lambda _: self._tasks.pop(conversation_id, None))
+        return True
+
+    async def _summarize(self, tenant_id: TenantId, conversation_id: UUID) -> None:
+        try:
+            await self._run(tenant_id, conversation_id)
+        except Exception:
+            logger.exception("summary_failed", conversation_id=str(conversation_id))
+
+    async def drain(self) -> None:
+        """Дождаться текущих сводок."""
+        while self._tasks:
+            await asyncio.wait(list(self._tasks.values()))
+
+    async def aclose(self) -> None:
+        """Остановка процесса: незавершённые сводки отменяются (их запустит следующий ход)."""
+        tasks = list(self._tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.wait(tasks)

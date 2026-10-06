@@ -11,7 +11,7 @@ from app.api import health
 from app.knowledge_wiring import KnowledgeServices, build_knowledge_services
 from app.logs import TraceIdMiddleware, configure_logging
 from app.modules.agent.public import LLMClients
-from app.modules.chat.public import TurnRegistry
+from app.modules.chat.public import SummaryScheduler, TurnRegistry, background_summary
 from app.modules.chat.public import router as chat_router
 from app.modules.knowledge.public import SqlCatalog
 from app.modules.leads.public import SqlLeadStore
@@ -27,6 +27,8 @@ from app.settings import Settings
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
+    summaries: SummaryScheduler = app.state.summary_scheduler
+    await summaries.aclose()
     knowledge: KnowledgeServices | None = app.state.knowledge
     if knowledge is not None:
         await knowledge.aclose()
@@ -51,6 +53,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openai_compatible_base_url=settings.openai_compatible_base_url,
         anthropic_api_key=_secret(settings.anthropic_api_key),
         anthropic_base_url=settings.anthropic_base_url,
+    )
+    # Сводка длинной истории после хода — фоновой задачей процесса (ADR-0024).
+    app.state.summary_scheduler = SummaryScheduler(
+        background_summary(app.state.session_factory, app.state.llm_clients.for_provider)
     )
     # Поиск по знаниям для search_knowledge; None без OPENAI_API_KEY.
     app.state.knowledge = build_knowledge_services(settings)

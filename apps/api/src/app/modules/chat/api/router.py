@@ -16,6 +16,7 @@ from app.contracts import (
 from app.modules.agent.public import LLMClients
 from app.modules.chat.api.sse import sse_stream
 from app.modules.chat.application.conversations import get_history, start_conversation
+from app.modules.chat.application.summaries import SummaryScheduler
 from app.modules.chat.application.turns import TurnRegistry, retry_turn, start_turn
 from app.modules.chat.domain.errors import (
     ConversationNotFoundError,
@@ -63,6 +64,15 @@ def get_turn_registry(request: Request) -> TurnRegistry:
 
 
 Registry = Annotated[TurnRegistry, Depends(get_turn_registry)]
+
+
+def get_summary_scheduler(request: Request) -> SummaryScheduler:
+    """Фоновые сводки процесса; тесты подменяют через dependency_overrides."""
+    scheduler: SummaryScheduler = request.app.state.summary_scheduler
+    return scheduler
+
+
+Summaries = Annotated[SummaryScheduler, Depends(get_summary_scheduler)]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -114,6 +124,7 @@ async def send_message(
     session: StreamDbSession,
     agent: Agent,
     registry: Registry,
+    summaries: Summaries,
 ) -> EventSourceResponse:
     structlog.contextvars.bind_contextvars(conversation_id=str(conversation_id))
     try:
@@ -129,6 +140,7 @@ async def send_message(
             agent,
             session.commit,
             registry,
+            summaries,
         )
     except ConversationNotFoundError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e
@@ -156,6 +168,7 @@ async def retry_message(
     session: StreamDbSession,
     agent: Agent,
     registry: Registry,
+    summaries: Summaries,
 ) -> EventSourceResponse:
     """Повтор неудачного ответа `message_id` (ADR-0023): ход по тому же вводу, ответ
     заменяет неудачный в истории и контексте модели."""
@@ -172,6 +185,7 @@ async def retry_message(
             agent,
             session.commit,
             registry,
+            summaries,
         )
     except ConversationNotFoundError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e

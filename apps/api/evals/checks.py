@@ -97,6 +97,23 @@ def _state_contains(expected: dict[str, Any], outcome: TurnOutcome) -> list[str]
     return problems
 
 
+# Порог доли букв алфавита языка: русские названия товаров в английском ответе (их не
+# переводят) под него укладываются, ответ целиком на другом языке — нет.
+_SCRIPT_SHARE = 0.6
+
+
+def _reply_language(expected: str, outcome: TurnOutcome) -> list[str]:
+    """По алфавиту: ru — кириллица, en/sv — латиница (en и sv так не различить)."""
+    letters = [c for c in outcome.text if c.isalpha()]
+    if not letters:
+        return ["в ответе нет текста"]
+    cyrillic = sum("а" <= c.lower() <= "я" or c.lower() == "ё" for c in letters) / len(letters)
+    share = cyrillic if expected == "ru" else 1 - cyrillic
+    if share < _SCRIPT_SHARE:
+        return [f"ответ не на {expected}: доля букв алфавита {share:.0%}"]
+    return []
+
+
 def _must_contain(expected: list[str], outcome: TurnOutcome) -> list[str]:
     text = outcome.text.casefold()
     missing = [s for s in expected if s.casefold() not in text]
@@ -116,4 +133,5 @@ _CHECKS: dict[str, Callable[[Any, TurnOutcome], list[str]]] = {
     "state_contains": _state_contains,
     "must_contain": _must_contain,
     "must_not_contain": _must_not_contain,
+    "reply_language": _reply_language,
 }

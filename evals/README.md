@@ -66,6 +66,7 @@ make eval-diff a=20261003-181752 b=20261003-183741   # имя в reports/ или
 id: gift_selection_with_budget
 tenant: demo
 scenario: product_selection
+locale: en-US                          # необязательно: язык браузера клиента (ADR-0025)
 tags: [clarification, catalog]
 turns:
   - user: "Хочу подарок маме"
@@ -92,7 +93,13 @@ turns:
 - `components` — типы отправленных UI-компонентов.
 - `state_contains` — подмножество DialogState после хода.
 - `must_contain` / `must_not_contain` — подстроки (регистр игнорируется).
+- `reply_language` — язык ответа (`ru` / `en` / `sv`) по алфавиту: не меньше 60% букв —
+  кириллица (ru) или латиница (en, sv). en и sv так не различаются — это дело рубрики `judge`;
+  русские названия товаров в ответе на другом языке под порог укладываются.
 - `judge` — свободная рубрика для LLM-судьи, оценка pass/fail + пояснение.
+
+`locale` диалога выбирает язык диалога так же, как `POST /v1/conversations` (ADR-0025):
+по нему и `assistant.language` / `default_language` конфига; без `locale` — по конфигу.
 
 Для списков в `state_contains` проверяется вхождение элементов, а не равенство
 (`concerns: [dullness]` — в слоте есть `dullness`, могут быть и другие).

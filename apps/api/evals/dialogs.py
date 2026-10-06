@@ -3,7 +3,7 @@
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -32,6 +32,7 @@ class Expect(BaseModel):
     state_contains: dict[str, Any] = Field(default_factory=dict)
     must_contain: list[str] = Field(default_factory=list)
     must_not_contain: list[str] = Field(default_factory=list)
+    reply_language: Literal["ru", "en", "sv"] | None = None
     judge: str | None = None
 
 
@@ -59,13 +60,16 @@ class DialogTurn(BaseModel):
 
 
 class Dialog(BaseModel):
-    """`tenant` — slug тенанта: конфиг берётся из `config/tenants/<tenant>.yaml`."""
+    """`tenant` — slug тенанта: конфиг берётся из `config/tenants/<tenant>.yaml`. `locale` —
+    язык браузера клиента (BCP 47): по нему и конфигу выбирается язык диалога, как при
+    создании диалога в chat API (ADR-0025); без него — язык по конфигу."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
     tenant: str = Field(min_length=1)
     scenario: str | None = None
+    locale: str | None = Field(default=None, min_length=1)
     tags: list[str] = Field(default_factory=list)
     turns: list[DialogTurn] = Field(min_length=1)
 

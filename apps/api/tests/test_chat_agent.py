@@ -32,6 +32,7 @@ from app.modules.chat.domain.entities import ChatMessage, MessageRole, MessageSt
 from app.modules.chat.infrastructure.loop_agent import (
     LoopTurnAgent,
     builtin_turn_agent,
+    client_script,
     confirmation_reply,
     to_llm_messages,
 )
@@ -317,7 +318,68 @@ async def test_english_conversation_gets_translated_and_platform_labels() -> Non
     )
     [started] = [e for e in events if isinstance(e, ToolStarted)]
     assert started.display_label == "Preparing your request"
-    assert "отвечай на английском языке" in llm.requests[0].system
+    # В истории нет текста клиента — язык интерфейса остаётся запасным языком ответа.
+    assert "Интерфейс клиента — на английском языке" in llm.requests[0].system
+
+
+@pytest.mark.parametrize(
+    ("texts", "expected"),
+    [
+        (["Нужен крем"], "cyrillic"),
+        (["Нужен крем", "ok, the second one"], "latin"),
+        (["Hej! Jag söker en parfym"], "latin"),
+        (["Hi", ""], "latin"),  # пустое сообщение (кнопка) не в счёт — берётся прошлый текст
+        (["42 👍"], None),
+        ([], None),
+    ],
+)
+def test_client_script_of_last_text_message(texts: list[str], expected: str | None) -> None:
+    history = [message(MessageRole.USER, t, {"type": "text", "text": t}) for t in texts]
+
+    assert client_script(history) == expected
+
+
+async def test_client_script_hint_in_prompt() -> None:
+    llm = FakeLLM([FakeReply(text="Hello!")])
+    user_input = {"type": "text", "text": "Hi, I need a cream"}
+    request = TurnRequest(
+        tenant_id=TENANT,
+        conversation_id=uuid4(),
+        agent_config_id=uuid4(),
+        turn_id=uuid4(),
+        input=user_input,
+        agent_config=config({"provider": "openai", "name": "m"}),
+        history=(message(MessageRole.USER, user_input["text"], user_input),),
+        language="ru",
+    )
+
+    async for _ in builtin_turn_agent(lambda _: llm).run_turn(request):
+        pass
+
+    system = llm.requests[0].system
+    assert "Последнее текстовое сообщение клиента написано латиницей" in system
+    # Клиент пишет текстом — язык интерфейса (ru) в промпт не идёт.
+    assert "Интерфейс клиента" not in system
+
+
+async def test_interface_language_in_prompt_only_before_client_text() -> None:
+    llm = FakeLLM([FakeReply(text="Hello!")])
+    press = {"type": "action", "action_id": "start", "label": "Start"}
+    request = TurnRequest(
+        tenant_id=TENANT,
+        conversation_id=uuid4(),
+        agent_config_id=uuid4(),
+        turn_id=uuid4(),
+        input=press,
+        agent_config=config({"provider": "openai", "name": "m"}),
+        history=(message(MessageRole.USER, "", press),),
+        language="en",
+    )
+
+    async for _ in builtin_turn_agent(lambda _: llm).run_turn(request):
+        pass
+
+    assert "Интерфейс клиента — на английском языке" in llm.requests[0].system
 
 
 async def test_fallback_message_in_conversation_language() -> None:

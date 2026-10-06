@@ -1,0 +1,18 @@
+id: beauty_21_en_skincare
+tenant: demo-beauty
+scenario: skincare_selection
+locale: en-US
+tags: [language, skincare, catalog]
+turns:
+  - user: "I need a face cream. My skin is dry and feels tight by the evening"
+    expect:
+      tools_called: [search_catalog]
+      components: [product_carousel]
+      state_contains: { skin_type: dry }
+      reply_language: en
+      judge: "Отвечает по-английски (названия товаров из каталога могут остаться по-русски); показывает кремы для сухой кожи и объясняет выбор по атрибутам из каталога (увлажнение, керамиды, гиалуроновая кислота и т.п.)"
+  - user: "Which one has the lightest texture?"
+    expect:
+      clarifies: false
+      reply_language: en
+      judge: "Отвечает по-английски, выбирает из уже показанных кремов вариант с самой лёгкой текстурой по данным каталога и не задаёт повторных вопросов о типе кожи"

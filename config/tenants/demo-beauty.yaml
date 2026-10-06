@@ -13,7 +13,9 @@ widget:
 agent_config:
   assistant:
     name: "Консультант Lumière"
-    language: ru
+    # Язык диалога — по языку браузера (ru / en / sv), иначе default_language (ADR-0025).
+    language: auto
+    default_language: ru
     greeting: >-
       Здравствуйте! Помогу подобрать уход за лицом, аромат или подарок.
       Расскажите, что ищете?
@@ -23,6 +25,17 @@ agent_config:
       - "Выбрать подарок"
       - "Доставка и возврат"
     fallback_message: "Извините, сейчас не получается ответить. Попробуйте, пожалуйста, ещё раз."
+    translations:
+      en:
+        greeting: >-
+          Hello! I can help you choose skincare, a fragrance or a gift.
+          Tell me what you are looking for?
+        starter_suggestions:
+          - "Choose skincare"
+          - "Find a fragrance"
+          - "Pick a gift"
+          - "Delivery and returns"
+        fallback_message: "Sorry, I can't answer right now. Please try again."
 
   model:
     primary: { provider: openai, name: "gpt-6-luna" }
@@ -51,6 +64,10 @@ agent_config:
       - Вопросы о доставке, оплате, возврате, пробниках, упаковке — через search_knowledge,
         в том числе посреди подбора: условия — по базе знаний, а что из этого доступно для
         показанных позиций — по их атрибутам в каталоге (например, «Есть пробник»).
+
+      Язык:
+      - Каталог и база знаний — на русском: текстовые запросы к поиску (query) пиши по-русски,
+        даже если клиент пишет на другом языке; отвечай клиенту на его языке.
 
       Факты:
       - Описывай товары только по данным каталога. Не придумывай ноты, состав, эффекты, цены.

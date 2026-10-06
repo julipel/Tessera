@@ -1,0 +1,18 @@
+# Интерфейс на русском (locale ru-RU), а клиент пишет по-английски: ответ — на языке
+# сообщений клиента, в том числе на короткую реплику без явного языка (ADR-0025).
+id: beauty_23_en_message_ru_locale
+tenant: demo-beauty
+scenario: fragrance_selection
+locale: ru-RU
+tags: [language, fragrance]
+turns:
+  - user: "Hi! I'm looking for a light, fresh unisex perfume for the office in summer. Nothing sweet"
+    expect:
+      tools_called: [search_catalog]
+      reply_language: en
+      judge: "Отвечает по-английски и показывает свежие лёгкие ароматы для офиса без сладких (гурманских) нот, опираясь на ноты из каталога"
+  - user: "ok, the second one"
+    expect:
+      clarifies: false
+      reply_language: en
+      judge: "Отвечает по-английски и рассказывает о втором из показанных ароматов по данным каталога"

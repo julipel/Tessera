@@ -141,15 +141,16 @@ def test_fixed_reply_language_ignores_conversation_language() -> None:
 def test_auto_reply_language_follows_client_with_conversation_fallback() -> None:
     text = build_system_prompt(_config(), RuntimeContext(now=NOW, language="en")).text
 
-    assert "Отвечай на языке последнего сообщения клиента" in text
-    assert "короткий ответ) — отвечай на английском языке." in text
+    assert "Язык ответа — язык, на котором пишет клиент" in text
+    # Язык диалога — запасной после языка прежних сообщений клиента, а не вместо него.
+    assert "Интерфейс клиента — на английском языке: отвечай на нём, только если" in text
 
 
 def test_auto_reply_language_without_conversation_language() -> None:
     text = build_system_prompt(_config(), RuntimeContext(now=NOW)).text
 
-    assert "Отвечай на языке последнего сообщения клиента" in text
-    assert "Если по сообщению язык не определить" not in text
+    assert "язык предыдущих сообщений клиента." in text
+    assert "Интерфейс клиента" not in text
 
 
 def test_runtime_context() -> None:

@@ -1,0 +1,15 @@
+id: beauty_22_en_faq
+tenant: demo-beauty
+locale: en-US
+tags: [language, faq]
+turns:
+  - user: "How long does delivery take, and can I return a perfume if it doesn't suit me?"
+    expect:
+      tools_called: [search_knowledge]
+      reply_language: en
+      judge: "Отвечает по-английски о сроках доставки и условиях возврата парфюма строго по базе знаний (база на русском), включая ограничения для вскрытого парфюма, если они там есть; ничего не выдумывает"
+  - user: "Do you have samples?"
+    expect:
+      tools_called: [search_knowledge]
+      reply_language: en
+      judge: "Отвечает по-английски о пробниках по базе знаний (сколько, бесплатно ли, у всех ли ароматов); упомянуть миниатюры — плюс, но не обязательно"

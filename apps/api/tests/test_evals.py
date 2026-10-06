@@ -259,6 +259,39 @@ CONFIRM = {
 }
 
 
+@pytest.mark.parametrize(
+    ("text", "expected", "ok"),
+    [
+        ("Для сухой кожи подойдёт крем с керамидами.", "ru", True),
+        ("For dry skin, try a cream with ceramides.", "en", True),
+        # Русские названия товаров в английском ответе не переводятся — проверка их терпит.
+        ("I recommend «Мягкий гель» — it is gentle and suits sensitive skin well.", "en", True),
+        ("Для сухой кожи подойдёт крем с керамидами.", "en", False),
+        ("For dry skin, try a cream with ceramides.", "ru", False),
+        ("👍 42", "en", False),
+    ],
+)
+def test_reply_language_check(text: str, expected: str, ok: bool) -> None:
+    [result] = check_turn(
+        Expect.model_validate({"reply_language": expected}), TurnOutcome(text=text)
+    )
+
+    assert (result.status is CheckStatus.PASSED) is ok, result.detail
+
+
+@pytest.mark.parametrize(("locale", "expected"), [(None, "ru"), ("en-US", "en"), ("de-DE", "ru")])
+async def test_dialog_language_from_locale_and_config(
+    configs: TenantConfigs, locale: str | None, expected: str
+) -> None:
+    agent = ScriptedAgent([AnswerDelta("ok"), done()])
+    runner = DialogRunner(agent, configs)
+    data = {"id": "d1", "tenant": "eval-shop", "turns": [{"user": "Hi"}]}
+
+    await runner.run(Dialog.model_validate({**data, "locale": locale} if locale else data))
+
+    assert agent.requests[0].language == expected
+
+
 async def test_form_and_confirm_ids_come_from_shown_components(configs: TenantConfigs) -> None:
     agent = ScriptedAgent(
         [AnswerDelta("Оставьте контакт"), ComponentEmitted(FORM), done()],

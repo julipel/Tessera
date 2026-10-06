@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID, uuid4, uuid5
 
+from app.contracts import AgentConfig
 from app.modules.agent.public import (
     AgentEvent,
     AnswerDelta,
@@ -25,6 +26,7 @@ from app.modules.agent.public import (
 )
 from app.modules.chat.public import ChatMessage, MessageRole, MessageStatus, TurnRequest
 from app.modules.shared.kernel import TenantId
+from app.modules.tenants.kernel import resolve_language
 from app.modules.tenants.public import load_tenant_spec
 from evals.checks import CheckResult, CheckStatus, TurnOutcome, check_turn, needs_judge
 from evals.dialogs import REPO_ROOT, Dialog, describe_input
@@ -146,6 +148,9 @@ class DialogRunner:
         result = DialogResult(dialog.id, dialog.tenant, list(dialog.tags))
         try:
             config = self._configs.get(dialog.tenant)
+            # Язык выбирается один раз, как при создании диалога в chat API (ADR-0025).
+            assistant = AgentConfig.model_validate(config).assistant
+            language = resolve_language(assistant, dialog.locale)
         except Exception as e:
             result.error = f"конфиг тенанта {dialog.tenant!r}: {e}"
             return result
@@ -153,7 +158,9 @@ class DialogRunner:
         tenant_id = self._tenant_ids.get(dialog.tenant) or TenantId(
             uuid5(_EVAL_NAMESPACE, f"tenant:{dialog.tenant}")
         )
-        conversation = _Conversation(tenant_id=tenant_id, conversation_id=uuid4())
+        conversation = _Conversation(
+            tenant_id=tenant_id, conversation_id=uuid4(), language=language
+        )
         transcript: list[TranscriptTurn] = []
         failed = False
         for index, turn in enumerate(dialog.turns, start=1):
@@ -193,6 +200,7 @@ class DialogRunner:
             agent_config=config,
             history=tuple(conversation.history),
             dialog_state=conversation.state,
+            language=conversation.language,
         )
         collector = _TurnCollector()
         started = time.monotonic()
@@ -256,6 +264,7 @@ async def run_dialogs(
 class _Conversation:
     tenant_id: TenantId
     conversation_id: UUID
+    language: str | None = None
     history: list[ChatMessage] = field(default_factory=list)
     state: dict[str, Any] = field(default_factory=dict)
     components: list[dict[str, Any]] = field(default_factory=list)

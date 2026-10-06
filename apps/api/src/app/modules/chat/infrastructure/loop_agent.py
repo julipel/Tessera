@@ -5,7 +5,7 @@ TurnContext.
 """
 
 import json
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -75,7 +75,10 @@ class LoopTurnAgent:
             dialog_state=known,
             active_scenario=state.active_scenario,
             history_summary=request.history_summary,
-            language=language,
+            # Язык интерфейса — запасной язык ответа, только пока клиент ничего не написал
+            # текстом: иначе модель отвечает на нём, хотя клиент пишет на другом (P6-04c).
+            language=None if _has_text(request.history) else language,
+            client_script=client_script(request.history),
         )
         prompt = build_system_prompt(config, runtime)
         ctx = TurnContext(
@@ -137,6 +140,26 @@ def confirmation_reply(user_input: dict[str, Any]) -> ConfirmationReply | None:
 def _confirm_labels(config: AgentConfig, language: Language) -> ConfirmLabels:
     texts = assistant_texts(config.assistant, language)
     return confirm_labels(language, texts.confirm, texts.cancel)
+
+
+def _has_text(history: Iterable[ChatMessage]) -> bool:
+    return any(m.role is MessageRole.USER and m.content.strip() for m in history)
+
+
+def client_script(history: Sequence[ChatMessage]) -> str | None:
+    """Алфавит последнего текстового сообщения клиента: `cyrillic`, `latin` или None (нет
+    текста или букв поровну). Язык ответа по-прежнему выбирает модель (ADR-0025); это сигнал
+    против языка данных и инструкций — к нему модель и сбивалась (P6-04c)."""
+    text = next(
+        (m.content for m in reversed(history) if m.role is MessageRole.USER and m.content.strip()),
+        "",
+    )
+    letters = [c.lower() for c in text if c.isalpha()]
+    cyrillic = sum("а" <= c <= "я" or c == "ё" for c in letters)
+    latin = sum("a" <= c <= "z" or c in "åäöéü" for c in letters)
+    if cyrillic == latin:
+        return None
+    return "cyrillic" if cyrillic > latin else "latin"
 
 
 def to_llm_messages(history: Iterable[ChatMessage]) -> Iterable[LLMMessage]:

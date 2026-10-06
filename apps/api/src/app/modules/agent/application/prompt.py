@@ -15,6 +15,7 @@ from app.contracts import AgentConfig, ScenarioConfig, SlotDefinition
 from app.modules.agent.application.platform_prompt import PLATFORM_PROMPT, PLATFORM_PROMPT_VERSION
 
 _LANGUAGES = {"ru": "русском", "en": "английском", "sv": "шведском"}
+_SCRIPTS = {"cyrillic": "кириллицей", "latin": "латиницей"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,7 +23,8 @@ class RuntimeContext:
     """Runtime-слой хода. `now` — с часовым поясом. `active_scenario` — ключ сценария из
     AgentConfig; None или неизвестный ключ — в промпт идут все сценарии. `language` — язык
     диалога (ADR-0025): при `assistant.language: auto` — язык ответа, когда по сообщению
-    клиента его не определить."""
+    клиента его не определить. `client_script` — алфавит последнего текстового сообщения
+    клиента (`cyrillic` / `latin`): явный сигнал языка ответа против языка данных."""
 
     now: datetime
     channel: str = "web"
@@ -30,6 +32,7 @@ class RuntimeContext:
     active_scenario: str | None = None
     history_summary: str | None = None
     language: str | None = None
+    client_script: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,16 +115,29 @@ def _reply_language(config: AgentConfig, runtime: RuntimeContext) -> str:
     if fixed in _LANGUAGES:
         return f"Отвечай на {_LANGUAGES[fixed]} языке."
     # Инструкции и данные обычно на языке тенанта и тянут ответ к нему — правило явное.
-    text = (
-        "Отвечай на языке последнего сообщения клиента, даже если инструкции, данные "
-        "и прошлые ответы — на другом языке. Названия товаров и брендов не переводи."
-    )
+    lines = [
+        "Язык ответа — язык, на котором пишет клиент (его последнее сообщение), даже если "
+        "инструкции, данные, прошлые ответы и интерфейс — на другом языке.",
+        "Если по последнему сообщению язык не определить (нажатие кнопки, отправка формы, "
+        "короткое «ок») — язык предыдущих сообщений клиента.",
+    ]
+    # Язык диалога (по locale клиента) — только пока клиент ничего не написал словами:
+    # интерфейс на русском не значит, что клиент пишет по-русски.
     if runtime.language in _LANGUAGES:
-        text += (
-            " Если по сообщению язык не определить (нажатие кнопки, отправка формы, короткий "
-            f"ответ) — отвечай на {_LANGUAGES[runtime.language]} языке."
+        lines.append(
+            f"Интерфейс клиента — на {_LANGUAGES[runtime.language]} языке: отвечай на нём, "
+            "только если клиент ещё не написал ни одного сообщения словами."
         )
-    return text
+    if runtime.client_script in _SCRIPTS:
+        lines.append(
+            f"Последнее текстовое сообщение клиента написано {_SCRIPTS[runtime.client_script]}: "
+            "весь ответ — на языке этого сообщения, даже если результаты инструментов на другом."
+        )
+    lines.append(
+        "Быстрые ответы (suggest_replies) — на языке ответа. Названия товаров и брендов "
+        "не переводи."
+    )
+    return "\n".join(lines)
 
 
 def _json_data(data: Mapping[str, Any]) -> str:

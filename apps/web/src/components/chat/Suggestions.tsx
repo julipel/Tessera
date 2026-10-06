@@ -1,4 +1,7 @@
+"use client";
+
 import type { UserInput } from "@/contracts";
+import { useI18n } from "@/lib/i18n";
 
 export interface Suggestion {
   label: string;
@@ -13,9 +16,10 @@ export function Suggestions({
   items: Suggestion[];
   onPick: (input: UserInput) => void;
 }) {
+  const { t } = useI18n();
   if (!items.length) return null;
   return (
-    <div role="group" aria-label="Быстрые ответы" className="flex flex-wrap gap-2">
+    <div role="group" aria-label={t.suggestionsLabel} className="flex flex-wrap gap-2">
       {items.map((item) => (
         <button
           key={item.label}

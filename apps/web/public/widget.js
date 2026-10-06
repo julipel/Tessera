@@ -22,10 +22,18 @@
   var frameUrl = chatOrigin + "/widget?key=" + encodeURIComponent(key);
   var mobile = window.matchMedia("(max-width: 639px)");
   var Z = "2147483000";
+  // Подписи кнопки и iframe — по языку браузера (ru/en/sv, иначе ru): конфиг тенанта виджет
+  // не загружает, язык диалога выбирает чат во фрейме (ADR-0025).
+  var TEXT = {
+    ru: { open: "Открыть чат", close: "Закрыть чат", frame: "Чат с консультантом" },
+    en: { open: "Open chat", close: "Close chat", frame: "Chat with an assistant" },
+    sv: { open: "Öppna chatten", close: "Stäng chatten", frame: "Chatt med en assistent" },
+  };
+  var text = TEXT[(navigator.language || "").toLowerCase().split(/[-_]/)[0]] || TEXT.ru;
 
   var launcher = document.createElement("button");
   launcher.type = "button";
-  launcher.setAttribute("aria-label", "Открыть чат");
+  launcher.setAttribute("aria-label", text.open);
   launcher.setAttribute("aria-expanded", "false");
   launcher.setAttribute("data-tessera", "launcher");
   launcher.appendChild(chatIcon());
@@ -79,13 +87,13 @@
       // iframe создаётся при первом открытии и дальше только скрывается — диалог не теряется.
       iframe = document.createElement("iframe");
       iframe.src = frameUrl;
-      iframe.title = "Чат с консультантом";
+      iframe.title = text.frame;
       iframe.setAttribute("data-tessera", "frame");
       assign(iframe.style, { width: "100%", height: "100%", border: "0", display: "block" });
       panel.appendChild(iframe);
     }
     launcher.setAttribute("aria-expanded", String(open));
-    launcher.setAttribute("aria-label", open ? "Закрыть чат" : "Открыть чат");
+    launcher.setAttribute("aria-label", open ? text.close : text.open);
     layout();
     if (open) iframe.focus();
     else launcher.focus();

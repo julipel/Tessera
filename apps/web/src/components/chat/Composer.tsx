@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, type KeyboardEvent, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * Пока идёт ход (`busy`), вместо «Отправить» — «Остановить»; она неактивна, пока ход
@@ -15,6 +16,7 @@ export function Composer({
   onSend: (text: string) => void;
   onStop?: () => void;
 }) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
 
   const submit = (e?: FormEvent) => {
@@ -36,7 +38,7 @@ export function Composer({
     >
       <div className="mx-auto flex max-w-2xl items-end gap-2">
         <label htmlFor="chat-input" className="sr-only">
-          Сообщение
+          {t.messageLabel}
         </label>
         <textarea
           id="chat-input"
@@ -44,7 +46,7 @@ export function Composer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Напишите сообщение…"
+          placeholder={t.messagePlaceholder}
           className="max-h-40 min-h-11 flex-1 resize-none rounded-chat border border-chat-border bg-chat-surface px-3 py-2 text-base focus:outline-2 focus:outline-chat-primary"
         />
         {busy ? (
@@ -54,7 +56,7 @@ export function Composer({
             disabled={!onStop}
             className="min-h-11 rounded-chat border border-chat-border bg-chat-surface px-4 font-medium text-chat-text disabled:opacity-50"
           >
-            Остановить
+            {t.stop}
           </button>
         ) : (
           <button
@@ -62,7 +64,7 @@ export function Composer({
             disabled={!text.trim()}
             className="min-h-11 rounded-chat bg-chat-primary px-4 font-medium text-chat-on-primary disabled:opacity-50"
           >
-            Отправить
+            {t.send}
           </button>
         )}
       </div>

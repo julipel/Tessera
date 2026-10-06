@@ -263,7 +263,7 @@
   платформы (`display_label`, кнопки confirm по умолчанию) — словарь ядра ru/en/sv;
   `GET /v1/public/config?locale=` — выбранный язык и тексты на нём. ADR-0025.
   DoD: тесты выбора языка, API и Postgres, FakeLLM (fallback, confirm, статусы на языке диалога).
-- [ ] **P6-04b Язык диалога: фронт.** Словарь строк интерфейса чата ru/en/sv по
+- [x] **P6-04b Язык диалога: фронт.** Словарь строк интерфейса чата ru/en/sv по
   `PublicAssistant.language`, `locale` (`navigator.language`) в `GET /v1/public/config` и
   `POST /v1/conversations`, `<html lang>`, локаль `Intl` в `components/rich/format.ts`.
   DoD: unit-тесты словаря и форматирования, e2e с `locale: en-US` (интерфейс и приветствие на en).

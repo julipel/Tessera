@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Action, Event, Form, PublicConfig, UserInput } from "@/contracts";
 import { ApiError, ChatApi } from "@/lib/api/client";
-import { type ChatMessage, chatReducer, initialChatState, retryTarget } from "./state";
+import { browserLocale, i18n } from "@/lib/i18n";
+import { type Activity, type ChatMessage, chatReducer, initialChatState, retryTarget } from "./state";
 
 const VISITOR_KEY = "tessera:visitor_id";
 const conversationKey = (widgetKey: string) => `tessera:conversation:${widgetKey}`;
@@ -13,7 +14,7 @@ const UNMOUNT = "unmount";
 export interface UseChat {
   messages: ChatMessage[];
   busy: boolean;
-  activity: string | null;
+  activity: Activity | null;
   restoring: boolean;
   loadError: string | null;
   /** Публичный конфиг тенанта: имя, приветствие, стартовые подсказки, брендинг. */
@@ -36,7 +37,8 @@ const LABEL_MAX = 200; // ActionInput.label и FormSubmitInput.label в user_inp
 export function useChat(apiUrl: string, widgetKey: string): UseChat {
   const api = useMemo(() => new ChatApi(apiUrl, widgetKey), [apiUrl, widgetKey]);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // Сама ошибка, а не текст: «нет связи» показывается на языке конфига, загруженного позже.
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const conversationId = useRef<string | null>(null);
   const abort = useRef<AbortController | null>(null);
@@ -45,15 +47,18 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
     async (id: string) => dispatch({ type: "history", history: await api.getHistory(id) }),
     [api],
   );
+  // Ошибки API — текст бэкенда; «нет связи» — на языке диалога (до конфига — по умолчанию).
+  const offline = i18n(config?.assistant.language).t.networkError;
   const failStream = useCallback(
-    (e: unknown) => dispatch({ type: "stream_failed", message: errorText(e), retryable: isRetryable(e) }),
-    [],
+    (e: unknown) =>
+      dispatch({ type: "stream_failed", message: errorText(e, offline), retryable: isRetryable(e) }),
+    [offline],
   );
 
   useEffect(() => {
     // Без конфига чат работает: нейтральная тема, без приветствия и стартовых подсказок.
     api
-      .getPublicConfig()
+      .getPublicConfig(browserLocale())
       .then(setConfig)
       .catch(() => setConfig(null));
   }, [api]);
@@ -70,7 +75,7 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
           conversationId.current = null;
           writeStorage(conversationKey(widgetKey), null);
         } else {
-          setLoadError(errorText(e));
+          setLoadError(e);
         }
       });
     }
@@ -91,7 +96,7 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
       let finished = false;
       try {
         if (!conversationId.current) {
-          conversationId.current = await api.createConversation(visitorId());
+          conversationId.current = await api.createConversation(visitorId(), browserLocale());
           writeStorage(conversationKey(widgetKey), conversationId.current);
         }
         for await (const event of await open(conversationId.current, abort.current.signal)) {
@@ -188,7 +193,7 @@ export function useChat(apiUrl: string, widgetKey: string): UseChat {
     busy: state.busy,
     activity: state.activity,
     restoring: state.restoring,
-    loadError,
+    loadError: loadError ? errorText(loadError, offline) : null,
     config,
     send,
     sendText,
@@ -213,9 +218,8 @@ function isRetryable(e: unknown): boolean {
   return e instanceof ApiError ? e.body.retryable : true;
 }
 
-function errorText(e: unknown): string {
-  if (e instanceof ApiError) return e.message;
-  return "Нет связи с сервером. Попробуйте ещё раз.";
+function errorText(e: unknown, offline: string): string {
+  return e instanceof ApiError ? e.message : offline;
 }
 
 // localStorage может быть недоступен (приватный режим, iframe со сторонними cookie).

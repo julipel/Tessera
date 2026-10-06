@@ -1,8 +1,12 @@
+"use client";
+
 import type { ProductCard as ProductCardData } from "@/contracts";
+import { useI18n } from "@/lib/i18n";
 import { ActionRow, type OnAction } from "./ActionButton";
 import { formatPrice } from "./format";
 
 export function ProductCard({ card, onAction }: { card: ProductCardData; onAction?: OnAction }) {
+  const { locale } = useI18n();
   return (
     <article
       aria-label={card.title}
@@ -42,7 +46,7 @@ export function ProductCard({ card, onAction }: { card: ProductCardData; onActio
           </ul>
         )}
         <div className="mt-auto flex flex-col gap-2">
-          {card.price && <p className="text-lg font-semibold">{formatPrice(card.price)}</p>}
+          {card.price && <p className="text-lg font-semibold">{formatPrice(card.price, locale)}</p>}
           <ActionRow actions={card.actions} subject={card.title} onAction={onAction} />
         </div>
       </div>

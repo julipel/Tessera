@@ -27,6 +27,9 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL: WEB_URL,
+    // Язык браузера — как у посетителей демо-тенантов: demo-garden (language: auto) выбирает
+    // язык диалога по нему (ADR-0025). Английский интерфейс — i18n.spec.ts.
+    locale: "ru-RU",
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

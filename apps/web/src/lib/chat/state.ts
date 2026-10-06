@@ -31,8 +31,9 @@ export interface ChatState {
   messages: ChatMessage[];
   /** Ход идёт: от отправки до `done` или сбоя стрима. */
   busy: boolean;
-  /** Подпись индикатора: «печатает» до первого текста, метка `status` или инструмента. */
-  activity: string | null;
+  /** Индикатор: `TYPING` до первого текста (подпись — на языке интерфейса), иначе метка
+   * `status` или инструмента от бэкенда. */
+  activity: Activity | null;
   /** Идёт загрузка сохранённого диалога: приветствие и стартовые подсказки не показываются. */
   restoring: boolean;
 }
@@ -45,7 +46,10 @@ export type ChatAction =
   | { type: "event"; event: Event }
   | { type: "stream_failed"; message: string; retryable: boolean };
 
-export const TYPING = "Печатает…";
+/** «Печатает» — подпись выбирает интерфейс по языку диалога (lib/i18n.ts). */
+export const TYPING = Symbol("typing");
+
+export type Activity = typeof TYPING | string;
 
 export const initialChatState: ChatState = {
   messages: [],
@@ -223,6 +227,7 @@ export function inputText(input: UserInput): string {
     case "action":
       return input.label ?? input.action_id;
     case "form_submit":
-      return input.label ?? "Форма отправлена";
+      // Без заголовка формы подпись «Форма отправлена» выбирает интерфейс по языку.
+      return input.label ?? "";
   }
 }

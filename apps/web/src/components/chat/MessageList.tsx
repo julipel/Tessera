@@ -2,15 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { UserInput } from "@/contracts";
-import type { ChatMessage } from "@/lib/chat/state";
+import { type Activity, type ChatMessage, TYPING } from "@/lib/chat/state";
+import { type Messages, useI18n } from "@/lib/i18n";
 import type { OnAction } from "../rich/ActionButton";
 import type { OnSubmitForm } from "../rich/Forms";
 import { MessageBlocks } from "./MessageBlocks";
 import { type Suggestion, Suggestions } from "./Suggestions";
 
-const STATUS_NOTE: Partial<Record<ChatMessage["status"], string>> = {
-  interrupted: "Ответ прерван",
-  failed: "Не удалось ответить",
+const STATUS_NOTE: Partial<Record<ChatMessage["status"], keyof Messages>> = {
+  interrupted: "interrupted",
+  failed: "failed",
 };
 
 // Ближе этого к низу ленты — считаем, что посетитель внизу и следит за ответом.
@@ -37,7 +38,7 @@ export function MessageList({
   onRetry,
 }: {
   messages: ChatMessage[];
-  activity: string | null;
+  activity: Activity | null;
   greeting?: string;
   starter: string[];
   onAction?: OnAction;
@@ -45,6 +46,7 @@ export function MessageList({
   onPick?: (input: UserInput) => void;
   onRetry?: () => void;
 }) {
+  const { t } = useI18n();
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
@@ -87,7 +89,7 @@ export function MessageList({
             {greeting}
           </p>
         )}
-        <ol className="mx-auto flex max-w-2xl flex-col gap-3" aria-label="Сообщения">
+        <ol className="mx-auto flex max-w-2xl flex-col gap-3" aria-label={t.messagesLabel}>
           {messages.map((m) => (
             <li
               key={m.id}
@@ -97,13 +99,13 @@ export function MessageList({
             >
               {m.role === "user" ? (
                 <div className="rounded-chat bg-chat-primary px-4 py-2 text-chat-on-primary whitespace-pre-wrap">
-                  {m.text}
+                  {m.text || (m.input?.type === "form_submit" ? t.formSent : "")}
                 </div>
               ) : (
                 <MessageBlocks blocks={m.blocks} onAction={onAction} onSubmitForm={onSubmitForm} />
               )}
               {(m.error || STATUS_NOTE[m.status]) && (
-                <p className="mt-1 text-sm text-chat-danger">{m.error ?? STATUS_NOTE[m.status]}</p>
+                <p className="mt-1 text-sm text-chat-danger">{m.error ?? t[STATUS_NOTE[m.status]!]}</p>
               )}
               {onRetry && m === last && (
                 <button
@@ -111,7 +113,7 @@ export function MessageList({
                   onClick={onRetry}
                   className="mt-1 self-start rounded-chat border border-chat-border bg-chat-surface px-3 py-1 text-sm hover:bg-chat-bg focus:outline-2 focus:outline-chat-primary"
                 >
-                  Повторить
+                  {t.retry}
                 </button>
               )}
             </li>
@@ -125,7 +127,7 @@ export function MessageList({
         <div aria-live="polite" className="mx-auto max-w-2xl">
           {activity && (
             <p role="status" className="mt-3 text-sm text-chat-muted animate-pulse">
-              {activity}
+              {activity === TYPING ? t.typing : activity}
             </p>
           )}
         </div>
@@ -134,8 +136,8 @@ export function MessageList({
         <button
           type="button"
           onClick={scrollToEnd}
-          aria-label="К новым сообщениям"
-          title="К новым сообщениям"
+          aria-label={t.toNewMessages}
+          title={t.toNewMessages}
           className="absolute bottom-3 left-1/2 flex size-10 -translate-x-1/2 items-center justify-center rounded-full border border-chat-border bg-chat-surface text-chat-muted shadow hover:bg-chat-bg focus:outline-2 focus:outline-chat-primary"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5 fill-none stroke-current stroke-2">

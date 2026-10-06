@@ -1,7 +1,10 @@
+"use client";
+
 // form и confirm. Без обработчика (идёт ход, витрина компонентов) кнопки отключены —
 // неявная отправка формы по Enter тоже не срабатывает.
 import type { FormEvent } from "react";
 import type { Confirm, Form, FormField } from "@/contracts";
+import { useI18n } from "@/lib/i18n";
 import { ActionButton, type OnAction } from "./ActionButton";
 
 /** Отправка формы: значения непустых полей по `FormField.name`. */
@@ -18,6 +21,7 @@ const CONTROL =
   "min-h-10 w-full rounded-chat border border-chat-border bg-chat-surface px-3 py-2 text-base focus:outline-2 focus:outline-chat-primary";
 
 function Field({ formId, field }: { formId: string; field: FormField }) {
+  const { t } = useI18n();
   const id = `${formId}-${field.name}`;
   const common = { id, name: field.name, required: field.required, className: CONTROL };
   return (
@@ -31,7 +35,7 @@ function Field({ formId, field }: { formId: string; field: FormField }) {
       ) : field.kind === "select" ? (
         <select defaultValue="" {...common}>
           <option value="" disabled>
-            Выберите…
+            {t.selectPlaceholder}
           </option>
           {field.options?.map((o) => (
             <option key={o.value} value={o.value}>
@@ -47,6 +51,7 @@ function Field({ formId, field }: { formId: string; field: FormField }) {
 }
 
 export function FormView({ data, onSubmit }: { data: Form; onSubmit?: OnSubmitForm }) {
+  const { t } = useI18n();
   const submit = (e: FormEvent<HTMLFormElement>, send: OnSubmitForm) => {
     e.preventDefault();
     // Обязательность и формат (email, tel) уже проверил браузер; пустые необязательные — не шлём.
@@ -59,7 +64,7 @@ export function FormView({ data, onSubmit }: { data: Form; onSubmit?: OnSubmitFo
   return (
     <form
       aria-label={data.title}
-      // Без обработчика — серверный рендер (витрина): обработчик событий в props нельзя.
+      // Без обработчика (идёт ход, витрина) форма не отправляется.
       onSubmit={onSubmit && ((e) => submit(e, onSubmit))}
       className="flex flex-col gap-3 rounded-chat border border-chat-border bg-chat-surface p-3"
     >
@@ -72,15 +77,16 @@ export function FormView({ data, onSubmit }: { data: Form; onSubmit?: OnSubmitFo
         disabled={!onSubmit}
         className="min-h-10 rounded-chat bg-chat-primary px-4 font-medium text-chat-on-primary disabled:opacity-50"
       >
-        {data.submit_label ?? "Отправить"}
+        {data.submit_label ?? t.formSubmit}
       </button>
     </form>
   );
 }
 
 export function ConfirmView({ data, onAction }: { data: Confirm; onAction?: OnAction }) {
+  const { t } = useI18n();
   return (
-    <div role="group" aria-label="Подтверждение" className="flex flex-col gap-3 rounded-chat border border-chat-border bg-chat-surface p-3">
+    <div role="group" aria-label={t.confirmLabel} className="flex flex-col gap-3 rounded-chat border border-chat-border bg-chat-surface p-3">
       <p>{data.text}</p>
       <div className="flex flex-wrap gap-2">
         <ActionButton action={{ style: "primary", ...data.confirm_action }} onAction={onAction} />

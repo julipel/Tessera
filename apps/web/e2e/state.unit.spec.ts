@@ -173,7 +173,8 @@ test("отправка формы: в истории заголовок форм
   ]);
   expect(state.busy).toBe(true);
 
-  expect(inputText({ type: "form_submit", form_id: "f", values: {} })).toBe("Форма отправлена");
+  // Без заголовка формы подпись выбирает интерфейс по языку (MessageList, lib/i18n.ts).
+  expect(inputText({ type: "form_submit", form_id: "f", values: {} })).toBe("");
 });
 
 test("suggestions: подсказки у сообщения хода, действует последнее событие", () => {

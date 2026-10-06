@@ -1,5 +1,6 @@
 // Публичный HTTP API чата (docs/contracts.md §1). Ошибки — HttpError (`http_error.schema.json`).
 import type {
+  CreateConversationRequest,
   CreateConversationResponse,
   Event,
   HttpErrorBody,
@@ -29,17 +30,21 @@ export class ChatApi {
     private readonly widgetKey: string,
   ) {}
 
-  async createConversation(visitorId: string): Promise<string> {
+  /** `locale` — язык клиента (BCP 47): по нему бэкенд выбирает язык диалога (ADR-0025). */
+  async createConversation(visitorId: string, locale?: string): Promise<string> {
+    const request: CreateConversationRequest = { visitor_id: visitorId, locale };
     const resp = await this.request("/v1/conversations", {
       method: "POST",
-      body: JSON.stringify({ visitor_id: visitorId }),
+      body: JSON.stringify(request),
     });
     const body = (await resp.json()) as CreateConversationResponse;
     return body.conversation_id;
   }
 
-  async getPublicConfig(): Promise<PublicConfig> {
-    const resp = await this.request("/v1/public/config");
+  /** Конфиг на языке, который получит диалог с этим `locale`. */
+  async getPublicConfig(locale?: string): Promise<PublicConfig> {
+    const query = locale ? `?${new URLSearchParams({ locale })}` : "";
+    const resp = await this.request(`/v1/public/config${query}`);
     return (await resp.json()) as PublicConfig;
   }
 

@@ -14,7 +14,9 @@ widget:
 agent_config:
   assistant:
     name: "Садовник «Зелёного угла»"
-    language: ru
+    # Язык диалога — по языку браузера (ru / en / sv), иначе default_language (ADR-0025).
+    language: auto
+    default_language: ru
     greeting: >-
       Добрый день! Подскажу, что посадить, как ухаживать за растениями и чем подкормить сад.
     starter_suggestions:
@@ -22,6 +24,16 @@ agent_config:
       - "Уход за комнатными растениями"
       - "Подкормка весной"
     fallback_message: "Извините, сейчас не получается ответить. Попробуйте, пожалуйста, ещё раз."
+    translations:
+      en:
+        greeting: >-
+          Good afternoon! I can help you choose what to plant, how to care for your plants
+          and how to feed your garden.
+        starter_suggestions:
+          - "What to plant in the shade"
+          - "Houseplant care"
+          - "Spring feeding"
+        fallback_message: "Sorry, I can't answer right now. Please try again."
 
   model:
     primary: { provider: openai, name: "gpt-6-luna" }

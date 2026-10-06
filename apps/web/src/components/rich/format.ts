@@ -1,11 +1,9 @@
 import type { Price } from "@/contracts";
 
-// Локаль пока фиксирована; язык по пользователю/конфигу — P6-04.
-const LOCALE = "ru-RU";
-
-export function formatPrice({ amount, currency }: Price): string {
+/** Цена в локали языка диалога (`useI18n().locale`). */
+export function formatPrice({ amount, currency }: Price, locale: string): string {
   try {
-    return new Intl.NumberFormat(LOCALE, {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency,
       maximumFractionDigits: Number.isInteger(amount) ? 0 : 2,

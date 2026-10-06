@@ -1,5 +1,8 @@
+"use client";
+
 // Информационные компоненты: info_card, image, link_list, sources.
 import type { ImageComponent, InfoCard as InfoCardData, LinkList as LinkListData, Sources as SourcesData } from "@/contracts";
+import { useI18n } from "@/lib/i18n";
 import { Markdown } from "../chat/Markdown";
 
 const EXTERNAL = { target: "_blank", rel: "noopener noreferrer" } as const;
@@ -53,9 +56,10 @@ export function LinkList({ data }: { data: LinkListData }) {
 }
 
 export function Sources({ data }: { data: SourcesData }) {
+  const { t } = useI18n();
   return (
-    <section aria-label="Источники" className="text-sm">
-      <h3 className="mb-1 text-chat-muted">Источники</h3>
+    <section aria-label={t.sources} className="text-sm">
+      <h3 className="mb-1 text-chat-muted">{t.sources}</h3>
       <ol className="flex flex-col gap-1">
         {data.items.map((item, i) => (
           <li key={item.url} className="flex gap-2">

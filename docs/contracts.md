@@ -31,7 +31,8 @@
 если он поддерживается (ru / en / sv), иначе `assistant.default_language`. На языке диалога —
 тексты тенанта, подписи платформы (`display_label`, кнопки confirm по умолчанию) и запасной язык
 ответа; `GET /v1/public/config?locale=` выбирает язык тем же правилом и отдаёт его
-в `assistant.language` (без `auto`).
+в `assistant.language` (без `auto`). Веб-чат передаёт `navigator.language` в оба запроса,
+строки интерфейса (`apps/web/src/lib/i18n.ts`) и локаль цен — по `assistant.language`.
 
 `GET .../messages` → `MessageHistory` (`conversations.schema.json`): сообщения в порядке создания,
 у `user` — исходный `input`, у `assistant` — `blocks` (`text` / `component` с `block_id`, порядок

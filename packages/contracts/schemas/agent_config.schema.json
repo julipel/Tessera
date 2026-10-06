@@ -17,6 +17,7 @@
       "default": {}
     },
     "knowledge": { "$ref": "#/$defs/KnowledgeConfig" },
+    "memory": { "$ref": "#/$defs/MemoryConfig" },
     "branding": { "$ref": "#/$defs/BrandingConfig" }
   },
   "required": ["assistant", "model", "limits", "prompt", "tools"],
@@ -90,6 +91,30 @@
         "max_tool_calls_per_step": { "type": "integer", "minimum": 1, "default": 4 },
         "turn_timeout_s": { "type": "number", "exclusiveMinimum": 0, "default": 60 },
         "max_tool_retries": { "type": "integer", "minimum": 0, "default": 2 }
+      },
+      "additionalProperties": false
+    },
+    "MemoryConfig": {
+      "type": "object",
+      "description": "Сводка ранней истории (architecture.md §7): когда история после прошлой сводки длиннее порога, старая часть сворачивается в сводку, последние ходы остаются целиком.",
+      "properties": {
+        "summary_threshold_tokens": {
+          "type": "integer",
+          "minimum": 500,
+          "default": 6000,
+          "description": "Порог объёма истории после прошлой сводки, в приблизительных токенах (оценка по длине текста)."
+        },
+        "keep_recent_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4,
+          "description": "Сколько последних ходов (ввод пользователя и ответы на него) не сворачивать."
+        },
+        "summary_model": {
+          "oneOf": [{ "$ref": "#/$defs/ModelConfig" }, { "type": "null" }],
+          "default": null,
+          "description": "Модель сводки; null — основная модель (model.primary)."
+        }
       },
       "additionalProperties": false
     },

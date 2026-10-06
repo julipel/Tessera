@@ -149,6 +149,7 @@ export interface AgentConfig {
     [k: string]: FormConfig;
   };
   knowledge?: KnowledgeConfig;
+  memory?: MemoryConfig;
   branding?: BrandingConfig;
 }
 /**
@@ -453,6 +454,29 @@ export interface CardAction {
   action_id: string;
   label: string;
   style?: "primary" | "secondary" | "link";
+}
+/**
+ * Сводка ранней истории (architecture.md §7): когда история после прошлой сводки длиннее порога, старая часть сворачивается в сводку, последние ходы остаются целиком.
+ *
+ * This interface was referenced by `AgentConfig`'s JSON-Schema
+ * via the `definition` "MemoryConfig".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "MemoryConfig".
+ */
+export interface MemoryConfig {
+  /**
+   * Порог объёма истории после прошлой сводки, в приблизительных токенах (оценка по длине текста).
+   */
+  summary_threshold_tokens?: number;
+  /**
+   * Сколько последних ходов (ввод пользователя и ответы на него) не сворачивать.
+   */
+  keep_recent_turns?: number;
+  /**
+   * Модель сводки; null — основная модель (model.primary).
+   */
+  summary_model?: ModelConfig | null;
 }
 /**
  * This interface was referenced by `AgentConfig`'s JSON-Schema

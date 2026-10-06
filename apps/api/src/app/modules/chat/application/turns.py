@@ -1,7 +1,7 @@
 """Ход ассистента: события агента → SSE-протокол (docs/contracts.md §2) и запись ответа."""
 
 import asyncio
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Sequence
+from collections.abc import AsyncGenerator, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -23,6 +23,7 @@ from app.modules.agent.kernel import (
     TurnCompleted,
 )
 from app.modules.chat.application.conversations import require_conversation, user_message
+from app.modules.chat.application.summaries import after_summary
 from app.modules.chat.domain.entities import (
     ChatMessage,
     Conversation,
@@ -41,6 +42,7 @@ from app.modules.chat.domain.errors import (
 )
 from app.modules.chat.domain.ports import (
     AgentConfigSource,
+    Commit,
     ConversationStore,
     MessageStore,
     ToolCallStore,
@@ -52,8 +54,6 @@ from app.modules.tools.public import form_values_problem
 PROTOCOL_VERSION = "1"
 
 logger = structlog.get_logger(__name__)
-
-type Commit = Callable[[], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,6 +413,8 @@ def _turn_request(
     question: ChatMessage,
     history: Sequence[ChatMessage],
 ) -> TurnRequest:
+    # Свёрнутые в сводку сообщения модель видит только через сводку (architecture.md §7).
+    summary, recent = after_summary(conversation, history)
     return TurnRequest(
         tenant_id=conversation.tenant_id,
         conversation_id=conversation.id,
@@ -420,8 +422,9 @@ def _turn_request(
         turn_id=uuid4(),
         input=question.input or {},
         agent_config=config,
-        history=tuple(history),
+        history=tuple(recent),
         dialog_state=conversation.state,
+        history_summary=summary,
     )
 
 

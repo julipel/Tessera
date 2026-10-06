@@ -56,6 +56,28 @@ class LimitsConfig(BaseModel):
     max_tool_retries: Annotated[int | None, Field(ge=0)] = 2
 
 
+class MemoryConfig(BaseModel):
+    """
+    Сводка ранней истории (architecture.md §7): когда история после прошлой сводки длиннее порога, старая часть сворачивается в сводку, последние ходы остаются целиком.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    summary_threshold_tokens: Annotated[int | None, Field(ge=500)] = 6000
+    """
+    Порог объёма истории после прошлой сводки, в приблизительных токенах (оценка по длине текста).
+    """
+    keep_recent_turns: Annotated[int | None, Field(ge=1)] = 4
+    """
+    Сколько последних ходов (ввод пользователя и ответы на него) не сворачивать.
+    """
+    summary_model: ModelConfig | None = None
+    """
+    Модель сводки; null — основная модель (model.primary).
+    """
+
+
 class SlotItems(BaseModel):
     """
     Используется при type=array, напр. concerns[] из пилота beauty.
@@ -268,4 +290,5 @@ class AgentConfig(BaseModel):
     Ключ — form_key (используется в show_form и в component.form_id).
     """
     knowledge: KnowledgeConfig | None = None
+    memory: MemoryConfig | None = None
     branding: BrandingConfig | None = None

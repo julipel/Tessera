@@ -3,6 +3,7 @@
 from app.modules.agent.application.loop import AgentLoop
 from app.modules.agent.application.platform_prompt import PLATFORM_PROMPT_VERSION
 from app.modules.agent.application.prompt import RuntimeContext, SystemPrompt, build_system_prompt
+from app.modules.agent.application.summarizer import SUMMARY_PROMPT_VERSION, HistorySummarizer
 from app.modules.agent.domain.events import (
     AgentEvent,
     AnswerDelta,
@@ -51,6 +52,7 @@ from app.modules.agent.infrastructure.tool_executor import RegistryToolExecutor
 
 __all__ = [
     "PLATFORM_PROMPT_VERSION",
+    "SUMMARY_PROMPT_VERSION",
     "AgentEvent",
     "AgentLoop",
     "AnswerDelta",
@@ -63,6 +65,7 @@ __all__ = [
     "FakeLLMExhaustedError",
     "FakeReply",
     "FinishReason",
+    "HistorySummarizer",
     "LLMChunk",
     "LLMClient",
     "LLMClients",

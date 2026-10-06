@@ -33,6 +33,8 @@ def _conversation(record: ConversationRecord) -> Conversation:
         visitor_id=record.visitor_id,
         created_at=record.created_at,
         state=record.state,
+        summary=record.summary,
+        summary_message_id=record.summary_message_id,
     )
 
 
@@ -84,6 +86,32 @@ class ConversationRepository(TenantRepository[ConversationRecord]):
             .values(state=state)
         )
         await self.session.execute(stmt)
+
+    async def update_summary(
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        summary: str,
+        through_message_id: UUID,
+        expected_through: UUID | None,
+    ) -> bool:
+        # Условный UPDATE, как mark_replaced: опоздавшая сводка не затрёт более свежую.
+        expected = (
+            ConversationRecord.summary_message_id.is_(None)
+            if expected_through is None
+            else ConversationRecord.summary_message_id == expected_through
+        )
+        stmt = (
+            update(ConversationRecord)
+            .where(
+                ConversationRecord.tenant_id == tenant_id,
+                ConversationRecord.id == conversation_id,
+                expected,
+            )
+            .values(summary=summary, summary_message_id=through_message_id)
+            .returning(ConversationRecord.id)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none() is not None
 
 
 class MessageRepository(TenantRepository[MessageRecord]):

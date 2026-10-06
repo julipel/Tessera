@@ -276,6 +276,10 @@ model:
   # temperature (0–2) — необязательная подсказка: адаптер передаёт её, только если провайдер
   # и модель её поддерживают, иначе отбрасывает (ADR-0009). Без неё — значение провайдера.
 limits: { max_steps: 6, max_tool_calls_per_step: 4, turn_timeout_s: 60, max_tool_retries: 2 }
+# Сводка ранней истории (architecture.md §7): история после прошлой сводки длиннее порога
+# (приблизительные токены, ~3 символа на токен) — старая часть сворачивается, последние
+# keep_recent_turns ходов остаются целиком. summary_model: null — model.primary.
+memory: { summary_threshold_tokens: 6000, keep_recent_turns: 4, summary_model: null }
 prompt:
   tenant: |
     Ты — консультант компании Example...

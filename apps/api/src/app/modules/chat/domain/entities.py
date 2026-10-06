@@ -27,7 +27,8 @@ class MessageStatus(StrEnum):
 @dataclass(frozen=True, slots=True)
 class Conversation:
     """`agent_config_id` — версия конфига, с которой диалог начат (architecture.md §10);
-    `state` — DialogState в JSON (architecture.md §7)."""
+    `state` — DialogState в JSON (architecture.md §7); `summary` — сводка ранней истории,
+    `summary_message_id` — последнее свёрнутое в неё сообщение (P6-02)."""
 
     id: UUID
     tenant_id: TenantId
@@ -36,6 +37,8 @@ class Conversation:
     visitor_id: str
     created_at: datetime
     state: dict[str, Any] = field(default_factory=dict)
+    summary: str | None = None
+    summary_message_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,8 +94,9 @@ class ToolCallEntry:
 @dataclass(frozen=True, slots=True)
 class TurnRequest:
     """Вход хода агента: `input` — ввод пользователя по контракту UserInput, `agent_config` —
-    версия AgentConfig диалога, `history` — сообщения диалога, включая этот ввод,
-    `dialog_state` — состояние диалога на начало хода. Всё загружено до запуска агента:
+    версия AgentConfig диалога, `history` — сообщения диалога после сводки, включая этот
+    ввод, `history_summary` — сводка более ранних сообщений, `dialog_state` — состояние
+    диалога на начало хода. Всё загружено до запуска агента:
     задача агента отменяема и в БД не ходит."""
 
     tenant_id: TenantId
@@ -103,3 +107,4 @@ class TurnRequest:
     agent_config: dict[str, Any]
     history: tuple[ChatMessage, ...]
     dialog_state: dict[str, Any] = field(default_factory=dict)
+    history_summary: str | None = None

@@ -55,6 +55,8 @@ class ConversationRecord(TenantScopedBase):
         JSONB, default=dict, server_default=text("'{}'::jsonb")
     )
     summary: Mapped[str | None] = mapped_column(Text)
+    # Последнее сообщение, свёрнутое в summary (P6-02); без FK — messages ссылаются на диалог.
+    summary_message_id: Mapped[UUID | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=_CREATED_AT
     )

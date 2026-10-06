@@ -1,6 +1,6 @@
 """Порты хранилищ модуля chat (реализации — в infrastructure)."""
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -15,6 +15,8 @@ from app.modules.chat.domain.entities import (
 )
 from app.modules.shared.kernel import TenantId
 
+type Commit = Callable[[], Awaitable[None]]
+
 
 class ConversationStore(Protocol):
     async def create(
@@ -26,6 +28,19 @@ class ConversationStore(Protocol):
     async def update_state(
         self, tenant_id: TenantId, conversation_id: UUID, state: dict[str, Any]
     ) -> None: ...
+
+    async def update_summary(
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        summary: str,
+        through_message_id: UUID,
+        expected_through: UUID | None,
+    ) -> bool:
+        """Записать сводку по сообщение `through_message_id`, если граница сводки всё ещё
+        `expected_through`. False — сводку уже обновили (или диалога нет): из двух
+        одновременных сводок записывается только одна."""
+        ...
 
 
 class MessageStore(Protocol):
@@ -64,6 +79,17 @@ class AgentConfigSource(Protocol):
     """Конкретная версия AgentConfig тенанта (данные модуля tenants)."""
 
     async def config(self, tenant_id: TenantId, config_id: UUID) -> dict[str, Any] | None: ...
+
+
+class ConversationSummarizer(Protocol):
+    """Сводка ранней истории моделью из AgentConfig диалога (модуль agent)."""
+
+    async def summarize(
+        self, agent_config: dict[str, Any], previous: str | None, messages: Sequence[ChatMessage]
+    ) -> str | None:
+        """Новая сводка: `previous`, дополненная `messages`; None — модель не вернула текст.
+        Ошибка провайдера — `LLMError`."""
+        ...
 
 
 class TurnAgent(Protocol):

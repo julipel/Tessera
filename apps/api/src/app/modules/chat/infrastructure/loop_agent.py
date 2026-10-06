@@ -70,6 +70,7 @@ class LoopTurnAgent:
             now=self._now(),
             dialog_state=known,
             active_scenario=state.active_scenario,
+            history_summary=request.history_summary,
         )
         prompt = build_system_prompt(config, runtime)
         ctx = TurnContext(

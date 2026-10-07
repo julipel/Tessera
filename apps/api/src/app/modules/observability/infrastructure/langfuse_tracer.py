@@ -19,7 +19,9 @@ from langfuse import (
     propagate_attributes,
 )
 from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SpanExporter
 
+from app.modules.observability.domain.pii import mask_pii
 from app.modules.observability.domain.tracing import (
     GenerationInfo,
     GenerationTrace,
@@ -150,11 +152,13 @@ class LangfuseTracer:
         host: str | None,
         environment: str,
         timeout_s: int = 30,
+        span_exporter: SpanExporter | None = None,
     ) -> "LangfuseTracer":
         # Свой TracerProvider: иначе SDK зарегистрирует глобальный провайдер OpenTelemetry.
         # gzip и таймаут отправки больше 5 с по умолчанию: generation несёт весь промпт шага
         # (десятки КБ), и на медленном канале пачка не успевала уйти (P7-03). Отправка — в
-        # фоновом потоке SDK, ход она не задерживает.
+        # фоновом потоке SDK, ход она не задерживает. Персональные данные маскируются до
+        # отправки (input, output, metadata каждого observation; ADR-0032).
         return cls(
             Langfuse(
                 public_key=public_key,
@@ -164,6 +168,8 @@ class LangfuseTracer:
                 tracer_provider=TracerProvider(),
                 timeout=timeout_s,
                 otel_compression="gzip",
+                mask=_mask,
+                span_exporter=span_exporter,  # в тестах — in-memory вместо отправки
             )
         )
 
@@ -176,6 +182,10 @@ class LangfuseTracer:
 
     def shutdown(self) -> None:
         self._client.shutdown()
+
+
+def _mask(*, data: Any, **_: Any) -> Any:
+    return mask_pii(data)
 
 
 def build_tracer(

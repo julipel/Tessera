@@ -6,7 +6,8 @@
 `knowledge.catalog.attribute_labels` (в порядке конфига): ключи атрибутов пользователю не
 показываются, подписи — бизнес-специфика тенанта. Кнопки карточек — из
 `knowledge.catalog.card_actions`: нажатие приходит в диалог как `input.type=action` с
-`payload: {entity_id}` (contracts.md §1).
+`payload: {entity_id}` (contracts.md §1). Подписи тенанта приходят уже на языке диалога
+(`localize_config`), строки платформы — из словаря по `language` (ADR-0025).
 """
 
 from collections.abc import Mapping, Sequence
@@ -27,6 +28,7 @@ from app.contracts import (
     ProductCarousel,
 )
 from app.modules.knowledge.kernel import CatalogEntity, CatalogError
+from app.modules.tools.application.labels import CatalogTexts, catalog_texts
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition, ToolHandler
 from app.modules.tools.domain.ports import Catalog
 from app.modules.tools.domain.result import ToolError, ToolResult
@@ -52,9 +54,12 @@ _DESCRIPTION = (
 )
 
 
-def show_entities_tool(catalog: Catalog, settings: CatalogConfig | None = None) -> ToolDefinition:
+def show_entities_tool(
+    catalog: Catalog, settings: CatalogConfig | None = None, language: str = "ru"
+) -> ToolDefinition:
     labels = dict((settings.attribute_labels if settings else None) or {})
     actions = tuple((settings.card_actions if settings else None) or ())
+    texts = catalog_texts(language)
     return ToolDefinition(
         name=SHOW_ENTITIES,
         description=_DESCRIPTION,
@@ -80,13 +85,16 @@ def show_entities_tool(catalog: Catalog, settings: CatalogConfig | None = None) 
             "required": ["entity_ids", "layout"],
             "additionalProperties": False,
         },
-        handler=_handler(catalog, labels, actions),
+        handler=_handler(catalog, labels, actions, texts),
         display_label="Показываю варианты",
     )
 
 
 def _handler(
-    catalog: Catalog, labels: Mapping[str, str], actions: Sequence[CardAction]
+    catalog: Catalog,
+    labels: Mapping[str, str],
+    actions: Sequence[CardAction],
+    texts: CatalogTexts,
 ) -> ToolHandler:
     async def handle(arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
         raw_ids: list[str] = arguments["entity_ids"]
@@ -127,7 +135,9 @@ def _handler(
             content["not_found"] = missing
         return ToolResult(
             content=content,
-            components=_components(layout, entities, labels, actions, arguments.get("title")),
+            components=_components(
+                layout, entities, labels, actions, texts, arguments.get("title")
+            ),
             state_patch={"shown_entities": [str(e.id) for e in entities]},
         )
 
@@ -139,18 +149,22 @@ def _components(
     entities: Sequence[CatalogEntity],
     labels: Mapping[str, str],
     actions: Sequence[CardAction],
+    texts: CatalogTexts,
     title: str | None,
 ) -> tuple[dict[str, Any], ...]:
     if layout == COMPARISON:
-        return (comparison_table(entities, labels),)
-    cards = [product_card(entity, actions) for entity in entities]
+        return (comparison_table(entities, labels, texts),)
+    cards = [product_card(entity, actions, texts) for entity in entities]
     if layout == CAROUSEL:
         carousel = ProductCarousel(type="product_carousel", title=title, items=cards)
         return (carousel.model_dump(mode="json"),)
     return tuple(card.model_dump(mode="json") for card in cards)
 
 
-def product_card(entity: CatalogEntity, actions: Sequence[CardAction] = ()) -> ProductCard:
+def product_card(
+    entity: CatalogEntity, actions: Sequence[CardAction] = (), texts: CatalogTexts | None = None
+) -> ProductCard:
+    texts = texts or catalog_texts("ru")
     price = None
     if entity.price is not None and entity.currency:
         price = Price(amount=_number(entity.price), currency=entity.currency)
@@ -161,7 +175,7 @@ def product_card(entity: CatalogEntity, actions: Sequence[CardAction] = ()) -> P
         subtitle=entity.category,
         image_url=entity.image_url,
         price=price,
-        badges=[label] if (label := _stock_label(entity.in_stock)) else [],
+        badges=[label] if (label := _stock_label(entity.in_stock, texts)) else [],
         url=entity.url,
         actions=[
             Action(
@@ -176,16 +190,19 @@ def product_card(entity: CatalogEntity, actions: Sequence[CardAction] = ()) -> P
 
 
 def comparison_table(
-    entities: Sequence[CatalogEntity], labels: Mapping[str, str]
+    entities: Sequence[CatalogEntity],
+    labels: Mapping[str, str],
+    texts: CatalogTexts | None = None,
 ) -> dict[str, Any]:
     """Строка, пустая у всех позиций, не выводится; пропуск у одной позиции — «—»."""
+    texts = texts or catalog_texts("ru")
     rows: list[tuple[str, list[str | None]]] = [
-        ("Цена", [_price_text(e) for e in entities]),
-        ("Наличие", [_stock_label(e.in_stock) for e in entities]),
-        ("Категория", [e.category for e in entities]),
+        (texts.price, [_price_text(e) for e in entities]),
+        (texts.availability, [_stock_label(e.in_stock, texts) for e in entities]),
+        (texts.category, [e.category for e in entities]),
     ]
     rows += [
-        (label, [_value_text(e.attributes.get(key)) for e in entities])
+        (label, [_value_text(e.attributes.get(key), texts) for e in entities])
         for key, label in labels.items()
     ]
     table = ComparisonTable(
@@ -200,10 +217,10 @@ def comparison_table(
     return table.model_dump(mode="json")
 
 
-def _stock_label(in_stock: bool | None) -> str | None:
+def _stock_label(in_stock: bool | None, texts: CatalogTexts) -> str | None:
     if in_stock is None:
         return None
-    return "В наличии" if in_stock else "Нет в наличии"
+    return texts.in_stock if in_stock else texts.out_of_stock
 
 
 def _price_text(entity: CatalogEntity) -> str | None:
@@ -213,13 +230,13 @@ def _price_text(entity: CatalogEntity) -> str | None:
     return f"{amount} {entity.currency}" if entity.currency else amount
 
 
-def _value_text(value: Any) -> str | None:
+def _value_text(value: Any, texts: CatalogTexts) -> str | None:
     if value is None or value == "" or value == []:
         return None
     if isinstance(value, bool):
-        return "да" if value else "нет"
+        return texts.yes if value else texts.no
     if isinstance(value, list):
-        return ", ".join(t for item in value if (t := _value_text(item)))
+        return ", ".join(t for item in value if (t := _value_text(item, texts)))
     if isinstance(value, int | float | Decimal):
         return _number_text(Decimal(str(value)))
     return str(value)

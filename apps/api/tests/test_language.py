@@ -5,7 +5,13 @@ from typing import Any
 import pytest
 
 from app.contracts import AgentConfig, AssistantConfig
-from app.modules.tenants.kernel import AssistantTexts, assistant_texts, resolve_language
+from app.modules.tenants.kernel import (
+    AssistantTexts,
+    Language,
+    assistant_texts,
+    localize_config,
+    resolve_language,
+)
 from app.modules.tools.public import builtin_tools, confirm_labels
 
 
@@ -124,3 +130,107 @@ def test_every_builtin_display_label_is_translated(language: str) -> None:
             assert translated[name] is None
         else:
             assert translated[name] not in (None, label), name
+
+
+# --- Тексты тенанта в компонентах инструментов (P6-04d) ---
+
+
+def agent_config(translations: dict[str, Any] | None = None) -> AgentConfig:
+    return AgentConfig.model_validate(
+        {
+            "assistant": {
+                "name": "A",
+                "greeting": "Привет",
+                "fallback_message": "Ошибка",
+                **({"translations": translations} if translations is not None else {}),
+            },
+            "model": {"primary": {"provider": "openai", "name": "m"}},
+            "limits": {},
+            "prompt": {"tenant": "t"},
+            "tools": {},
+            "forms": {
+                "contact": {
+                    "title": "Связаться",
+                    "fields": [
+                        {"name": "name", "label": "Имя", "kind": "text"},
+                        {
+                            "name": "time",
+                            "label": "Время",
+                            "kind": "select",
+                            "options": [
+                                {"value": "morning", "label": "Утро"},
+                                {"value": "evening", "label": "Вечер"},
+                            ],
+                        },
+                    ],
+                },
+                "other": {
+                    "title": "Другая",
+                    "fields": [{"name": "x", "label": "Икс", "kind": "text"}],
+                },
+            },
+            "knowledge": {
+                "catalog": {
+                    "attribute_labels": {"brand": "Бренд", "spf": "SPF"},
+                    "card_actions": [
+                        {"action_id": "ask_about", "label": "Подробнее"},
+                        {"action_id": "pick", "label": "Выбрать", "style": "primary"},
+                    ],
+                }
+            },
+        }
+    )
+
+
+def test_localize_config_translates_forms_and_catalog_by_keys() -> None:
+    config = agent_config(
+        {
+            "en": {
+                "forms": {
+                    "contact": {
+                        "title": "Contact us",
+                        "fields": {
+                            "name": {"label": "Name"},
+                            "time": {"label": "Time", "options": {"evening": "Evening"}},
+                        },
+                    }
+                },
+                "card_actions": {"ask_about": "Details"},
+                "attribute_labels": {"brand": "Brand"},
+            }
+        }
+    )
+
+    localized = localize_config(config, "en")
+
+    assert localized.forms is not None
+    contact = localized.forms["contact"]
+    assert contact.title == "Contact us"
+    assert [f.label for f in contact.fields] == ["Name", "Time"]
+    # value варианта не переводится — отправленную форму проверяют по нему.
+    assert [(o.value, o.label) for o in contact.fields[1].options or []] == [
+        ("morning", "Утро"),
+        ("evening", "Evening"),
+    ]
+    assert localized.forms["other"] == config.forms["other"]  # type: ignore[index]
+    assert localized.knowledge is not None and localized.knowledge.catalog is not None
+    catalog = localized.knowledge.catalog
+    assert [(a.action_id, a.label, a.style) for a in catalog.card_actions or []] == [
+        ("ask_about", "Details", "secondary"),
+        ("pick", "Выбрать", "primary"),
+    ]
+    assert catalog.attribute_labels == {"brand": "Brand", "spf": "SPF"}
+    # Базовый конфиг не меняется.
+    assert config.forms["contact"].title == "Связаться"  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("translations", "language"),
+    [(None, "en"), ({"en": {"greeting": "Hi"}}, "sv"), ({"en": {"greeting": "Hi"}}, "en")],
+)
+def test_localize_config_without_translation_keeps_base_texts(
+    translations: dict[str, Any] | None, language: Language
+) -> None:
+    config = agent_config(translations)
+
+    assert localize_config(config, language) == config

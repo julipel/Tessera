@@ -10,6 +10,31 @@ from typing_extensions import TypeAliasType
 
 from . import components_schema, tools_schema
 
+CardActionsAdditionalProperty = TypeAliasType(
+    "CardActionsAdditionalProperty", Annotated[str, Field(max_length=40, min_length=1)]
+)
+
+
+AttributeLabelsAdditionalProperty = TypeAliasType(
+    "AttributeLabelsAdditionalProperty", Annotated[str, Field(min_length=1)]
+)
+
+
+OptionsAdditionalProperty = TypeAliasType(
+    "OptionsAdditionalProperty", Annotated[str, Field(min_length=1)]
+)
+
+
+class FormFieldTranslation(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    label: Annotated[str | None, Field(min_length=1)] = None
+    options: dict[str, OptionsAdditionalProperty] | None = None
+    """
+    value варианта select → label; value не переводится.
+    """
+
 
 class ConfirmLabels(BaseModel):
     """
@@ -144,11 +169,6 @@ EntityTypesAdditionalProperty = TypeAliasType(
 )
 
 
-AttributeLabelsAdditionalProperty = TypeAliasType(
-    "AttributeLabelsAdditionalProperty", Annotated[str, Field(min_length=1)]
-)
-
-
 class CardAction(BaseModel):
     """
     Кнопка карточки позиции: нажатие отправляет input.type=action с payload {entity_id}.
@@ -195,14 +215,15 @@ class BrandingConfig(BaseModel):
     """
 
 
-class AssistantTranslation(BaseModel):
+class FormTranslation(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    greeting: str | None = None
-    starter_suggestions: list[str] | None = None
-    fallback_message: str | None = None
-    confirm_labels: ConfirmLabels | None = None
+    title: str | None = None
+    fields: dict[str, FormFieldTranslation] | None = None
+    """
+    name поля → перевод.
+    """
 
 
 class ToolsConfig(BaseModel):
@@ -268,6 +289,28 @@ class KnowledgeConfig(BaseModel):
     )
     search_knowledge: KnowledgeSearchConfig | None = None
     catalog: CatalogConfig | None = None
+
+
+class AssistantTranslation(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    greeting: str | None = None
+    starter_suggestions: list[str] | None = None
+    fallback_message: str | None = None
+    confirm_labels: ConfirmLabels | None = None
+    card_actions: dict[str, CardActionsAdditionalProperty] | None = None
+    """
+    action_id кнопки из knowledge.catalog.card_actions → label.
+    """
+    attribute_labels: dict[str, AttributeLabelsAdditionalProperty] | None = None
+    """
+    Ключ атрибута из knowledge.catalog.attribute_labels → подпись.
+    """
+    forms: dict[str, FormTranslation] | None = None
+    """
+    form_key из forms → перевод формы.
+    """
 
 
 class Translations(BaseModel):

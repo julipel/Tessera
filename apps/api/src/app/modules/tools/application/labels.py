@@ -2,26 +2,26 @@
 
 Русские подписи — в определениях инструментов и в `ConfirmLabels`; здесь — переводы.
 Подписи без перевода остаются русскими; полноту переводов встроенных инструментов
-проверяет тест.
+проверяет тест. Строки компонентов каталога (`CatalogTexts`) — здесь на всех языках.
 """
 
 from collections.abc import Iterable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from app.modules.tools.application.catalog import GET_ENTITY, SEARCH_CATALOG
 from app.modules.tools.application.forms import CREATE_LEAD
 from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE
-from app.modules.tools.application.show_entities import SHOW_ENTITIES
 from app.modules.tools.domain.definition import ConfirmLabels, ToolDefinition
 
-# builtin.py импортирует этот модуль, поэтому имя update_dialog_state — строкой.
+# builtin.py и show_entities.py импортируют этот модуль, поэтому их имена — строками.
 _UPDATE_DIALOG_STATE = "update_dialog_state"
+_SHOW_ENTITIES = "show_entities"
 
 _DISPLAY_LABELS: dict[str, dict[str, str]] = {
     "en": {
         SEARCH_CATALOG: "Searching the catalog",
         GET_ENTITY: "Viewing product details",
-        SHOW_ENTITIES: "Showing options",
+        _SHOW_ENTITIES: "Showing options",
         SEARCH_KNOWLEDGE: "Searching the knowledge base",
         _UPDATE_DIALOG_STATE: "Noting that",
         CREATE_LEAD: "Preparing your request",
@@ -29,7 +29,7 @@ _DISPLAY_LABELS: dict[str, dict[str, str]] = {
     "sv": {
         SEARCH_CATALOG: "Söker i katalogen",
         GET_ENTITY: "Tittar på produkten",
-        SHOW_ENTITIES: "Visar alternativ",
+        _SHOW_ENTITIES: "Visar alternativ",
         SEARCH_KNOWLEDGE: "Söker i kunskapsbasen",
         _UPDATE_DIALOG_STATE: "Antecknar",
         CREATE_LEAD: "Förbereder din förfrågan",
@@ -62,3 +62,52 @@ def confirm_labels(
     на языке диалога."""
     default = _CONFIRM_LABELS.get(language, ConfirmLabels())
     return ConfirmLabels(confirm=confirm or default.confirm, cancel=cancel or default.cancel)
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogTexts:
+    """Строки платформы в компонентах `show_entities`: бейдж наличия в карточке, строки
+    таблицы сравнения и значения логических атрибутов."""
+
+    in_stock: str
+    out_of_stock: str
+    price: str
+    availability: str
+    category: str
+    yes: str
+    no: str
+
+
+_CATALOG_TEXTS: dict[str, CatalogTexts] = {
+    "ru": CatalogTexts(
+        in_stock="В наличии",
+        out_of_stock="Нет в наличии",
+        price="Цена",
+        availability="Наличие",
+        category="Категория",
+        yes="да",
+        no="нет",
+    ),
+    "en": CatalogTexts(
+        in_stock="In stock",
+        out_of_stock="Out of stock",
+        price="Price",
+        availability="Availability",
+        category="Category",
+        yes="yes",
+        no="no",
+    ),
+    "sv": CatalogTexts(
+        in_stock="I lager",
+        out_of_stock="Slut i lager",
+        price="Pris",
+        availability="Tillgänglighet",
+        category="Kategori",
+        yes="ja",
+        no="nej",
+    ),
+}
+
+
+def catalog_texts(language: str) -> CatalogTexts:
+    return _CATALOG_TEXTS.get(language, _CATALOG_TEXTS["ru"])

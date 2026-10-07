@@ -67,7 +67,46 @@
         "greeting": { "type": "string" },
         "starter_suggestions": { "type": "array", "items": { "type": "string" } },
         "fallback_message": { "type": "string" },
-        "confirm_labels": { "$ref": "#/$defs/ConfirmLabels" }
+        "confirm_labels": { "$ref": "#/$defs/ConfirmLabels" },
+        "card_actions": {
+          "type": "object",
+          "description": "action_id кнопки из knowledge.catalog.card_actions → label.",
+          "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 40 }
+        },
+        "attribute_labels": {
+          "type": "object",
+          "description": "Ключ атрибута из knowledge.catalog.attribute_labels → подпись.",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "forms": {
+          "type": "object",
+          "description": "form_key из forms → перевод формы.",
+          "additionalProperties": { "$ref": "#/$defs/FormTranslation" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FormTranslation": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "fields": {
+          "type": "object",
+          "description": "name поля → перевод.",
+          "additionalProperties": { "$ref": "#/$defs/FormFieldTranslation" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FormFieldTranslation": {
+      "type": "object",
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "options": {
+          "type": "object",
+          "description": "value варианта select → label; value не переводится.",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
       },
       "additionalProperties": false
     },

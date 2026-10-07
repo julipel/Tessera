@@ -38,6 +38,7 @@ from app.modules.chat.infrastructure.loop_agent import (
 )
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.public import ToolRegistry
+from test_catalog_tools import CREAM, FakeCatalog
 
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
 TENANT = TenantId(uuid4())
@@ -320,6 +321,75 @@ async def test_english_conversation_gets_translated_and_platform_labels() -> Non
     assert started.display_label == "Preparing your request"
     # В истории нет текста клиента — язык интерфейса остаётся запасным языком ответа.
     assert "Интерфейс клиента — на английском языке" in llm.requests[0].system
+
+
+async def test_forms_and_card_actions_in_conversation_language() -> None:
+    """P6-04d: форма, кнопки карточек, строки платформы в карточке и текст confirm заявки —
+    на языке диалога; без перевода — базовые тексты тенанта."""
+    calls = (
+        ToolCall(id="c1", name="show_form", arguments={"form_key": "contact"}, raw_arguments="{}"),
+        ToolCall(
+            id="c2",
+            name="show_entities",
+            arguments={"entity_ids": [str(CREAM.id)], "layout": "cards"},
+            raw_arguments="{}",
+        ),
+        ToolCall(
+            id="c3",
+            name="create_lead",
+            arguments={"form_key": "contact", "fields": {"phone": "+7900"}},
+            raw_arguments="{}",
+        ),
+    )
+    agent_config = {
+        **LEAD_CONFIG,
+        "assistant": {
+            **LEAD_CONFIG["assistant"],
+            "translations": {
+                "en": {
+                    "forms": {
+                        "contact": {"title": "Contact", "fields": {"phone": {"label": "Phone"}}}
+                    },
+                    "card_actions": {"ask_about": "Details"},
+                }
+            },
+        },
+        "tools": {"builtin": ["show_form", "show_entities", "create_lead"]},
+        "knowledge": {
+            "catalog": {
+                "card_actions": [
+                    {"action_id": "ask_about", "label": "Подробнее"},
+                    {"action_id": "pick", "label": "Выбрать"},
+                ]
+            }
+        },
+    }
+
+    async def components(language: str) -> list[dict[str, Any]]:
+        llm = FakeLLM([FakeReply(tool_calls=calls), FakeReply()])
+        agent = builtin_turn_agent(
+            lambda _: llm, catalog=FakeCatalog([CREAM]), leads=RecordingLeads()
+        )
+        request = replace(
+            lead_request({"type": "text", "text": "Hi"}, {}),
+            agent_config=agent_config,
+            language=language,
+        )
+        return [
+            e.component async for e in agent.run_turn(request) if isinstance(e, ComponentEmitted)
+        ]
+
+    form, card, confirm = await components("en")
+    assert (form["title"], [f["label"] for f in form["fields"]]) == ("Contact", ["Phone"])
+    assert [a["label"] for a in card["actions"]] == ["Details", "Выбрать"]
+    assert card["badges"] == ["In stock"]
+    assert confirm["text"] == "Contact. Phone: +7900"
+
+    form, card, confirm = await components("ru")
+    assert (form["title"], [f["label"] for f in form["fields"]]) == ("Контакт", ["Телефон"])
+    assert [a["label"] for a in card["actions"]] == ["Подробнее", "Выбрать"]
+    assert card["badges"] == ["В наличии"]
+    assert confirm["text"] == "Контакт. Телефон: +7900"
 
 
 @pytest.mark.parametrize(

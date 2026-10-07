@@ -28,7 +28,12 @@ from app.modules.agent.public import (
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, TurnRequest
 from app.modules.memory.public import DialogState
-from app.modules.tenants.kernel import Language, assistant_texts, resolve_language
+from app.modules.tenants.kernel import (
+    Language,
+    assistant_texts,
+    localize_config,
+    resolve_language,
+)
 from app.modules.tools.public import (
     CANCEL_ACTION_ID,
     CONFIRM_ACTION_ID,
@@ -112,13 +117,17 @@ def builtin_turn_agent(
     """Агентный цикл со встроенными инструментами из `tools.builtin` конфига — так ход
     собирают chat API и раннер эвалов (ADR-0011). Без `knowledge` не подключается
     `search_knowledge`, без `catalog` — `search_catalog` и `get_entity`, без `leads` —
-    `create_lead`."""
+    `create_lead`. Формы и подписи каталога — на языке диалога (ADR-0025)."""
     return LoopTurnAgent(
         llm_for,
         lambda config, language: RegistryToolExecutor(
             ToolRegistry(
                 builtin_tools(
-                    config, knowledge=knowledge, catalog=catalog, leads=leads, language=language
+                    localize_config(config, language),
+                    knowledge=knowledge,
+                    catalog=catalog,
+                    leads=leads,
+                    language=language,
                 ),
                 _confirm_labels(config, language),
             )

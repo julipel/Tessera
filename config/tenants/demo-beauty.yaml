@@ -36,6 +36,29 @@ agent_config:
           - "Pick a gift"
           - "Delivery and returns"
         fallback_message: "Sorry, I can't answer right now. Please try again."
+        # Тексты компонентов инструментов (P6-04d): ключи — как в forms и knowledge.catalog
+        card_actions: { ask_about: "Details" }
+        forms:
+          consultation:
+            title: "Beautician consultation"
+            fields:
+              name: { label: "Name" }
+              contact: { label: "Phone or Telegram" }
+              preferred_time: { label: "Preferred time" }
+              comment: { label: "Comment" }
+        attribute_labels:
+          brand: "Brand"
+          product_type: "Product type"
+          skin_types: "Skin type"
+          concerns: "Concerns"
+          key_ingredients: "Key ingredients"
+          texture: "Texture"
+          spf: "SPF"
+          fragrance_free: "Fragrance-free"
+          contains_retinoids: "Contains retinoids"
+          families: "Fragrance families"
+          concentration: "Concentration"
+          intensity: "Intensity"
 
   model:
     primary: { provider: openai, name: "gpt-6-luna" }

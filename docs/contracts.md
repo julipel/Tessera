@@ -277,7 +277,12 @@ assistant:
   confirm_labels: { confirm: "Подтвердить", cancel: "Отмена" }   # кнопки confirm (по умолчанию)
   translations:               # тексты на других языках диалога; нет поля — базовое значение
     en: { greeting: "Hi! I can help you choose...", starter_suggestions: ["Find a gift"],
-          fallback_message: "Sorry, something went wrong.", confirm_labels: { confirm: "Send" } }
+          fallback_message: "Sorry, something went wrong.", confirm_labels: { confirm: "Send" },
+          # тексты компонентов инструментов — по ключам из forms и knowledge.catalog (P6-04d);
+          # value вариантов select и action_id не переводятся
+          forms: { contact: { title: "Contact", fields: { phone: { label: "Phone" },
+                                                          time: { options: { evening: "Evening" } } } } },
+          card_actions: { ask_about: "Details" }, attribute_labels: { brand: "Brand" } }
 model:
   primary: { provider: openai, name: "<model>" }
   fallback: { provider: anthropic, name: "<model>" }

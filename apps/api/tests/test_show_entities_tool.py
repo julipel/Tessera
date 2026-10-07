@@ -253,3 +253,34 @@ async def test_number_formatting_in_comparison() -> None:
     values = {row["label"]: row["values"] for row in table["rows"]}
     assert values["Цена"] == ["12\u00a0990 RUB", "1\u00a0990 RUB"]
     assert values["Объём"] == ["50", "50"] and values["SPF"] == ["30.5", "—"]
+
+
+@pytest.mark.parametrize(
+    ("language", "badges", "rows", "yes"),
+    [
+        ("en", ("In stock", "Out of stock"), ["Price", "Availability", "Category"], "yes"),
+        ("sv", ("I lager", "Slut i lager"), ["Pris", "Tillgänglighet", "Kategori"], "ja"),
+    ],
+)
+async def test_platform_strings_in_conversation_language(
+    language: str, badges: tuple[str, str], rows: list[str], yes: str
+) -> None:
+    """Строки платформы — на языке диалога (P6-04d, ADR-0025); подписи тенанта и данные
+    каталога не переводятся."""
+    definition = show_entities_tool(
+        FakeCatalog([CREAM, SERUM, MASK]), CatalogConfig(attribute_labels=LABELS), language
+    )
+
+    cream, mask = validated(
+        await call(definition, {"entity_ids": [str(CREAM.id), str(MASK.id)], "layout": "cards"})
+    )
+    [table] = validated(
+        await call(
+            definition, {"entity_ids": [str(CREAM.id), str(MASK.id)], "layout": "comparison"}
+        )
+    )
+
+    assert (cream["badges"], mask["badges"]) == ([badges[0]], [badges[1]])
+    assert [row["label"] for row in table["rows"]] == [*rows, "Тип кожи", "Без отдушек"]
+    assert table["rows"][1]["values"] == list(badges)
+    assert table["rows"][-1]["values"] == ["—", yes]

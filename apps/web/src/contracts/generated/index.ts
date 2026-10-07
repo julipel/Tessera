@@ -194,6 +194,24 @@ export interface AssistantTranslation {
   starter_suggestions?: string[];
   fallback_message?: string;
   confirm_labels?: ConfirmLabels;
+  /**
+   * action_id кнопки из knowledge.catalog.card_actions → label.
+   */
+  card_actions?: {
+    [k: string]: string;
+  };
+  /**
+   * Ключ атрибута из knowledge.catalog.attribute_labels → подпись.
+   */
+  attribute_labels?: {
+    [k: string]: string;
+  };
+  /**
+   * form_key из forms → перевод формы.
+   */
+  forms?: {
+    [k: string]: FormTranslation;
+  };
 }
 /**
  * Подписи кнопок компонента confirm у инструментов с requires_confirmation (ADR-0021).
@@ -207,6 +225,38 @@ export interface AssistantTranslation {
 export interface ConfirmLabels {
   confirm?: string;
   cancel?: string;
+}
+/**
+ * This interface was referenced by `AgentConfig`'s JSON-Schema
+ * via the `definition` "FormTranslation".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FormTranslation".
+ */
+export interface FormTranslation {
+  title?: string;
+  /**
+   * name поля → перевод.
+   */
+  fields?: {
+    [k: string]: FormFieldTranslation;
+  };
+}
+/**
+ * This interface was referenced by `AgentConfig`'s JSON-Schema
+ * via the `definition` "FormFieldTranslation".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FormFieldTranslation".
+ */
+export interface FormFieldTranslation {
+  label?: string;
+  /**
+   * value варианта select → label; value не переводится.
+   */
+  options?: {
+    [k: string]: string;
+  };
 }
 /**
  * This interface was referenced by `AgentConfig`'s JSON-Schema

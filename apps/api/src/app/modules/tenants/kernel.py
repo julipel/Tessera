@@ -8,7 +8,8 @@ from app.modules.tenants.domain.language import (
     AssistantTexts,
     Language,
     assistant_texts,
+    localize_config,
     resolve_language,
 )
 
-__all__ = ["AssistantTexts", "Language", "assistant_texts", "resolve_language"]
+__all__ = ["AssistantTexts", "Language", "assistant_texts", "localize_config", "resolve_language"]

@@ -60,7 +60,8 @@ def builtin_tools(
     language: str = "ru",
 ) -> list[ToolDefinition]:
     """Встроенные инструменты из `config.tools.builtin`, которые уже реализованы и для
-    которых есть зависимости; подписи tool_started — на языке диалога `language`."""
+    которых есть зависимости; подписи tool_started и строки платформы в компонентах — на
+    языке диалога `language`. Тексты тенанта переводит вызывающий (`localize_config`)."""
     factories: dict[str, Callable[[AgentConfig], ToolDefinition]] = {
         UPDATE_DIALOG_STATE: lambda c: update_dialog_state_tool(c.prompt.scenarios or []),
         SUGGEST_REPLIES: lambda c: suggest_replies_tool(),
@@ -75,7 +76,7 @@ def builtin_tools(
         )
         factories[GET_ENTITY] = lambda c: get_entity_tool(catalog)
         factories[SHOW_ENTITIES] = lambda c: show_entities_tool(
-            catalog, c.knowledge.catalog if c.knowledge else None
+            catalog, c.knowledge.catalog if c.knowledge else None, language
         )
     forms = config.forms or {}
     if forms:

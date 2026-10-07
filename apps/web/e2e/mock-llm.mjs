@@ -9,7 +9,9 @@
 // - отправленная форма consultation → create_lead с её значениями (подтверждение e2e).
 // Ход целиком (UX e2e):
 // - слово «долго» → длинный медленный ответ из LONG_LINES абзацев (остановка, автоскролл);
-// - слово «сбой» → первый запрос с этим текстом — response.failed (повтор после ошибки);
+// - слово «сбой» → первые FAIL_ATTEMPTS запросов с этим текстом — response.failed: ход
+//   повторяет шаг основной модели (PRIMARY_ATTEMPTS в agent/application/fallback_llm.py,
+//   ADR-0027) и падает, «Повторить» получает ответ;
 //   если в контексте этот вопрос дважды подряд, ответ начинается с DUPLICATE_MARK.
 import { createServer } from "node:http";
 
@@ -57,7 +59,8 @@ const FORM_SUBMITTED = "[Отправлена форма consultation: ";
 const LONG_TRIGGER = "долго";
 const LONG_LINES = 40;
 const FAIL_TRIGGER = "сбой";
-const failed = new Set();
+const FAIL_ATTEMPTS = 2;
+const failed = new Map();
 const DUPLICATE_MARK = "(дубль в контексте) ";
 
 /** Вызов инструмента по последнему сообщению пользователя или null. */
@@ -81,8 +84,8 @@ async function responses(req, res) {
 
   res.writeHead(200, { "content-type": "text/event-stream" });
   send({ type: "response.created", response: { ...response, status: "in_progress" } });
-  if (!afterTool && last.includes(FAIL_TRIGGER) && !failed.has(last)) {
-    failed.add(last);
+  if (!afterTool && last.includes(FAIL_TRIGGER) && (failed.get(last) ?? 0) < FAIL_ATTEMPTS) {
+    failed.set(last, (failed.get(last) ?? 0) + 1);
     const error = { code: "server_error", message: "e2e: сбой модели" };
     res.end(event({ type: "response.failed", sequence_number: sequence, response: { ...response, status: "failed", error } }));
     return;

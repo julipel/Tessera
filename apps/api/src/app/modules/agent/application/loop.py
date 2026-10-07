@@ -52,14 +52,17 @@ class AgentLoop:
         schemas = self._tools.schemas()
         usage = Usage()
         state = ctx.state
+        visible = False  # клиент уже видит текст или компонент этого хода
         if ctx.confirmation is not None:
             outcome = _Outcome()
             async for event in self._resolve_confirmation(ctx, outcome):
+                visible = visible or isinstance(event, ComponentEmitted)
                 yield event
             if outcome.state is not None:
                 state = outcome.state
             messages = _with_note(messages, outcome.note)
         retries = 0
+        empty_retried = False
         steps = 0
         finish = FinishReason.STEP_LIMIT
 
@@ -76,6 +79,7 @@ class AgentLoop:
             async for chunk in self._llm.stream(request):
                 match chunk:
                     case TextDelta(text=text):
+                        visible = visible or bool(text.strip())
                         yield AnswerDelta(text)
                     case ToolCallStarted(id=call_id, name=name):
                         yield ToolStarted(call_id, name, self._tools.display_label(name))
@@ -84,6 +88,16 @@ class AgentLoop:
             if response is None:
                 raise RuntimeError("LLMClient: стрим завершился без ResponseCompleted")
             usage = _add(usage, response.usage)
+
+            if not response.tool_calls and not visible:
+                # Пустой ответ хода — один повтор шага, затем fallback-фраза (architecture.md
+                # §12). Пустой последний шаг после текста или компонентов — обычный конец хода.
+                logger.warning("agent.empty_response", turn_id=str(ctx.turn_id), step=steps)
+                if empty_retried:
+                    finish = FinishReason.EMPTY_RESPONSE
+                    break
+                empty_retried = True
+                continue
 
             if not response.tool_calls:
                 finish = FinishReason.ANSWERED
@@ -96,6 +110,7 @@ class AgentLoop:
             batch_ms = round((time.perf_counter() - started) * 1000)
             for call, result in zip(response.tool_calls, results, strict=True):
                 for event in _reported(call, result, batch_ms):
+                    visible = visible or isinstance(event, ComponentEmitted)
                     yield event
             patches = [r.state_patch for r in results if r.ok and r.state_patch]
             if patches:

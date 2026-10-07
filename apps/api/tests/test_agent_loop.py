@@ -571,3 +571,44 @@ async def test_failed_confirmed_call_is_reported_to_model() -> None:
     [updated] = [e for e in events if isinstance(e, DialogStateUpdated)]
     assert updated.state.pending_confirmation is None
     assert "upstream_error: create_lead: данные недоступны" in last_user_text(llm.requests[0])
+
+
+# --- Пустой ответ модели (P7-01, architecture.md §12) ---
+
+
+async def test_empty_response_is_retried_once() -> None:
+    llm = FakeLLM([FakeReply(), FakeReply(text="Подойдёт крем с керамидами.")])
+
+    events = await run(llm, FakeTools())
+
+    assert text(events) == "Подойдёт крем с керамидами."
+    assert completed(events).finish is FinishReason.ANSWERED
+    assert completed(events).steps == 2
+    assert llm.requests[0] == llm.requests[1]  # повтор того же шага
+
+
+async def test_second_empty_response_gives_fallback_message() -> None:
+    llm = FakeLLM([FakeReply(chunks=(" ",)), FakeReply()])
+
+    events = await run(llm, FakeTools())
+
+    assert text(events).endswith(context().fallback_message)
+    assert completed(events).finish is FinishReason.EMPTY_RESPONSE
+    assert llm.remaining == 0
+
+
+@pytest.mark.parametrize(
+    "result",
+    [ToolResult(content="ok"), ToolResult(content="ok", components=({"type": "product_card"},))],
+)
+async def test_empty_last_step_after_visible_output_is_answer(result: ToolResult) -> None:
+    # Текст первого шага или показанный компонент — уже ответ: пустой последний шаг не повтор.
+    first = FakeReply(
+        text="Какой у вас тип кожи?" if not result.components else "", tool_calls=(call("c"),)
+    )
+    llm = FakeLLM([first, FakeReply()])
+
+    events = await run(llm, FakeTools({"c": result}))
+
+    assert completed(events).finish is FinishReason.ANSWERED
+    assert llm.remaining == 0

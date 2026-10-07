@@ -15,6 +15,8 @@ from app.modules.agent.public import (
     AgentLoop,
     AssistantMessage,
     ConfirmationReply,
+    FallbackLLM,
+    FallbackModel,
     LLMClient,
     LLMMessage,
     Provider,
@@ -103,9 +105,26 @@ class LoopTurnAgent:
             state=state,
             confirmation=confirmation_reply(request.input),
         )
-        loop = AgentLoop(self._llm_for(primary.provider), self._tools_for(config, language))
+        loop = AgentLoop(self._llm(config), self._tools_for(config, language))
         async for event in loop.run_turn(ctx):
             yield event
+
+    def _llm(self, config: AgentConfig) -> LLMClient:
+        """Основная модель с ретраями и резервной из `model.fallback` (ADR-0027); клиент
+        резервной создаётся, только когда понадобится."""
+        primary = self._llm_for(config.model.primary.provider)
+        fallback = config.model.fallback
+        if fallback is None:
+            return FallbackLLM(primary)
+        provider = fallback.provider
+        return FallbackLLM(
+            primary,
+            FallbackModel(
+                client=lambda: self._llm_for(provider),
+                model=fallback.name,
+                temperature=fallback.temperature,
+            ),
+        )
 
 
 def builtin_turn_agent(

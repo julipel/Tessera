@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts import Event, HttpError, MessageHistory, UserInput
 from app.logs import TRACE_ID_HEADER
+from app.modules.agent.application import fallback_llm
 from app.modules.agent.public import (
     AgentEvent,
     AnswerDelta,
@@ -1089,3 +1090,45 @@ async def test_retry_without_key_is_401(db_client: AsyncClient, conversation_id:
 
     assert response.status_code == 401
     assert _error_code(response) == "unauthorized"
+
+
+# --- Ретраи и резервная модель (P7-01, ADR-0027) ---
+
+
+@pytest.mark.parametrize("backup_fails", [False, True])
+async def test_unavailable_primary_falls_back_to_backup_model(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    use_agent: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    backup_fails: bool,
+) -> None:
+    monkeypatch.setattr(fallback_llm, "RETRY_DELAY_S", 0.0)
+    config = _config("backup")
+    config["model"]["fallback"] = {"provider": "anthropic", "name": "backup-model"}
+    await _tenant(db_session, "backup", config)
+    created = await db_client.post(URL, json={"visitor_id": "v-1"}, headers=_key("backup"))
+    conversation_id = UUID(created.json()["conversation_id"])
+    unavailable = LLMError("HTTP 503", retryable=True)
+    llms = {
+        "openai": FakeLLM([unavailable, unavailable]),
+        "anthropic": FakeLLM([unavailable if backup_fails else FakeReply(text=ANSWER)]),
+    }
+    use_agent(
+        LoopTurnAgent(lambda p: llms[p], lambda *_: RegistryToolExecutor(ToolRegistry([]))),
+    )
+
+    response = await _send(db_client, conversation_id, slug="backup")
+
+    events = [e.model_dump() for _, e in _parse_sse(response.text)]
+    [backup_request] = llms["anthropic"].requests
+    assert backup_request.model == "backup-model"
+    if backup_fails:
+        error = next(e for e in events if e["type"] == "error")
+        assert (error["data"]["code"], error["data"]["retryable"]) == ("llm_unavailable", True)
+        assert events[-1]["data"]["status"] == "failed"
+    else:
+        assert not any(e["type"] == "error" for e in events)
+        texts = "".join(e["data"]["delta"] for e in events if e["type"] == "text_delta")
+        assert texts == ANSWER
+        assert events[-1]["data"]["status"] == "completed"

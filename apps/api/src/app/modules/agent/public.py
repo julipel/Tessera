@@ -1,5 +1,6 @@
 """Публичный интерфейс модуля agent — единственная точка входа для других модулей."""
 
+from app.modules.agent.application.fallback_llm import FallbackLLM, FallbackModel
 from app.modules.agent.application.loop import AgentLoop
 from app.modules.agent.application.platform_prompt import PLATFORM_PROMPT_VERSION
 from app.modules.agent.application.prompt import RuntimeContext, SystemPrompt, build_system_prompt
@@ -64,6 +65,8 @@ __all__ = [
     "FakeLLM",
     "FakeLLMExhaustedError",
     "FakeReply",
+    "FallbackLLM",
+    "FallbackModel",
     "FinishReason",
     "HistorySummarizer",
     "LLMChunk",

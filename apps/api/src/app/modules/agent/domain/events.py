@@ -73,6 +73,7 @@ class FinishReason(StrEnum):
     ANSWERED = "answered"
     STEP_LIMIT = "step_limit"
     TOOL_RETRIES_EXHAUSTED = "tool_retries_exhausted"
+    EMPTY_RESPONSE = "empty_response"
 
 
 @dataclass(frozen=True, slots=True)

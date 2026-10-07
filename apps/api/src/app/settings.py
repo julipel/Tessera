@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     openai_compatible_base_url: str | None = None
     anthropic_api_key: SecretStr | None = None
     anthropic_base_url: str | None = None
+    # Токен API админки (`Authorization: Bearer …`) до пользователей админки (P8-01, ADR-0028);
+    # без токена эндпоинты админки отвечают 404.
+    admin_api_token: SecretStr | None = None
 
     @field_validator("source_db_allowed_networks")
     @classmethod

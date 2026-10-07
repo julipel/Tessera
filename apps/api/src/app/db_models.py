@@ -13,6 +13,7 @@ from app.modules.knowledge.public import (
     SourceSyncRecord,
 )
 from app.modules.leads.public import LeadRecord
+from app.modules.observability.public import AgentEventRecord
 from app.modules.shared.public import Base
 from app.modules.tenants.public import AgentConfigRecord, TenantRecord, WidgetKeyRecord
 
@@ -30,6 +31,7 @@ _registered = (
     DocumentRecord,
     ChunkRecord,
     LeadRecord,
+    AgentEventRecord,
 )
 
 __all__ = ["metadata"]

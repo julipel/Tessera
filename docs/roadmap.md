@@ -320,7 +320,15 @@
   как раньше; HTTP-ретраи — в SDK. Пустой ответ хода (ни текста, ни компонентов, ни вызовов) —
   один повтор, затем fallback-фраза (`FinishReason.EMPTY_RESPONSE`). e2e-мок «сбой» — 2 провала.
   Не сделано: повтор после частичного ответа, fallback суммаризатора, `turn_timeout_s`.
-- [ ] **P7-02 AgentEvent-лог и trace_id.** Запись всех событий хода, эндпоинт для админки.
+- [x] **P7-02 AgentEvent-лог и trace_id.** Запись всех событий хода, эндпоинт для админки.
+  Сделано (ADR-0028): таблица `agent_events` в `observability`; журнал хода копит
+  `chat.TurnStream` (`TurnJournal`) и пишет вместе с ответом одной транзакцией (и у прерванного,
+  и у неудачного хода): `turn_started` (ввод, `retry_of`), `text` (блоком), `tool_started`,
+  `tool_finished` (аргументы и ошибка, результат — в ToolCall), `state_updated`, `component`,
+  `suggestions`, `turn_completed`, `turn_finished` (статус, `message_id`, ошибка); trace_id —
+  `X-Trace-Id` запроса хода. `GET /v1/admin/tenants/{id}/events?conversation_id|turn_id|trace_id`
+  по `ADMIN_API_TOKEN` (без токена — 404). Не сделано: ретраи/fallback LLM в журнале (logs,
+  P7-03), ретенция журнала, запись событий до `save()` (падение процесса посреди хода).
 - [ ] **P7-03 Langfuse.** Трейсы LLM, версии промптов, стоимость.
 - [ ] **P7-04 Rate limiting и защита.** Лимиты по widget key / visitor, размер ввода,
   базовая защита от prompt injection в данных источников (данные ≠ инструкции).

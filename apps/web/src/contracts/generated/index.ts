@@ -131,6 +131,42 @@ export interface Contracts {
   [k: string]: unknown;
 }
 /**
+ * Ответ GET /v1/admin/tenants/{tenant_id}/events: события в порядке ходов (ts) и внутри хода (seq).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AgentEventList".
+ */
+export interface AgentEventList {
+  events: AgentEventItem[];
+}
+/**
+ * Событие хода. payload — данные по type (docs/contracts.md §7); turn_finished — последнее событие хода, есть всегда.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AgentEventItem".
+ */
+export interface AgentEventItem {
+  conversation_id: string;
+  turn_id: string;
+  /**
+   * X-Trace-Id запроса, в котором шёл ход.
+   */
+  trace_id: string;
+  seq: number;
+  type:
+    | "turn_started"
+    | "text"
+    | "tool_started"
+    | "tool_finished"
+    | "component"
+    | "suggestions"
+    | "state_updated"
+    | "turn_completed"
+    | "turn_finished";
+  payload: {};
+  ts: string;
+}
+/**
  * Конфигурация тенанта (поле config JSONB таблицы AgentConfig). Вся бизнес-специфика — здесь, не в коде ядра.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema

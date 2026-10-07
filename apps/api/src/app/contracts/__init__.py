@@ -4,6 +4,7 @@
 только внутренности `generated`, точка входа остаётся стабильной.
 """
 
+from app.contracts.generated.admin_events_schema import AgentEventItem, AgentEventList
 from app.contracts.generated.agent_config_schema import (
     AgentConfig,
     AssistantConfig,
@@ -88,6 +89,8 @@ __all__ = [
     "Action",
     "ActionInput",
     "AgentConfig",
+    "AgentEventItem",
+    "AgentEventList",
     "AssistantConfig",
     "CardAction",
     "CatalogConfig",

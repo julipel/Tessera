@@ -42,7 +42,8 @@ class TraceIdMiddleware:
     """Чистое ASGI-middleware: не ломает стриминг (SSE) и contextvars.
 
     Берёт trace_id из заголовка запроса или генерирует новый, кладёт в контекст
-    structlog на время запроса и возвращает в заголовке ответа.
+    structlog на время запроса и в `request.state.trace_id` (журнал хода, P7-02)
+    и возвращает в заголовке ответа.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -56,6 +57,7 @@ class TraceIdMiddleware:
         header = TRACE_ID_HEADER.lower().encode()
         incoming = dict(scope["headers"]).get(header)
         trace_id = incoming.decode("latin-1") if incoming else uuid.uuid4().hex
+        scope.setdefault("state", {})["trace_id"] = trace_id
 
         async def send_with_trace_id(message: Message) -> None:
             if message["type"] == "http.response.start":

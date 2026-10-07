@@ -337,3 +337,33 @@ branding:
 
 Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `forbidden`, `not_found`,
 `duplicate_message`, `not_retryable`.
+
+## 7. API админки: журнал хода (P7-02, ADR-0028)
+
+Доступ — `Authorization: Bearer <ADMIN_API_TOKEN>` из env (до пользователей админки, P8-01).
+Токен не задан — `/v1/admin/*` отвечает 404, неверный или нет заголовка — 401.
+
+```
+GET /v1/admin/tenants/{tenant_id}/events?conversation_id=…&turn_id=…&trace_id=…
+  → 200 AgentEventList {events: AgentEventItem[]}   # admin_events.schema.json
+  → 422 invalid_input — не задан ни один фильтр
+```
+
+Фильтры применяются вместе; события — в порядке ходов (`ts`) и внутри хода (`seq`), не больше
+1000. `trace_id` — `X-Trace-Id` ответа, в котором шёл ход (заголовок запроса или сгенерированный).
+Ход пишет журнал вместе с ответом ассистента (одна транзакция): ход без записанного ответа
+в журнале не виден.
+
+`payload` по `type`:
+
+| type | payload |
+|---|---|
+| `turn_started` | `input` (UserInput), `agent_config_id`, `retry_of` (id заменённого ответа или null) |
+| `text` | `block_id`, `text` — блок целиком, на месте его начала |
+| `tool_started` | `tool_call_id`, `name` |
+| `tool_finished` | `tool_call_id`, `name`, `ok`, `arguments`, `duration_ms`, `error` {code, message} при ошибке; результат — в ToolCall ответа |
+| `state_updated` | `state` — полное состояние диалога после шага |
+| `component` | `block_id`, `component` |
+| `suggestions` | `items` — подписи быстрых ответов |
+| `turn_completed` | `finish`, `steps`, `usage` {input_tokens, output_tokens} — нет у прерванного и неудачного хода |
+| `turn_finished` | `status` (completed/interrupted/failed), `message_id`, `error` {code, message, retryable} или null — последнее событие, есть всегда |

@@ -15,6 +15,7 @@ from app.modules.chat.public import SummaryScheduler, TurnRegistry, background_s
 from app.modules.chat.public import router as chat_router
 from app.modules.knowledge.public import SqlCatalog
 from app.modules.leads.public import SqlLeadStore
+from app.modules.observability.public import admin_router
 from app.modules.shared.public import (
     create_engine,
     create_session_factory,
@@ -78,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(tenants_public_router)
     app.include_router(chat_router)
+    app.include_router(admin_router)
     return app
 
 

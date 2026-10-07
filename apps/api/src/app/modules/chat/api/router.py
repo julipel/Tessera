@@ -37,6 +37,7 @@ from app.modules.chat.infrastructure.repositories import (
 )
 from app.modules.knowledge.public import KnowledgeSearch, SqlCatalog
 from app.modules.leads.public import SqlLeadStore
+from app.modules.observability.public import AgentEventRepository
 from app.modules.shared.public import ApiError, DbSession, StreamDbSession
 from app.modules.tenants.public import WidgetTenant
 
@@ -73,6 +74,12 @@ def get_summary_scheduler(request: Request) -> SummaryScheduler:
 
 
 Summaries = Annotated[SummaryScheduler, Depends(get_summary_scheduler)]
+
+
+def _trace_id(request: Request) -> str:
+    """trace_id запроса (TraceIdMiddleware) — в журнал хода: ход идёт в этом запросе."""
+    trace_id: str = getattr(request.state, "trace_id", "")
+    return trace_id
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -123,6 +130,7 @@ async def conversation_messages(
     },
 )
 async def send_message(
+    request: Request,
     conversation_id: UUID,
     body: SendMessageRequest,
     tenant_id: WidgetTenant,
@@ -146,6 +154,8 @@ async def send_message(
             session.commit,
             registry,
             summaries,
+            agent_events=AgentEventRepository(session),
+            trace_id=_trace_id(request),
         )
     except ConversationNotFoundError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e
@@ -167,6 +177,7 @@ async def send_message(
     },
 )
 async def retry_message(
+    request: Request,
     conversation_id: UUID,
     message_id: UUID,
     tenant_id: WidgetTenant,
@@ -191,6 +202,8 @@ async def retry_message(
             session.commit,
             registry,
             summaries,
+            agent_events=AgentEventRepository(session),
+            trace_id=_trace_id(request),
         )
     except ConversationNotFoundError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e

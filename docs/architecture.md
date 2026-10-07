@@ -460,7 +460,12 @@ AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSON
 
 ## 13. Наблюдаемость
 
-- Каждое событие хода пишется в `AgentEvent` (trace_id на ход).
+- Каждое событие хода пишется в `AgentEvent` (trace_id на ход). Журнал копит `chat.TurnStream`
+  (`TurnJournal`) и пишет вместе с ответом ассистента одной транзакцией, в т.ч. у прерванного
+  и неудачного хода; trace_id — запроса хода (`X-Trace-Id`, `TraceIdMiddleware` кладёт его
+  в `request.state`). Текст — блоками, не кусками стрима; результат инструмента — только
+  в ToolCall. Чтение — `GET /v1/admin/tenants/{id}/events` по токену из env до P8-01
+  (ADR-0028, contracts.md §7).
 - Langfuse: трейсы LLM-вызовов, версия промпта, токены, стоимость.
 - structlog + OpenTelemetry для HTTP/БД. Sentry для исключений.
 - Метрики: латентность до первого токена, длительность хода, шаги на ход, ошибки инструментов,

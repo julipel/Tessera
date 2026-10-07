@@ -14,6 +14,7 @@ from app.modules.chat.domain.entities import (
     ToolCallEntry,
     TurnRequest,
 )
+from app.modules.observability.kernel import AgentEventEntry
 from app.modules.shared.kernel import TenantId
 
 type Commit = Callable[[], Awaitable[None]]
@@ -73,6 +74,12 @@ class ToolCallStore(Protocol):
     async def list_for(self, tenant_id: TenantId, message_id: UUID) -> Sequence[ToolCallEntry]:
         """Вызовы сообщения в порядке записи."""
         ...
+
+
+class AgentEventStore(Protocol):
+    """Журнал событий хода (модуль observability, P7-02)."""
+
+    async def add_many(self, tenant_id: TenantId, entries: Sequence[AgentEventEntry]) -> None: ...
 
 
 class ActiveConfigLookup(Protocol):

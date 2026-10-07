@@ -23,6 +23,7 @@ from app.modules.agent.kernel import (
     TurnCompleted,
 )
 from app.modules.chat.application.conversations import require_conversation, user_message
+from app.modules.chat.application.journal import TurnJournal
 from app.modules.chat.application.summaries import (
     SummaryScheduler,
     after_summary,
@@ -46,6 +47,7 @@ from app.modules.chat.domain.errors import (
 )
 from app.modules.chat.domain.ports import (
     AgentConfigSource,
+    AgentEventStore,
     Commit,
     ConversationStore,
     MessageStore,
@@ -96,6 +98,8 @@ class TurnStream:
     Завершённые вызовы инструментов и последнее состояние диалога записываются вместе
     с ответом; аргументы, результаты инструментов и состояние в клиент не уходят.
     После записи ответа длинная история сворачивается в сводку в фоне (`summaries`).
+    С `agent_events` вместе с ответом записывается журнал хода (`TurnJournal`, P7-02);
+    `trace_id` — запроса, в котором идёт ход, `retry_of` — заменённый повтором ответ.
     """
 
     def __init__(
@@ -110,6 +114,9 @@ class TurnStream:
         registry: "TurnRegistry",
         message_id: UUID | None = None,
         summaries: SummaryScheduler | None = None,
+        agent_events: AgentEventStore | None = None,
+        trace_id: str = "",
+        retry_of: UUID | None = None,
     ) -> None:
         self.conversation = conversation
         self.conversations = conversations
@@ -122,9 +129,13 @@ class TurnStream:
         self.summaries = summaries
         self.turn_id = request.turn_id
         self.message_id = message_id or uuid4()
+        self.agent_events = agent_events
+        self.journal = TurnJournal(conversation.id, self.turn_id, trace_id)
+        self._retry_of = retry_of
         self._seq = 0
         self._blocks: list[dict[str, Any]] = []
         self._open_text: dict[str, Any] | None = None
+        self._journal_text: dict[str, Any] = {}
         self._tools_started = 0
         self._finished_calls: list[ToolCallEntry] = []
         self._dialog_state: dict[str, Any] | None = None  # None — состояние не менялось
@@ -138,6 +149,14 @@ class TurnStream:
         self.registry.add(self)
         # message_id нет только у turn_started (envelope.schema.json).
         yield self._event("turn_started", {})
+        self.journal.record(
+            "turn_started",
+            {
+                "input": self.request.input,
+                "agent_config_id": str(self.request.agent_config_id),
+                "retry_of": str(self._retry_of) if self._retry_of else None,
+            },
+        )
         finished = _AgentFinished(MessageStatus.INTERRUPTED)
         if not self._cancel_requested:
             queue: asyncio.Queue[_QueueItem] = asyncio.Queue()
@@ -169,17 +188,23 @@ class TurnStream:
             case AnswerDelta(text=text) if text:
                 if self._open_text is None:
                     self._open_text = self._add_block({"type": "text", "text": ""})
+                    # Блок в журнале — с места начала, текст дописывается до записи журнала.
+                    self._journal_text = {"block_id": self._open_text["block_id"], "text": ""}
+                    self.journal.record("text", self._journal_text)
                 self._open_text["text"] += text
+                self._journal_text["text"] += text
                 yield self._event(
                     "text_delta", {"block_id": self._open_text["block_id"], "delta": text}
                 )
             case ToolStarted(tool_call_id=call_id, name=name, display_label=label):
                 yield from self._close_text()
+                self.journal.record_agent_event(event)
                 self._tools_started += 1
                 yield self._event(
                     "tool_started", {"tool_call_id": call_id, "name": name, "display_label": label}
                 )
             case ToolFinished() as finished:
+                self.journal.record_agent_event(event)
                 self._finished_calls.append(_tool_call_entry(finished))
                 yield self._event(
                     "tool_finished",
@@ -192,18 +217,22 @@ class TurnStream:
             case ComponentEmitted(component=component):
                 yield from self._close_text()
                 block = self._add_block({"type": "component", "component": component})
+                self.journal.record_agent_event(event, block["block_id"])
                 yield self._event(
                     "component", {"block_id": block["block_id"], "component": component}
                 )
             case SuggestionsOffered(items=items):
+                self.journal.record_agent_event(event)
                 # Нажатие быстрого ответа — обычный текст пользователя (contracts.md §2).
                 yield self._event(
                     "suggestions",
                     {"items": [{"label": i, "input": {"type": "text", "text": i}} for i in items]},
                 )
             case DialogStateUpdated(state=state):
+                self.journal.record_agent_event(event)
                 self._dialog_state = state.to_dict()
             case TurnCompleted(usage=usage):
+                self.journal.record_agent_event(event)
                 self._usage = {
                     "input_tokens": usage.input_tokens,
                     "output_tokens": usage.output_tokens,
@@ -287,12 +316,30 @@ class TurnStream:
             await self.conversations.update_state(
                 self.conversation.tenant_id, self.conversation.id, self._dialog_state
             )
+        if self.agent_events is not None:
+            await self._save_journal(status, error)
         await self.commit()
         logger.info("turn_finished", turn_id=str(self.turn_id), status=status)
         if self.summaries is not None and needs_summary(
             self.request.agent_config, self.request.history, content
         ):
             self.summaries.schedule(self.conversation.tenant_id, self.conversation.id)
+
+    async def _save_journal(self, status: MessageStatus, error: _TurnError | None) -> None:
+        assert self.agent_events is not None
+        self.journal.record(
+            "turn_finished",
+            {
+                "status": status,
+                "message_id": str(self.message_id),
+                "error": (
+                    {"code": error.code, "message": error.message, "retryable": error.retryable}
+                    if error
+                    else None
+                ),
+            },
+        )
+        await self.agent_events.add_many(self.conversation.tenant_id, self.journal.entries)
 
     def _event(self, type_: str, data: dict[str, Any]) -> Event:
         self._seq += 1
@@ -323,6 +370,9 @@ async def start_turn(
     commit: Commit,
     registry: "TurnRegistry",
     summaries: SummaryScheduler | None = None,
+    *,
+    agent_events: AgentEventStore | None = None,
+    trace_id: str = "",
 ) -> TurnStream:
     """Загрузить версию AgentConfig диалога, проверить и записать ввод пользователя
     (и зафиксировать до начала стрима) и подготовить ход: загрузить историю.
@@ -354,6 +404,8 @@ async def start_turn(
         commit,
         registry,
         summaries=summaries,
+        agent_events=agent_events,
+        trace_id=trace_id,
     )
 
 
@@ -369,6 +421,9 @@ async def retry_turn(
     commit: Commit,
     registry: "TurnRegistry",
     summaries: SummaryScheduler | None = None,
+    *,
+    agent_events: AgentEventStore | None = None,
+    trace_id: str = "",
 ) -> TurnStream:
     """Новый ход для сохранённого ввода вместо неудачного ответа `message_id` (ADR-0023).
 
@@ -406,6 +461,9 @@ async def retry_turn(
         registry,
         message_id=new_message_id,
         summaries=summaries,
+        agent_events=agent_events,
+        trace_id=trace_id,
+        retry_of=message_id,
     )
 
 

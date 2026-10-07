@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "admin_events.schema.json",
+  "title": "AdminEventsSchema",
+  "description": "Журнал событий хода для админки (docs/contracts.md §7). Файл без единого корневого типа — экспортируемые типы в $defs: AgentEventList, AgentEventItem.",
+  "$defs": {
+    "AgentEventList": {
+      "type": "object",
+      "description": "Ответ GET /v1/admin/tenants/{tenant_id}/events: события в порядке ходов (ts) и внутри хода (seq).",
+      "properties": {
+        "events": { "type": "array", "items": { "$ref": "#/$defs/AgentEventItem" } }
+      },
+      "required": ["events"],
+      "additionalProperties": false
+    },
+    "AgentEventItem": {
+      "type": "object",
+      "description": "Событие хода. payload — данные по type (docs/contracts.md §7); turn_finished — последнее событие хода, есть всегда.",
+      "properties": {
+        "conversation_id": { "type": "string", "format": "uuid" },
+        "turn_id": { "type": "string", "format": "uuid" },
+        "trace_id": { "type": "string", "description": "X-Trace-Id запроса, в котором шёл ход." },
+        "seq": { "type": "integer", "minimum": 1 },
+        "type": {
+          "type": "string",
+          "enum": [
+            "turn_started",
+            "text",
+            "tool_started",
+            "tool_finished",
+            "component",
+            "suggestions",
+            "state_updated",
+            "turn_completed",
+            "turn_finished"
+          ]
+        },
+        "payload": { "type": "object" },
+        "ts": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversation_id", "turn_id", "trace_id", "seq", "type", "payload", "ts"],
+      "additionalProperties": false
+    }
+  }
+}

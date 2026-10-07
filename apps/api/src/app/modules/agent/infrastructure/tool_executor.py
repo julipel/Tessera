@@ -40,5 +40,8 @@ def _invocation(call: ToolCall) -> ToolInvocation:
 
 def _tool_context(ctx: TurnContext) -> ToolContext:
     return ToolContext(
-        tenant_id=ctx.tenant_id, conversation_id=ctx.conversation_id, turn_id=ctx.turn_id
+        tenant_id=ctx.tenant_id,
+        conversation_id=ctx.conversation_id,
+        turn_id=ctx.turn_id,
+        active_scenario=ctx.state.active_scenario,
     )

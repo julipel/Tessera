@@ -25,6 +25,7 @@ from app.modules.agent.public import (
     TurnCompleted,
 )
 from app.modules.chat.public import ChatMessage, MessageRole, MessageStatus, TurnRequest
+from app.modules.memory.public import DialogState
 from app.modules.shared.kernel import TenantId
 from app.modules.tenants.kernel import resolve_language
 from app.modules.tenants.public import load_tenant_spec
@@ -221,7 +222,7 @@ class DialogRunner:
             text=text,
             tools_called=tuple(collector.tools),
             components=tuple(c.get("type", "?") for c in collector.components),
-            slots=dict(conversation.state.get("slots") or {}),
+            slots=dict(DialogState.from_dict(conversation.state).active_slots),
             component_data=tuple(collector.components),
         )
         result.finish = collector.finish

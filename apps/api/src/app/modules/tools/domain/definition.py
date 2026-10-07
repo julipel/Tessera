@@ -15,11 +15,13 @@ from app.modules.tools.domain.result import ToolResult
 
 @dataclass(frozen=True, slots=True)
 class ToolContext:
-    """Чей ход исполняет инструмент: обработчики ходят в данные только с этим `tenant_id`."""
+    """Чей ход исполняет инструмент: обработчики ходят в данные только с этим `tenant_id`.
+    `active_scenario` — активный сценарий диалога на шаге вызова (ADR-0026)."""
 
     tenant_id: TenantId
     conversation_id: UUID
     turn_id: UUID
+    active_scenario: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -72,9 +72,9 @@ class LoopTurnAgent:
         state = DialogState.from_dict(request.dialog_state)
         # Диалог без языка (создан до P6-04) — язык по конфигу, как без locale (ADR-0025).
         language = resolve_language(config.assistant, request.language)
-        # Ожидающий вызов — не знание о пользователе: о нём модель узнаёт из результата
-        # инструмента и пометки к ответу на подтверждение.
-        known = {k: v for k, v in state.to_dict().items() if k != "pending_confirmation"}
+        # Слоты неактивных сценариев модели не нужны (ADR-0026); ожидающий вызов — не знание
+        # о пользователе: о нём модель узнаёт из результата инструмента и пометки к ответу.
+        known = state.prompt_dict()
         runtime = RuntimeContext(
             now=self._now(),
             dialog_state=known,

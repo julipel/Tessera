@@ -9,7 +9,7 @@
 не подключаются.
 """
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 import structlog
@@ -31,9 +31,9 @@ from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_kno
 from app.modules.tools.application.labels import localize_display_labels
 from app.modules.tools.application.show_entities import SHOW_ENTITIES, show_entities_tool
 from app.modules.tools.application.suggest_replies import SUGGEST_REPLIES, suggest_replies_tool
-from app.modules.tools.domain.definition import ToolContext, ToolDefinition
+from app.modules.tools.domain.definition import ToolContext, ToolDefinition, ToolHandler
 from app.modules.tools.domain.ports import Catalog, KnowledgeSearcher, LeadStore
-from app.modules.tools.domain.result import ToolResult
+from app.modules.tools.domain.result import ToolError, ToolResult
 
 logger = structlog.get_logger(__name__)
 
@@ -42,7 +42,8 @@ UPDATE_DIALOG_STATE = "update_dialog_state"
 _DESCRIPTION = (
     "Запиши, что пользователь сообщил о своём запросе: значения слотов сценария и важные "
     "факты вне слотов. Вызывай, как только узнал новое, — записанное попадает в состояние "
-    "диалога, и переспрашивать его не нужно. Чтобы стереть слот, передай null. Вызывай "
+    "диалога, и переспрашивать его не нужно. Слоты — только активного сценария или того, "
+    "что передаёшь в scenario. Чтобы стереть слот, передай null. Вызывай "
     "в одном шаге с другими инструментами (поиском, показом), а не отдельным шагом."
 )
 _SCENARIO_DESCRIPTION = (
@@ -97,11 +98,13 @@ def builtin_tools(
 
 
 def update_dialog_state_tool(scenarios: Iterable[ScenarioConfig]) -> ToolDefinition:
-    """Схема аргументов — по слотам всех сценариев: лишние слоты и неверные типы отклоняет
-    реестр (`validation_error`), модель исправляется. Слот с одним именем и разными
-    определениями в разных сценариях принимает значение по любому из них. `scenario` —
-    ключ сценария, есть в схеме, только если сценарии заданы; в состояние он попадает
-    как `active_scenario` и действует со следующего хода."""
+    """Схема аргументов — по слотам всех сценариев: так в одном вызове можно сменить
+    сценарий и записать слоты нового. Неверные типы отклоняет реестр, слоты не из сценария
+    вызова (`scenario`, без него — активного) — обработчик (`validation_error`, ADR-0026),
+    модель исправляется. Слот с одним именем и разными определениями в разных сценариях
+    принимает значение по любому из них. `scenario` — ключ сценария, есть в схеме, только
+    если сценарии заданы; в состояние он попадает как `active_scenario` и в промпте действует
+    со следующего хода."""
     scenarios = list(scenarios)
     variants: dict[str, list[dict[str, Any]]] = {}
     for scenario in scenarios:
@@ -128,17 +131,47 @@ def update_dialog_state_tool(scenarios: Iterable[ScenarioConfig]) -> ToolDefinit
         name=UPDATE_DIALOG_STATE,
         description=_DESCRIPTION,
         parameters={"type": "object", "properties": properties, "additionalProperties": False},
-        handler=_update_dialog_state,
+        handler=_dialog_state_handler(scenarios),
         timeout_s=1,
         display_label="Запоминаю",
     )
 
 
-async def _update_dialog_state(arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
-    patch = {key: arguments[key] for key in ("slots", "facts") if key in arguments}
-    if "scenario" in arguments:
-        patch["active_scenario"] = arguments["scenario"]
-    return ToolResult(content="Записано в состояние диалога.", state_patch=patch)
+def _dialog_state_handler(scenarios: Sequence[ScenarioConfig]) -> ToolHandler:
+    declared = {s.key: list(s.slots or {}) for s in scenarios}
+
+    async def update_dialog_state(arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
+        # Слоты — сценария вызова: аргумент scenario, без него — активный (ADR-0026).
+        scenario = arguments.get("scenario", ctx.active_scenario)
+        if problem := _foreign_slots(arguments.get("slots") or {}, scenario, declared):
+            return ToolResult(error=ToolError("validation_error", problem, retryable=False))
+        patch = {key: arguments[key] for key in ("slots", "facts") if key in arguments}
+        if "scenario" in arguments:
+            patch["active_scenario"] = arguments["scenario"]
+        return ToolResult(content="Записано в состояние диалога.", state_patch=patch)
+
+    return update_dialog_state
+
+
+def _foreign_slots(
+    slots: Mapping[str, Any], scenario: str | None, declared: Mapping[str, list[str]]
+) -> str | None:
+    if not slots:
+        return None
+    if scenario is None or scenario not in declared:
+        return (
+            f"{UPDATE_DIALOG_STATE}: слоты записываются в сценарий — передай scenario вместе "
+            "со слотами или запиши сведения в facts"
+        )
+    foreign = [name for name in slots if name not in declared[scenario]]
+    if not foreign:
+        return None
+    allowed = ", ".join(declared[scenario]) or "нет"
+    return (
+        f"{UPDATE_DIALOG_STATE}: слотов {', '.join(foreign)} нет в сценарии {scenario} "
+        f"(его слоты: {allowed}). Если задача клиента сменилась — передай scenario, иначе "
+        "запиши сведения в facts"
+    )
 
 
 def _same_slot(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:

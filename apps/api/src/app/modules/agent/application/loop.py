@@ -3,7 +3,7 @@
 import json
 import time
 from collections.abc import AsyncIterator, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import structlog
 
@@ -90,7 +90,9 @@ class AgentLoop:
                 break
 
             started = time.perf_counter()
-            results = await self._execute(response.tool_calls, ctx)
+            # Состояние шага, а не начала хода: сценарий, сменённый на прошлом шаге, уже
+            # действует для слотов (ADR-0026).
+            results = await self._execute(response.tool_calls, replace(ctx, state=state))
             batch_ms = round((time.perf_counter() - started) * 1000)
             for call, result in zip(response.tool_calls, results, strict=True):
                 for event in _reported(call, result, batch_ms):

@@ -19,6 +19,7 @@ from app.modules.agent.public import (
     FakeReply,
     LLMClients,
     LLMError,
+    LLMRequest,
     OpenAILLM,
     OpenAIResponsesLLM,
     Provider,
@@ -568,3 +569,87 @@ async def test_scenario_chosen_by_model_narrows_next_turn_prompt() -> None:
     assert "## gift — Подарок" in system
     assert "## support" not in system
     assert "- support: Доставка и возврат" in system
+
+
+# --- Слоты активного сценария (P6-05, ADR-0026) ---
+
+SLOTS_CONFIG: dict[str, Any] = {
+    **SCENARIO_CONFIG,
+    "prompt": {
+        "tenant": "Ты — консультант.",
+        "scenarios": [
+            {
+                "key": "skincare",
+                "description": "Уход за кожей",
+                "instructions": "Выясни тип кожи.",
+                "slots": {"skin_type": {"type": "string"}, "budget": {"type": "number"}},
+            },
+            {
+                "key": "gift",
+                "description": "Подарок",
+                "instructions": "Кому и бюджет.",
+                "slots": {"recipient": {"type": "string"}, "budget": {"type": "number"}},
+            },
+        ],
+    },
+}
+
+
+def update_state(call_id: str, arguments: dict[str, Any]) -> ToolCall:
+    return ToolCall(id=call_id, name="update_dialog_state", arguments=arguments, raw_arguments="{}")
+
+
+def known_state(request: LLMRequest) -> str:
+    return request.system.split("не переспрашивай):")[1]
+
+
+async def test_after_scenario_switch_prompt_has_no_slots_of_previous_scenario() -> None:
+    llm = FakeLLM(
+        [
+            FakeReply(
+                tool_calls=(
+                    update_state("c1", {"scenario": "skincare", "slots": {"skin_type": "dry"}}),
+                )
+            ),
+            FakeReply(text="Подберу крем для сухой кожи."),
+            # Смена сценария: модель по старой памяти пишет слот прежнего — отклоняется.
+            FakeReply(
+                tool_calls=(
+                    update_state(
+                        "c2", {"scenario": "gift", "slots": {"budget": 6000, "skin_type": "dry"}}
+                    ),
+                )
+            ),
+            FakeReply(
+                tool_calls=(update_state("c3", {"scenario": "gift", "slots": {"budget": 6000}}),)
+            ),
+            FakeReply(text="Подберу подарок до 6000."),
+            FakeReply(text="Вот варианты."),
+        ]
+    )
+    agent = builtin_turn_agent(lambda _: llm)
+    request = replace(scenario_request("Крем, кожа сухая", {}), agent_config=SLOTS_CONFIG)
+
+    first = [e async for e in agent.run_turn(request)]
+    state = [e.state for e in first if isinstance(e, DialogStateUpdated)][-1]
+    second = [
+        e
+        async for e in agent.run_turn(
+            replace(
+                request,
+                input={"type": "text", "text": "Подарок до 6000"},
+                dialog_state=state.to_dict(),
+            )
+        )
+    ]
+    rejected = next(e for e in second if isinstance(e, ToolFinished) and e.tool_call_id == "c2")
+    assert rejected.error_code == "validation_error"
+    state = [e.state for e in second if isinstance(e, DialogStateUpdated)][-1]
+    # Слоты прежнего сценария хранятся отдельно и в активный не попадают.
+    assert state.to_dict()["slots"] == {"skincare": {"skin_type": "dry"}, "gift": {"budget": 6000}}
+
+    [e async for e in agent.run_turn(replace(request, dialog_state=state.to_dict()))]
+
+    known = known_state(llm.requests[-1])
+    assert '"budget": 6000' in known and '"active_scenario": "gift"' in known
+    assert "skin_type" not in known

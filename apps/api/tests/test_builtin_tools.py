@@ -1,5 +1,5 @@
-"""Встроенные инструменты (P2-09, P6-01): update_dialog_state — схема по слотам сценариев,
-выбор сценария и state_patch."""
+"""Встроенные инструменты (P2-09, P6-01, P6-05): update_dialog_state — схема по слотам
+сценариев, выбор сценария, слоты только сценария вызова и state_patch."""
 
 from typing import Any
 from uuid import uuid4
@@ -56,9 +56,16 @@ SCENARIOS = [
 ]
 
 
-async def execute(arguments: dict[str, Any]) -> ToolResult:
+async def execute(
+    arguments: dict[str, Any], active_scenario: str | None = "skincare"
+) -> ToolResult:
     registry = ToolRegistry([update_dialog_state_tool(SCENARIOS)])
-    ctx = ToolContext(tenant_id=TenantId(uuid4()), conversation_id=uuid4(), turn_id=uuid4())
+    ctx = ToolContext(
+        tenant_id=TenantId(uuid4()),
+        conversation_id=uuid4(),
+        turn_id=uuid4(),
+        active_scenario=active_scenario,
+    )
     [result] = await registry.execute_many(
         [ToolInvocation(id="call_1", name=UPDATE_DIALOG_STATE, arguments=arguments)], ctx
     )
@@ -83,21 +90,63 @@ def test_schema_has_slots_of_all_scenarios() -> None:
     assert slots["additionalProperties"] is False
 
 
-@pytest.mark.parametrize("occasion", ["день рождения", "office"])
-async def test_same_slot_with_different_definitions_accepts_any(occasion: str) -> None:
+@pytest.mark.parametrize(
+    ("scenario", "occasion"), [("gift", "день рождения"), ("fragrance", "office")]
+)
+async def test_same_slot_with_different_definitions_accepts_any(
+    scenario: str, occasion: str
+) -> None:
     # occasion в gift — свободная строка, в fragrance — enum: годится значение по любому.
-    result = await execute({"slots": {"occasion": occasion}})
+    result = await execute({"slots": {"occasion": occasion}}, active_scenario=scenario)
 
     assert result.ok
     assert result.state_patch == {"slots": {"occasion": occasion}}
 
 
-@pytest.mark.parametrize("scenario", ["gift", None])
-async def test_scenario_becomes_active_scenario(scenario: str | None) -> None:
-    result = await execute({"scenario": scenario, "slots": {"budget": 3000}})
+async def test_scenario_becomes_active_scenario() -> None:
+    result = await execute({"scenario": "gift", "slots": {"budget": 3000}})
 
     assert result.ok
-    assert result.state_patch == {"slots": {"budget": 3000}, "active_scenario": scenario}
+    assert result.state_patch == {"slots": {"budget": 3000}, "active_scenario": "gift"}
+    reset = await execute({"scenario": None, "facts": ["просто спросить"]})
+    assert reset.state_patch == {"facts": ["просто спросить"], "active_scenario": None}
+
+
+async def test_slots_of_another_scenario_are_validation_error() -> None:
+    # Активен skincare: occasion — слот gift и fragrance, не skincare (ADR-0026).
+    result = await execute({"slots": {"skin_type": "сухая", "occasion": "день рождения"}})
+
+    assert result.error is not None and result.error.code == "validation_error"
+    assert "occasion" in result.error.message and "skin_type" in result.error.message
+    assert result.state_patch is None
+
+
+async def test_slots_are_checked_against_scenario_argument() -> None:
+    # Смена сценария и слоты нового в одном вызове; слоты прежнего — уже чужие.
+    switched = await execute({"scenario": "gift", "slots": {"occasion": "день рождения"}})
+    stale = await execute({"scenario": "gift", "slots": {"skin_type": "сухая"}})
+
+    assert switched.ok
+    assert stale.error is not None and stale.error.code == "validation_error"
+
+
+@pytest.mark.parametrize(
+    ("arguments", "active_scenario"),
+    [
+        ({"slots": {"budget": 3000}}, None),  # сценарий не выбран
+        ({"scenario": None, "slots": {"budget": 3000}}, "gift"),  # сценарий снят
+        ({"slots": {"budget": 3000}}, "removed"),  # сценария больше нет в конфиге
+    ],
+)
+async def test_slots_without_scenario_are_validation_error(
+    arguments: dict[str, Any], active_scenario: str | None
+) -> None:
+    result = await execute(arguments, active_scenario=active_scenario)
+
+    assert result.error is not None and result.error.code == "validation_error"
+    assert "scenario" in result.error.message
+    # Без слотов сценарий не нужен: факты пишутся всегда.
+    assert (await execute({"facts": ["спешит"]}, active_scenario=None)).ok
 
 
 def test_scenario_argument_lists_scenario_keys() -> None:

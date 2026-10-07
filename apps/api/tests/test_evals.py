@@ -189,7 +189,14 @@ async def test_dialog_runs_through_loop_agent_and_keeps_history(configs: TenantC
     llm = FakeLLM(
         [
             FakeReply(text="Какой у вас тип кожи?"),
-            FakeReply(tool_calls=(call("update_dialog_state", {"slots": {"skin_type": "dry"}}),)),
+            FakeReply(
+                tool_calls=(
+                    call(
+                        "update_dialog_state",
+                        {"scenario": "skincare", "slots": {"skin_type": "dry"}},
+                    ),
+                )
+            ),
             FakeReply(text="Для сухой кожи подойдёт крем с керамидами."),
         ]
     )

@@ -744,8 +744,8 @@ async def test_agent_does_not_reask_known_slot(
     remember = ToolCall(
         id="call_1",
         name="update_dialog_state",
-        arguments={"slots": {"budget": 3000}},
-        raw_arguments='{"slots": {"budget": 3000}}',
+        arguments={"scenario": "skincare", "slots": {"budget": 3000}},
+        raw_arguments='{"scenario": "skincare", "slots": {"budget": 3000}}',
     )
     llm = FakeLLM(
         [
@@ -772,7 +772,10 @@ async def test_agent_does_not_reask_known_slot(
     runtime = second.system.split("<runtime>")[1]
     known = runtime.split("не переспрашивай):")[1]
     assert '"budget": 3000' in known
-    assert await _state(db_session, beauty, conversation_id) == {"slots": {"budget": 3000}}
+    assert await _state(db_session, beauty, conversation_id) == {
+        "slots": {"skincare": {"budget": 3000}},
+        "active_scenario": "skincare",
+    }
 
 
 class StateThenGateAgent(GatedAgent):
@@ -780,7 +783,9 @@ class StateThenGateAgent(GatedAgent):
 
     async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
         self.turn_id = request.turn_id
-        yield DialogStateUpdated(DialogState(slots={"budget": 3000}, facts=("спешит",)))
+        yield DialogStateUpdated(
+            DialogState(slots={"skincare": {"budget": 3000}}, facts=("спешит",))
+        )
         self.first_sent.set()
         await anyio.sleep_forever()
         yield AnswerDelta("не дойдёт")
@@ -805,7 +810,7 @@ async def test_state_is_saved_when_turn_is_cancelled(
     # Состояние в клиент не уходит.
     assert all("budget" not in e.model_dump_json() for _, e in events)
     assert await _state(db_session, shop, conversation_id) == {
-        "slots": {"budget": 3000},
+        "slots": {"skincare": {"budget": 3000}},
         "facts": ["спешит"],
     }
 

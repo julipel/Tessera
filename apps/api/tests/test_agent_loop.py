@@ -82,6 +82,7 @@ class FakeTools:
         self.hang = hang
         self.delay_s = delay_s
         self.batches: list[tuple[ToolCall, ...]] = []
+        self.states: list[DialogState] = []
         self.confirmed: list[ToolCall] = []
         self.cancelled = False
 
@@ -93,6 +94,7 @@ class FakeTools:
 
     async def execute_many(self, calls: Sequence[ToolCall], ctx: TurnContext) -> list[ToolResult]:
         self.batches.append(tuple(calls))
+        self.states.append(ctx.state)
         if self.hang:
             try:
                 await asyncio.Event().wait()
@@ -427,15 +429,34 @@ async def test_state_patches_are_applied_in_call_order() -> None:
             ),
         }
     )
-    start = DialogState(slots={"recipient": "мама"})
+    start = DialogState(slots={"gift": {"recipient": "мама"}}, active_scenario="gift")
 
     events = await run(llm, tools, context(state=start))
 
     [updated] = [e for e in events if isinstance(e, DialogStateUpdated)]
     assert updated.state == DialogState(
-        slots={"recipient": "мама", "budget": 3000}, facts=("аллергия",)
+        slots={"gift": {"recipient": "мама", "budget": 3000}},
+        facts=("аллергия",),
+        active_scenario="gift",
     )
     assert events.index(updated) < events.index(AnswerDelta("Учла."))
+
+
+async def test_tools_get_state_of_current_step() -> None:
+    # Сценарий, сменённый на шаге 1, действует для слотов шага 2 (ADR-0026).
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(call("call_switch"),)),
+            FakeReply(tool_calls=(call("call_slots"),)),
+            FakeReply(text="Подберу подарок."),
+        ]
+    )
+    tools = FakeTools({"call_switch": ToolResult(state_patch={"active_scenario": "gift"})})
+    start = DialogState(active_scenario="skincare")
+
+    await run(llm, tools, context(state=start))
+
+    assert [s.active_scenario for s in tools.states] == ["skincare", "gift"]
 
 
 async def test_no_state_event_without_patches() -> None:
@@ -470,7 +491,7 @@ async def test_suggestions_from_successful_tool_results() -> None:
 
 
 PENDING = PendingConfirmation("cf_1", "create_lead", {"form_key": "consultation", "fields": {}})
-WAITING = DialogState(slots={"budget": 3000}, pending_confirmation=PENDING)
+WAITING = DialogState(facts=("спешит",), pending_confirmation=PENDING)
 
 
 def last_user_text(request: LLMRequest) -> str:
@@ -499,7 +520,7 @@ async def test_approved_confirmation_runs_pending_call_before_model() -> None:
     finished = next(e for e in events if isinstance(e, ToolFinished))
     assert (finished.ok, finished.content) == (True, "Заявка создана.")
     [updated] = [e for e in events if isinstance(e, DialogStateUpdated)]
-    assert updated.state == DialogState(slots={"budget": 3000})
+    assert updated.state == DialogState(facts=("спешит",))
     note = last_user_text(llm.requests[0])
     assert note.startswith(HISTORY[0].text)
     assert "[Подтверждено, create_lead: Заявка создана.]" in note

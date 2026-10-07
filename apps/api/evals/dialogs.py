@@ -59,10 +59,22 @@ class DialogTurn(BaseModel):
         return {"type": "text", "text": self.user}
 
 
+class InjectedFragment(BaseModel):
+    """Фрагмент базы знаний, подмешанный в выдачу `search_knowledge` диалога (ADR-0031)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    url: str | None = None
+
+
 class Dialog(BaseModel):
     """`tenant` — slug тенанта: конфиг берётся из `config/tenants/<tenant>.yaml`. `locale` —
     язык браузера клиента (BCP 47): по нему и конфигу выбирается язык диалога, как при
-    создании диалога в chat API (ADR-0025); без него — язык по конфигу."""
+    создании диалога в chat API (ADR-0025); без него — язык по конфигу. `knowledge_inject` —
+    фрагменты, которые поиск по знаниям вернёт первыми в этом диалоге (данные тенанта
+    не меняются; нужен поиск по знаниям — ключ OpenAI)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -71,6 +83,7 @@ class Dialog(BaseModel):
     scenario: str | None = None
     locale: str | None = Field(default=None, min_length=1)
     tags: list[str] = Field(default_factory=list)
+    knowledge_inject: list[InjectedFragment] = Field(default_factory=list)
     turns: list[DialogTurn] = Field(min_length=1)
 
 

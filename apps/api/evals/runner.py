@@ -32,6 +32,7 @@ from app.modules.tenants.public import load_tenant_spec
 from evals.checks import CheckResult, CheckStatus, TurnOutcome, check_turn, needs_judge
 from evals.dialogs import REPO_ROOT, Dialog, describe_input
 from evals.judge import Judge, TranscriptTurn
+from evals.knowledge_inject import injected
 
 TENANTS_DIR = REPO_ROOT / "config" / "tenants"
 # Служебное `action_id` эталона: раннер подставляет действие последнего компонента `confirm`.
@@ -146,6 +147,10 @@ class DialogRunner:
         self._tenant_ids = dict(tenant_ids or {})
 
     async def run(self, dialog: Dialog) -> DialogResult:
+        with injected(dialog.knowledge_inject):
+            return await self._run(dialog)
+
+    async def _run(self, dialog: Dialog) -> DialogResult:
         result = DialogResult(dialog.id, dialog.tenant, list(dialog.tags))
         try:
             config = self._configs.get(dialog.tenant)

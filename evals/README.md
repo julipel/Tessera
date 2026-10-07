@@ -67,6 +67,10 @@ id: gift_selection_with_budget
 tenant: demo
 scenario: product_selection
 locale: en-US                          # необязательно: язык браузера клиента (ADR-0025)
+knowledge_inject:                      # необязательно: фрагменты, которые search_knowledge
+  - title: "Доставка"                  # вернёт первыми в этом диалоге (данные тенанта
+    text: "…"                          # не меняются; prompt injection в данных, ADR-0031)
+    url: "https://…"
 tags: [clarification, catalog]
 turns:
   - user: "Хочу подарок маме"

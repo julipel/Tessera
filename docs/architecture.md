@@ -466,7 +466,15 @@ AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSON
   в `request.state`). Текст — блоками, не кусками стрима; результат инструмента — только
   в ToolCall. Чтение — `GET /v1/admin/tenants/{id}/events` по токену из env до P8-01
   (ADR-0028, contracts.md §7).
-- Langfuse: трейсы LLM-вызовов, версия промпта, токены, стоимость.
+- Langfuse: трейсы LLM-вызовов, версия промпта, токены, стоимость (ADR-0029). Порт `Tracer`
+  в `observability.kernel`, реализация — SDK Langfuse v4 (OpenTelemetry, свой TracerProvider);
+  без ключей — `NoopTracer`. Трейс = ход: id из `X-Trace-Id` (32 hex — как есть, иначе
+  производный), сессия — диалог. `TracedLLM` оборачивает клиент каждой модели внутри
+  `FallbackLLM` — каждая попытка (повтор, резервная) отдельная generation: модель, вход шага,
+  ответ, usage, время первого чанка, ошибка; версия — `platform_prompt` и `agent_config`.
+  Инструменты — observation `tool` по событиям хода. Стоимость считает Langfuse по модели
+  и usage; для моделей `openai_compatible` нужны custom models в Langfuse. Отправка —
+  фоновым экспортёром SDK, gzip, таймаут `LANGFUSE_TIMEOUT_S`.
 - structlog + OpenTelemetry для HTTP/БД. Sentry для исключений.
 - Метрики: латентность до первого токена, длительность хода, шаги на ход, ошибки инструментов,
   стоимость на диалог.

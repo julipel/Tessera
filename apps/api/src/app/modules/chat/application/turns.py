@@ -392,7 +392,11 @@ async def start_turn(
         raise DuplicateMessageError(f"сообщение {client_message_id} уже отправлено")
     await commit()
     request = _turn_request(
-        conversation, config, message, await messages.list_for(tenant_id, conversation_id)
+        conversation,
+        config,
+        message,
+        await messages.list_for(tenant_id, conversation_id),
+        trace_id,
     )
     return TurnStream(
         conversation,
@@ -449,7 +453,7 @@ async def retry_turn(
         raise RetryNotAllowedError(f"ответ {message_id} уже повторён")
     await commit()
     logger.info("turn_retry", replaced_message_id=str(message_id))
-    request = _turn_request(conversation, config, question, history)
+    request = _turn_request(conversation, config, question, history, trace_id)
     return TurnStream(
         conversation,
         request,
@@ -493,6 +497,7 @@ def _turn_request(
     config: dict[str, Any],
     question: ChatMessage,
     history: Sequence[ChatMessage],
+    trace_id: str,
 ) -> TurnRequest:
     # Свёрнутые в сводку сообщения модель видит только через сводку (architecture.md §7).
     summary, recent = after_summary(conversation, history)
@@ -507,6 +512,7 @@ def _turn_request(
         dialog_state=conversation.state,
         history_summary=summary,
         language=conversation.language,
+        trace_id=trace_id,
     )
 
 

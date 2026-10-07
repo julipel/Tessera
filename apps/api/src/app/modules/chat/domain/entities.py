@@ -106,7 +106,8 @@ class TurnRequest:
     """Вход хода агента: `input` — ввод пользователя по контракту UserInput, `agent_config` —
     версия AgentConfig диалога, `history` — сообщения диалога после сводки, включая этот
     ввод, `history_summary` — сводка более ранних сообщений, `dialog_state` — состояние
-    диалога на начало хода, `language` — язык диалога (None — выбрать по конфигу).
+    диалога на начало хода, `language` — язык диалога (None — выбрать по конфигу),
+    `trace_id` — запроса хода (`X-Trace-Id`): по нему трейс хода в Langfuse (ADR-0029).
     Всё загружено до запуска агента:
     задача агента отменяема и в БД не ходит."""
 
@@ -120,3 +121,4 @@ class TurnRequest:
     dialog_state: dict[str, Any] = field(default_factory=dict)
     history_summary: str | None = None
     language: str | None = None
+    trace_id: str = ""

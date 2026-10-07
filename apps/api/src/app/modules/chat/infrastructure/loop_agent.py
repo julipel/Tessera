@@ -23,13 +23,16 @@ from app.modules.agent.public import (
     RegistryToolExecutor,
     RuntimeContext,
     ToolExecutor,
+    TracedLLM,
     TurnContext,
     TurnLimits,
     UserMessage,
     build_system_prompt,
+    traced_turn,
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, TurnRequest
 from app.modules.memory.public import DialogState
+from app.modules.observability.kernel import NoopTracer, Tracer, TurnTrace, TurnTraceInfo
 from app.modules.tenants.kernel import (
     Language,
     assistant_texts,
@@ -55,17 +58,20 @@ type ToolsForConfig = Callable[[AgentConfig, Language], ToolExecutor]
 class LoopTurnAgent:
     """`llm_for` — клиент по провайдеру из AgentConfig (в приложении — `LLMClients.for_provider`),
     `tools_for` — инструменты хода по AgentConfig и языку диалога, `now` — часы для
-    Runtime-слоя промпта (в тестах фиксированные)."""
+    Runtime-слоя промпта (в тестах фиксированные), `tracer` — трейсы ходов (Langfuse,
+    ADR-0029; по умолчанию выключены)."""
 
     def __init__(
         self,
         llm_for: LLMForProvider,
         tools_for: ToolsForConfig,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        tracer: Tracer | None = None,
     ) -> None:
         self._llm_for = llm_for
         self._tools_for = tools_for
         self._now = now
+        self._tracer = tracer or NoopTracer()
 
     async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
         config = AgentConfig.model_validate(request.agent_config)
@@ -105,14 +111,27 @@ class LoopTurnAgent:
             state=state,
             confirmation=confirmation_reply(request.input),
         )
-        loop = AgentLoop(self._llm(config), self._tools_for(config, language))
-        async for event in loop.run_turn(ctx):
+        trace = self._tracer.start_turn(
+            TurnTraceInfo(
+                trace_id=request.trace_id,
+                tenant_id=request.tenant_id,
+                conversation_id=request.conversation_id,
+                turn_id=request.turn_id,
+                input=request.input,
+                prompt_versions={
+                    "platform_prompt": prompt.platform_version,
+                    "agent_config": str(request.agent_config_id),
+                },
+            )
+        )
+        loop = AgentLoop(self._llm(config, trace), self._tools_for(config, language))
+        async for event in traced_turn(loop.run_turn(ctx), trace):
             yield event
 
-    def _llm(self, config: AgentConfig) -> LLMClient:
+    def _llm(self, config: AgentConfig, trace: TurnTrace) -> LLMClient:
         """Основная модель с ретраями и резервной из `model.fallback` (ADR-0027); клиент
-        резервной создаётся, только когда понадобится."""
-        primary = self._llm_for(config.model.primary.provider)
+        резервной создаётся, только когда понадобится. Каждая попытка — generation в трейсе."""
+        primary = TracedLLM(self._llm_for(config.model.primary.provider), trace)
         fallback = config.model.fallback
         if fallback is None:
             return FallbackLLM(primary)
@@ -120,7 +139,7 @@ class LoopTurnAgent:
         return FallbackLLM(
             primary,
             FallbackModel(
-                client=lambda: self._llm_for(provider),
+                client=lambda: TracedLLM(self._llm_for(provider), trace),
                 model=fallback.name,
                 temperature=fallback.temperature,
             ),
@@ -132,11 +151,13 @@ def builtin_turn_agent(
     knowledge: KnowledgeSearcher | None = None,
     catalog: Catalog | None = None,
     leads: LeadStore | None = None,
+    tracer: Tracer | None = None,
 ) -> LoopTurnAgent:
     """Агентный цикл со встроенными инструментами из `tools.builtin` конфига — так ход
     собирают chat API и раннер эвалов (ADR-0011). Без `knowledge` не подключается
     `search_knowledge`, без `catalog` — `search_catalog` и `get_entity`, без `leads` —
-    `create_lead`. Формы и подписи каталога — на языке диалога (ADR-0025)."""
+    `create_lead`. Формы и подписи каталога — на языке диалога (ADR-0025). Без `tracer`
+    ходы не трейсятся."""
     return LoopTurnAgent(
         llm_for,
         lambda config, language: RegistryToolExecutor(
@@ -151,6 +172,7 @@ def builtin_turn_agent(
                 _confirm_labels(config, language),
             )
         ),
+        tracer=tracer,
     )
 
 

@@ -37,7 +37,7 @@ from app.modules.chat.infrastructure.repositories import (
 )
 from app.modules.knowledge.public import KnowledgeSearch, SqlCatalog
 from app.modules.leads.public import SqlLeadStore
-from app.modules.observability.public import AgentEventRepository
+from app.modules.observability.public import AgentEventRepository, Tracer
 from app.modules.shared.public import ApiError, DbSession, StreamDbSession
 from app.modules.tenants.public import WidgetTenant
 
@@ -53,7 +53,8 @@ def get_turn_agent(request: Request) -> TurnAgent:
     knowledge: KnowledgeSearch | None = request.app.state.knowledge_search
     catalog: SqlCatalog = request.app.state.catalog
     leads: SqlLeadStore = request.app.state.leads
-    return builtin_turn_agent(llms.for_provider, knowledge, catalog, leads)
+    tracer: Tracer = request.app.state.tracer
+    return builtin_turn_agent(llms.for_provider, knowledge, catalog, leads, tracer)
 
 
 Agent = Annotated[TurnAgent, Depends(get_turn_agent)]

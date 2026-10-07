@@ -12,6 +12,7 @@ dependencies = [
     "httpcore>=1.0.9",
     "httpx>=0.28.1",
     "jsonschema>=4.26.0",
+    "langfuse>=4.17.0",
     "openai>=3.24.0",
     "openpyxl>=3.1.5",
     "pydantic-settings>=2.15.0",

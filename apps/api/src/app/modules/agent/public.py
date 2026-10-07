@@ -5,6 +5,7 @@ from app.modules.agent.application.loop import AgentLoop
 from app.modules.agent.application.platform_prompt import PLATFORM_PROMPT_VERSION
 from app.modules.agent.application.prompt import RuntimeContext, SystemPrompt, build_system_prompt
 from app.modules.agent.application.summarizer import SUMMARY_PROMPT_VERSION, HistorySummarizer
+from app.modules.agent.application.tracing import TracedLLM, traced_turn
 from app.modules.agent.domain.events import (
     AgentEvent,
     AnswerDelta,
@@ -94,6 +95,7 @@ __all__ = [
     "ToolResultMessage",
     "ToolSchema",
     "ToolStarted",
+    "TracedLLM",
     "TurnCompleted",
     "TurnContext",
     "TurnLimits",
@@ -103,4 +105,5 @@ __all__ = [
     "create_anthropic_llm",
     "create_openai_llm",
     "create_openai_responses_llm",
+    "traced_turn",
 ]

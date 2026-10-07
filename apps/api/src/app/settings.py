@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     openai_compatible_base_url: str | None = None
     anthropic_api_key: SecretStr | None = None
     anthropic_base_url: str | None = None
+    # Трейсы LLM в Langfuse (P7-03, ADR-0029); без обоих ключей трейсинг выключен.
+    # LANGFUSE_HOST пусто — Langfuse Cloud (EU).
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_host: str | None = None
+    # Таймаут отправки пачки трейсов (фоновый поток SDK), с.
+    langfuse_timeout_s: int = 30
     # Токен API админки (`Authorization: Bearer …`) до пользователей админки (P8-01, ADR-0028);
     # без токена эндпоинты админки отвечают 404.
     admin_api_token: SecretStr | None = None

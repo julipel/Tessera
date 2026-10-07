@@ -1,5 +1,6 @@
 """Сборка FastAPI-приложения."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,7 +16,7 @@ from app.modules.chat.public import SummaryScheduler, TurnRegistry, background_s
 from app.modules.chat.public import router as chat_router
 from app.modules.knowledge.public import SqlCatalog
 from app.modules.leads.public import SqlLeadStore
-from app.modules.observability.public import admin_router
+from app.modules.observability.public import Tracer, admin_router, build_tracer
 from app.modules.shared.public import (
     create_engine,
     create_session_factory,
@@ -33,6 +34,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     knowledge: KnowledgeServices | None = app.state.knowledge
     if knowledge is not None:
         await knowledge.aclose()
+    tracer: Tracer = app.state.tracer
+    await asyncio.to_thread(tracer.shutdown)  # отправка накопленных трейсов — блокирующая
     await app.state.engine.dispose()
 
 
@@ -54,6 +57,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openai_compatible_base_url=settings.openai_compatible_base_url,
         anthropic_api_key=_secret(settings.anthropic_api_key),
         anthropic_base_url=settings.anthropic_base_url,
+    )
+    # Трейсы ходов в Langfuse (ADR-0029); без ключей — выключены.
+    app.state.tracer = build_tracer(
+        settings.langfuse_public_key,
+        _secret(settings.langfuse_secret_key),
+        settings.langfuse_host,
+        settings.app_env,
+        settings.langfuse_timeout_s,
     )
     # Сводка длинной истории после хода — фоновой задачей процесса (ADR-0024).
     app.state.summary_scheduler = SummaryScheduler(

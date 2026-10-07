@@ -6,5 +6,14 @@
 
 from app.modules.shared.domain.errors import DomainError, NotFoundError, TenantMismatchError
 from app.modules.shared.domain.ids import TenantId
+from app.modules.shared.domain.rate_limit import RateDecision, RateLimit, RateLimiter
 
-__all__ = ["DomainError", "NotFoundError", "TenantId", "TenantMismatchError"]
+__all__ = [
+    "DomainError",
+    "NotFoundError",
+    "RateDecision",
+    "RateLimit",
+    "RateLimiter",
+    "TenantId",
+    "TenantMismatchError",
+]

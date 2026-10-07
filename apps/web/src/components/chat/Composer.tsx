@@ -3,6 +3,9 @@
 import { type FormEvent, type KeyboardEvent, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 
+/** Как `maxLength` текста в user_input.schema.json: длиннее сервер отклонит (422). */
+const MAX_TEXT_LENGTH = 4000;
+
 /**
  * Пока идёт ход (`busy`), вместо «Отправить» — «Остановить»; она неактивна, пока ход
  * не начался на сервере (`onStop` не задан). Поле ввода остаётся доступным.
@@ -44,6 +47,7 @@ export function Composer({
           id="chat-input"
           rows={1}
           value={text}
+          maxLength={MAX_TEXT_LENGTH}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={t.messagePlaceholder}

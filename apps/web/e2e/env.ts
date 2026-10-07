@@ -20,4 +20,13 @@ export const E2E_ENV: Record<string, string> = {
   CORS_ORIGINS: JSON.stringify([WEB_URL]),
   OPENAI_API_KEY: "sk-e2e",
   OPENAI_BASE_URL: `${MOCK_LLM_URL}/v1`,
+  // Лимиты частоты выключены (ADR-0030): e2e делают десятки ходов в минуту с одного IP,
+  // а Redis-счётчики общие с dev-API. Сами лимиты проверяет pytest.
+  RATE_TURNS_PER_IP_PER_MIN: "0",
+  RATE_TURNS_PER_TENANT_PER_MIN: "0",
+  RATE_CONVERSATIONS_PER_IP_PER_HOUR: "0",
+  // Трейсинг выключен (ADR-0029): иначе ключи Langfuse из корневого .env отправили бы
+  // трейсы e2e-диалогов в проект Langfuse.
+  LANGFUSE_PUBLIC_KEY: "",
+  LANGFUSE_SECRET_KEY: "",
 };

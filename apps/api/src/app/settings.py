@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     openai_compatible_base_url: str | None = None
     anthropic_api_key: SecretStr | None = None
     anthropic_base_url: str | None = None
+    # Лимиты частоты публичного API (P7-04a, ADR-0030), фиксированное окно в Redis; 0 — правило
+    # выключено. IP — `request.client.host` (за прокси — uvicorn --proxy-headers).
+    rate_turns_per_ip_per_min: int = 20
+    rate_turns_per_tenant_per_min: int = 300
+    rate_conversations_per_ip_per_hour: int = 30
     # Трейсы LLM в Langfuse (P7-03, ADR-0029); без обоих ключей трейсинг выключен.
     # LANGFUSE_HOST пусто — Langfuse Cloud (EU).
     langfuse_public_key: str | None = None

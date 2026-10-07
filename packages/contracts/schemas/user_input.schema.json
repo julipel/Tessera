@@ -13,7 +13,7 @@
       "type": "object",
       "properties": {
         "type": { "const": "text" },
-        "text": { "type": "string", "minLength": 1 }
+        "text": { "type": "string", "minLength": 1, "maxLength": 4000 }
       },
       "required": ["type", "text"],
       "additionalProperties": false

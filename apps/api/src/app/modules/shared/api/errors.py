@@ -51,11 +51,18 @@ logger = structlog.get_logger(__name__)
 class ApiError(Exception):
     """Ошибка, которую роутер отдаёт клиенту как есть: статус, код и сообщение."""
 
-    def __init__(self, status_code: int, code: ErrorCode, message: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: ErrorCode,
+        message: str,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.headers = headers
 
 
 def error_response(
@@ -70,7 +77,7 @@ def error_response(
 
 async def _api_error(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, ApiError)
-    return error_response(exc.status_code, exc.code, exc.message)
+    return error_response(exc.status_code, exc.code, exc.message, exc.headers)
 
 
 async def _http_exception(_: Request, exc: Exception) -> JSONResponse:

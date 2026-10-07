@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import SecretStr
+from redis.asyncio import Redis
 
 from app.api import health
 from app.knowledge_wiring import KnowledgeServices, build_knowledge_services
@@ -18,6 +19,7 @@ from app.modules.knowledge.public import SqlCatalog
 from app.modules.leads.public import SqlLeadStore
 from app.modules.observability.public import Tracer, admin_router, build_tracer
 from app.modules.shared.public import (
+    RedisRateLimiter,
     create_engine,
     create_session_factory,
     install_error_handlers,
@@ -36,6 +38,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await knowledge.aclose()
     tracer: Tracer = app.state.tracer
     await asyncio.to_thread(tracer.shutdown)  # отправка накопленных трейсов — блокирующая
+    redis: Redis = app.state.redis
+    await redis.aclose()
     await app.state.engine.dispose()
 
 
@@ -49,6 +53,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # а не в lifespan: так он доступен и в тестах без запуска lifespan.
     app.state.engine = create_engine(settings.database_url, echo=settings.database_echo)
     app.state.session_factory = create_session_factory(app.state.engine)
+    # Redis — для лимитов частоты (ADR-0030); соединение ленивое, таймауты короткие:
+    # недоступный Redis не должен держать запрос.
+    app.state.redis = Redis.from_url(
+        settings.redis_url, socket_timeout=0.5, socket_connect_timeout=0.5
+    )
+    app.state.rate_limiter = RedisRateLimiter(app.state.redis)
     app.state.turn_registry = TurnRegistry()  # текущие ходы процесса — для отмены
     app.state.llm_clients = LLMClients(
         openai_api_key=_secret(settings.openai_api_key),
@@ -85,7 +95,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "X-Widget-Key"],
-        expose_headers=["X-Trace-Id"],
+        expose_headers=["X-Trace-Id", "Retry-After"],
     )
     app.include_router(health.router)
     app.include_router(tenants_public_router)

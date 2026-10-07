@@ -94,6 +94,12 @@
 `conversation_not_found`, 409 `duplicate_message` / `not_retryable`, 405/422 `invalid_input`, 429 `rate_limited`, 500 `internal`
 (подробности — только в логе с `trace_id`; `X-Trace-Id` есть в любом ответе).
 
+Лимиты (P7-04a, ADR-0030): `POST /v1/conversations` — 30 в час с IP; ходы (`POST …/messages`,
+`…/retry`) — 20 в минуту с IP и 300 в минуту на тенанта (значения — настройки платформы).
+Превышение — 429 `rate_limited` (retryable) с заголовком `Retry-After` (секунды до нового окна).
+Ввод хода: `text` — до 4000 символов (`user_input.schema.json`), тело запроса — до 32 КБ;
+больше — 422 `invalid_input`, ввод не записывается.
+
 ## 2. SSE-протокол
 
 Каждое событие: `event: <type>` и `data: <Envelope JSON>`.

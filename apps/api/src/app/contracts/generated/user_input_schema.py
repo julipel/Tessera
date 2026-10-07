@@ -13,7 +13,7 @@ class TextInput(BaseModel):
         extra="forbid",
     )
     type: Literal["text"]
-    text: Annotated[str, Field(min_length=1)]
+    text: Annotated[str, Field(max_length=4000, min_length=1)]
 
 
 class ActionInput(BaseModel):

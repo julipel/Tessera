@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_e
 
 from app.cli import ensure_database
 from app.main import create_app
-from app.modules.shared.public import get_session
+from app.modules.shared.public import InMemoryRateLimiter, get_session
 from app.settings import Settings
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
@@ -49,7 +49,10 @@ def settings() -> Settings:
 
 @pytest.fixture
 def app(settings: Settings) -> FastAPI:
-    return create_app(settings)
+    app = create_app(settings)
+    # Лимиты — в памяти и свои на тест: Redis-счётчики делились бы между тестами (ADR-0030).
+    app.state.rate_limiter = InMemoryRateLimiter()
+    return app
 
 
 @pytest.fixture

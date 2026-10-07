@@ -38,7 +38,15 @@ from app.modules.chat.infrastructure.repositories import (
 from app.modules.knowledge.public import KnowledgeSearch, SqlCatalog
 from app.modules.leads.public import SqlLeadStore
 from app.modules.observability.public import AgentEventRepository, Tracer
-from app.modules.shared.public import ApiError, DbSession, StreamDbSession
+from app.modules.shared.public import (
+    ApiError,
+    DbSession,
+    RateLimit,
+    RateLimiter,
+    StreamDbSession,
+    client_ip,
+    enforce_rate_limits,
+)
 from app.modules.tenants.public import WidgetTenant
 
 router = APIRouter(prefix="/v1/conversations", tags=["conversations"])
@@ -83,7 +91,56 @@ def _trace_id(request: Request) -> str:
     return trace_id
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+# Ввод хода: текст — до 4000 символов по контракту; тело целиком (payload кнопки, значения
+# формы) — не больше этого (ADR-0030).
+MAX_TURN_BODY_BYTES = 32 * 1024
+
+
+def _limiter(request: Request) -> RateLimiter:
+    limiter: RateLimiter = request.app.state.rate_limiter
+    return limiter
+
+
+async def limit_conversations(request: Request) -> None:
+    """Лимит создания диалогов с одного IP: `visitor_id` задаёт клиент, его легко менять."""
+    settings = request.app.state.settings
+    rule = RateLimit("conversations_ip", settings.rate_conversations_per_ip_per_hour, 3600)
+    await enforce_rate_limits(_limiter(request), [(rule, client_ip(request))])
+
+
+async def limit_turns(request: Request, tenant_id: WidgetTenant) -> None:
+    """Лимит ходов (сообщения и повторы): с одного IP и на тенанта (расход LLM)."""
+    settings = request.app.state.settings
+    await enforce_rate_limits(
+        _limiter(request),
+        [
+            (RateLimit("turns_ip", settings.rate_turns_per_ip_per_min, 60), client_ip(request)),
+            (
+                RateLimit("turns_tenant", settings.rate_turns_per_tenant_per_min, 60),
+                str(tenant_id),
+            ),
+        ],
+    )
+
+
+async def limit_turn_body(request: Request) -> None:
+    """Слишком большое тело хода — 422 `invalid_input` до разбора и записи."""
+    length = request.headers.get("content-length", "")
+    too_long = length.isdigit() and int(length) > MAX_TURN_BODY_BYTES
+    if too_long or len(await request.body()) > MAX_TURN_BODY_BYTES:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "invalid_input",
+            f"тело запроса больше {MAX_TURN_BODY_BYTES} байт",
+        )
+
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_conversations)],
+    responses={429: {"description": "лимит частоты (rate_limited), заголовок Retry-After"}},
+)
 async def create_conversation(
     body: CreateConversationRequest, tenant_id: WidgetTenant, session: DbSession
 ) -> CreateConversationResponse:
@@ -128,7 +185,9 @@ async def conversation_messages(
     responses={
         200: {"description": "SSE-стрим хода", "content": {"text/event-stream": {}}},
         409: {"description": "client_message_id уже отправлен (duplicate_message)"},
+        429: {"description": "лимит частоты (rate_limited), заголовок Retry-After"},
     },
+    dependencies=[Depends(limit_turn_body), Depends(limit_turns)],
 )
 async def send_message(
     request: Request,
@@ -175,7 +234,9 @@ async def send_message(
         200: {"description": "SSE-стрим нового хода", "content": {"text/event-stream": {}}},
         404: {"description": "диалога (conversation_not_found) или ответа (not_found) нет"},
         409: {"description": "ответ нельзя повторить (not_retryable)"},
+        429: {"description": "лимит частоты (rate_limited), заголовок Retry-After"},
     },
+    dependencies=[Depends(limit_turns)],
 )
 async def retry_message(
     request: Request,

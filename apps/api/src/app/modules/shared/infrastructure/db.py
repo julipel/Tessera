@@ -34,8 +34,22 @@ class TenantScopedBase(Base):
     tenant_id: Mapped[UUID] = mapped_column(index=True)
 
 
-def create_engine(database_url: str, *, echo: bool = False) -> AsyncEngine:
-    return create_async_engine(database_url, echo=echo, pool_pre_ping=True)
+def create_engine(
+    database_url: str,
+    *,
+    echo: bool = False,
+    pool_size: int = 5,
+    max_overflow: int = 10,
+    pool_timeout: float = 30,
+) -> AsyncEngine:
+    return create_async_engine(
+        database_url,
+        echo=echo,
+        pool_pre_ping=True,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+    )
 
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

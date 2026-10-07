@@ -493,6 +493,14 @@ API), порт `RateLimiter` в `shared.kernel`; правила — настро
 - structlog + OpenTelemetry для HTTP/БД. Sentry для исключений.
 - Метрики: латентность до первого токена, длительность хода, шаги на ход, ошибки инструментов,
   стоимость на диалог.
+- Нагрузочный тест (P7-05): `make loadtest n=… [c=…] [turns=…]` — `apps/api/loadtest`
+  (asyncio + httpx) создаёт n диалогов (одновременно c) по turns ходов и меряет по SSE время
+  до `turn_started`, до первого `text_delta` (TTFT) и до `done`, исходы (HTTP-коды, `error.code`);
+  отчёт — `loadtest/reports/`. Стенд `scripts/loadtest.sh`: база `app_load`, мок модели из e2e
+  с задержкой первого токена (`MOCK_LLM_FIRST_TOKEN_MS`, 500 мс), JSON-логи, лимиты и Langfuse
+  выключены — меряется платформа, а не провайдер; `LOADTEST_BASE_URL` — против живого API. Потолок
+  одновременных ходов процесса — пул БД (`DB_POOL_SIZE` + `DB_MAX_OVERFLOW`): ход держит
+  соединение до конца ответа модели.
 
 ## 14. Frontend
 

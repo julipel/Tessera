@@ -48,7 +48,7 @@ allowed-confusables = ["а", "в", "г", "е", "к", "м", "н", "о", "р", "с
 python_version = "3.12"
 strict = true
 mypy_path = "src"
-files = ["src", "tests", "migrations", "evals"]
+files = ["src", "tests", "migrations", "evals", "loadtest"]
 plugins = ["pydantic.mypy"]
 
 # asyncpg без py.typed; коннектор `database` оборачивает его в типизированный код.

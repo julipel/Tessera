@@ -30,6 +30,10 @@ async def require_widget_access(
         raise ApiError(status.HTTP_401_UNAUTHORIZED, "unauthorized", str(e)) from e
     except OriginNotAllowedError as e:
         raise ApiError(status.HTTP_403_FORBIDDEN, "forbidden", str(e)) from e
+    # Конец транзакции возвращает соединение в пул до эндпоинта: сессия живёт до выхода
+    # из него, а SSE-ход берёт своё соединение (StreamDbSession) — с двумя соединениями
+    # на ход занятый пул блокировал ходы друг другом (P7-05).
+    await session.commit()
     structlog.contextvars.bind_contextvars(tenant_id=str(access.tenant_id))
     return access
 

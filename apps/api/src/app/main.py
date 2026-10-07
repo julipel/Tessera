@@ -51,7 +51,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     # Engine ленивый (соединения открываются при первом запросе), поэтому создаём сразу,
     # а не в lifespan: так он доступен и в тестах без запуска lifespan.
-    app.state.engine = create_engine(settings.database_url, echo=settings.database_echo)
+    app.state.engine = create_engine(
+        settings.database_url,
+        echo=settings.database_echo,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+    )
     app.state.session_factory = create_session_factory(app.state.engine)
     # Redis — для лимитов частоты (ADR-0030); соединение ленивое, таймауты короткие:
     # недоступный Redis не должен держать запрос.

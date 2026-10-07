@@ -9,6 +9,7 @@ __pycache__/
 node_modules/
 .next/
 evals/reports/
+loadtest/reports/
 .claude/settings.local.json
 dist/
 # Файлы источников знаний (KNOWLEDGE_FILES_DIR); демо-данные тенантов (ADR-0019) — в git.

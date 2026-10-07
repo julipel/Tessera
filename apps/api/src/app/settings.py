@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     log_level: LogLevel = "INFO"
     database_url: str = "postgresql+asyncpg://app:app@localhost:5432/app"
     database_echo: bool = False
+    # Пул соединений API на процесс. SSE-ход держит соединение до конца ответа модели
+    # (P7-05, кандидат P7-08), поэтому одновременных ходов на процесс не больше
+    # DB_POOL_SIZE + DB_MAX_OVERFLOW; остальные ждут свободное соединение до таймаута пула.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
     redis_url: str = "redis://localhost:6379/0"
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: SecretStr | None = None

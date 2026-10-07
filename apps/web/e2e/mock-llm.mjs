@@ -13,10 +13,14 @@
 //   повторяет шаг основной модели (PRIMARY_ATTEMPTS в agent/application/fallback_llm.py,
 //   ADR-0027) и падает, «Повторить» получает ответ;
 //   если в контексте этот вопрос дважды подряд, ответ начинается с DUPLICATE_MARK.
+// Задержки (нагрузочный тест, P7-05): MOCK_LLM_FIRST_TOKEN_MS — пауза до первого слова
+// (по умолчанию 0), MOCK_LLM_WORD_MS — между словами обычного ответа (по умолчанию 30).
 import { createServer } from "node:http";
 
 const [host, port] = [process.env.MOCK_LLM_HOST, Number(process.env.MOCK_LLM_PORT)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const FIRST_TOKEN_MS = Number(process.env.MOCK_LLM_FIRST_TOKEN_MS ?? 0);
+const WORD_MS = Number(process.env.MOCK_LLM_WORD_MS ?? 30);
 
 function chunk(delta, finishReason = null, usage = undefined) {
   const choices = delta === null ? [] : [{ index: 0, delta, finish_reason: finishReason }];
@@ -97,8 +101,9 @@ async function responses(req, res) {
   if (long) {
     for (let i = 1; i <= LONG_LINES; i++) words.push(`\n\nСтрока ${i}.`);
   }
+  if (words.length) await sleep(FIRST_TOKEN_MS);
   for (const word of words) {
-    await sleep(long ? 100 : 30);
+    await sleep(long ? 100 : WORD_MS);
     // Ход прерван (отмена или закрытый стрим) — API закрыл соединение.
     if (res.destroyed) return;
     send({ type: "response.output_text.delta", item_id: "msg_e2e", output_index: 0, content_index: 0, delta: word });

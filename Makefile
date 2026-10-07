@@ -6,7 +6,7 @@ HAS_API := $(wildcard $(API)/pyproject.toml)
 HAS_WEB := $(wildcard $(WEB)/package.json)
 
 .PHONY: up down ps install check check-fast test lint-py typecheck-py arch lint-web typecheck-web test-web \
-        contracts contracts-check migrate migration eval eval-diff seed sync pilot dev-api dev-web worker
+        contracts contracts-check migrate migration eval eval-diff loadtest seed sync pilot dev-api dev-web worker
 
 # --wait: команда завершается, когда все сервисы прошли healthcheck
 up:
@@ -107,3 +107,9 @@ eval:
 # (имя отчёта без .json или путь от корня репозитория). Код 1 — есть ухудшения.
 eval-diff:
 	cd $(API) && uv run python -m evals.diff $(a) $(b)
+
+# Нагрузочный тест (P7-05): n диалогов по turns ходов, одновременно c (по умолчанию = n).
+# Свой стенд на моке модели — см. scripts/loadtest.sh (там же прогон против живого API).
+loadtest:
+	scripts/loadtest.sh $(if $(n),--dialogs $(n),) $(if $(c),--concurrency $(c),) \
+		$(if $(turns),--turns $(turns),)

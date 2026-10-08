@@ -47,3 +47,17 @@ async def test_trace_id_exposed_to_browser(settings: Settings) -> None:
     assert resp.headers["access-control-allow-origin"] == CHAT_ORIGIN
     assert "x-trace-id" in resp.headers["access-control-expose-headers"].lower()
     assert resp.headers["x-trace-id"]
+
+
+async def test_preflight_allows_delete_for_admin(settings: Settings) -> None:
+    # Удаление файла источника в админке (P8-03b).
+    headers = {
+        "Origin": CHAT_ORIGIN,
+        "Access-Control-Request-Method": "DELETE",
+        "Access-Control-Request-Headers": "authorization",
+    }
+    async with AsyncClient(transport=ASGITransport(app=_app(settings)), base_url="http://t") as ac:
+        resp = await ac.options("/v1/admin/tenants/t/sources/s/files/a.md", headers=headers)
+
+    assert resp.status_code == 200
+    assert "DELETE" in resp.headers["access-control-allow-methods"]

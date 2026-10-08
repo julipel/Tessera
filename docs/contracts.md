@@ -347,7 +347,7 @@ branding:
 HTTP-ответ с `invalid_input` может нести `details: [{loc, message}]` — ошибки по местам ввода
 (`loc` — путь из ключей и индексов, пустой — весь ввод); пока — только AgentConfig в админке.
 
-## 7. API админки (P7-02, P8-01b, P8-02a, P8-03a; ADR-0028, ADR-0036, ADR-0037)
+## 7. API админки (P7-02, P8-01b, P8-02a, P8-03a, P8-03b; ADR-0028, ADR-0036, ADR-0037)
 
 ### Вход и сессия
 
@@ -402,7 +402,18 @@ POST /v1/admin/tenants/{tenant_id}/sources  CreateSourceRequest {name, kind, con
 GET  /v1/admin/tenants/{tenant_id}/sources/{id}/syncs       → 200 SourceSyncList {syncs}  # 20 последних
 POST /v1/admin/tenants/{tenant_id}/sources/{id}/sync  StartSyncRequest {full?}
   → 202 SourceSyncItem — синхронизация в очереди воркера; уже ждущая или идущая — она же
+GET    …/sources/{id}/files              → 200 SourceFileList {files: [{name, size, modified_at}]}
+POST   …/sources/{id}/files/{filename}   тело — байты файла → 200 SourceFile   # editor
+  → 413 invalid_input — больше лимита (20 МБ); 422 invalid_input — см. ниже
+DELETE …/sources/{id}/files/{filename}   → 204   # editor; нет файла — 404
 ```
+
+Файлы — только у `file` (`.md`, `.markdown`, `.txt`, `.pdf`, `.docx`) и `table` (`.csv`, `.xlsx`),
+другой вид — 422. Список показывает и файлы источника из YAML (пути относительно каталога), а
+загружать и удалять можно только у `origin=admin`. Загрузка — тело запроса без multipart: один
+сегмент пути, не скрытый, ≤ 255 байт, расширение вида, не пустой, не больше 200 файлов на
+источник. Файл с тем же именем заменяется. Синхронизацию загрузка не запускает, а данные
+удалённого файла убирает только полная синхронизация.
 
 Источник другого тенанта — 404 `not_found`. `origin`: `yaml` — из YAML тенанта, меняет его
 только `make seed`, админка лишь запускает синхронизацию; `admin` — создан в админке, `make seed`

@@ -386,6 +386,26 @@ export interface StartSyncRequest {
   full?: boolean;
 }
 /**
+ * Файл в каталоге источника file/table. name — путь относительно каталога (posix), как external_id документа.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SourceFile".
+ */
+export interface SourceFile {
+  name: string;
+  size: number;
+  modified_at: string;
+}
+/**
+ * Ответ GET …/sources/{source_id}/files: по имени.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SourceFileList".
+ */
+export interface SourceFileList {
+  files: SourceFile[];
+}
+/**
  * Конфигурация тенанта (поле config JSONB таблицы AgentConfig). Вся бизнес-специфика — здесь, не в коде ядра.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema

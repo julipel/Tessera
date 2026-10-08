@@ -20,7 +20,7 @@ from app.modules.knowledge.domain.ingestion import (
     SourceSpec,
     SyncJob,
 )
-from app.modules.knowledge.domain.source_admin import SourceOverview, SyncRun
+from app.modules.knowledge.domain.source_admin import SourceFileInfo, SourceOverview, SyncRun
 from app.modules.knowledge.domain.source_seed import MirrorStats, RegisteredSource
 from app.modules.shared.kernel import TenantId
 
@@ -171,6 +171,18 @@ class SourceFileStore(Protocol):
     def mirror(self, source: SourceSpec, from_dir: Path) -> MirrorStats:
         """Сделать каталог источника копией `from_dir`: новые и изменённые файлы копируются,
         лишние удаляются; скрытые файлы и симлинки пропускаются. Синхронный (файловый I/O)."""
+        ...
+
+    def list_files(self, source: SourceSpec) -> list[SourceFileInfo]:
+        """Файлы каталога источника по имени, без скрытых и симлинков; нет каталога — пусто."""
+        ...
+
+    def put_file(self, source: SourceSpec, name: str, data: bytes) -> SourceFileInfo:
+        """Записать (заменить) файл в корне каталога источника атомарно, с новым mtime."""
+        ...
+
+    def delete_file(self, source: SourceSpec, name: str) -> bool:
+        """False — такого файла нет."""
         ...
 
 

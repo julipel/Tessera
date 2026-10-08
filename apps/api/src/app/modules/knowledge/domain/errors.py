@@ -45,3 +45,7 @@ class InvalidSourceError(DomainError, ValueError):
     def __init__(self, message: str, problems: Sequence[SourceProblem] = ()) -> None:
         super().__init__(message)
         self.problems = list(problems) or [SourceProblem((), message)]
+
+
+class SourceFileTooLargeError(DomainError):
+    """Загружаемый файл больше лимита."""

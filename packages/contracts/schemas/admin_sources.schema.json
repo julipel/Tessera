@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "admin_sources.schema.json",
   "title": "AdminSourcesSchema",
-  "description": "Источники знаний в админке (docs/contracts.md §7, ADR-0037). Файл без единого корневого типа — экспортируемые типы в $defs: SourceList, SourceSummary, SourceDetail, CreateSourceRequest, SourceSyncItem, SourceSyncList, SourceSyncStats, StartSyncRequest.",
+  "description": "Источники знаний в админке (docs/contracts.md §7, ADR-0037). Файл без единого корневого типа — экспортируемые типы в $defs: SourceList, SourceSummary, SourceDetail, CreateSourceRequest, SourceSyncItem, SourceSyncList, SourceSyncStats, StartSyncRequest, SourceFile, SourceFileList.",
   "$defs": {
     "SourceSyncStats": {
       "type": "object",
@@ -348,6 +348,45 @@
           "default": false
         }
       },
+      "additionalProperties": false
+    },
+    "SourceFile": {
+      "type": "object",
+      "description": "Файл в каталоге источника file/table. name — путь относительно каталога (posix), как external_id документа.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modified_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "name",
+        "size",
+        "modified_at"
+      ],
+      "additionalProperties": false
+    },
+    "SourceFileList": {
+      "type": "object",
+      "description": "Ответ GET …/sources/{source_id}/files: по имени.",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceFile"
+          }
+        }
+      },
+      "required": [
+        "files"
+      ],
       "additionalProperties": false
     }
   }

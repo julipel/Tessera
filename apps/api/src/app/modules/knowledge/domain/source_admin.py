@@ -14,6 +14,30 @@ ADMIN_SOURCE_KINDS = frozenset({SourceKind.WEBSITE, SourceKind.FILE, SourceKind.
 # Сколько последних синхронизаций источника показывает админка.
 RECENT_SYNCS = 20
 
+# Файлы, которые читают коннекторы file и table (их парсеры и читатели таблиц).
+FILE_SUFFIXES: dict[SourceKind, frozenset[str]] = {
+    SourceKind.FILE: frozenset({".md", ".markdown", ".txt", ".pdf", ".docx"}),
+    SourceKind.TABLE: frozenset({".csv", ".xlsx"}),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class SourceFileLimits:
+    """Загрузка файлов из админки. 20 МБ — не больше лимита коннекторов (file — 20 МБ);
+    число файлов ограничено, чтобы один источник не занял диск платформы."""
+
+    max_bytes: int = 20 * 1024 * 1024
+    max_files: int = 200
+
+
+@dataclass(frozen=True, slots=True)
+class SourceFileInfo:
+    """`name` — путь относительно каталога источника (posix), как external_id документа."""
+
+    name: str
+    size: int
+    modified_at: datetime
+
 
 @dataclass(frozen=True, slots=True)
 class SyncRun:

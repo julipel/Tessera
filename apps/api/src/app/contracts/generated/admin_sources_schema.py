@@ -12,7 +12,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel
 class AdminSourcesSchema(RootModel[Any]):
     root: Annotated[Any, Field(title="AdminSourcesSchema")]
     """
-    Источники знаний в админке (docs/contracts.md §7, ADR-0037). Файл без единого корневого типа — экспортируемые типы в $defs: SourceList, SourceSummary, SourceDetail, CreateSourceRequest, SourceSyncItem, SourceSyncList, SourceSyncStats, StartSyncRequest.
+    Источники знаний в админке (docs/contracts.md §7, ADR-0037). Файл без единого корневого типа — экспортируемые типы в $defs: SourceList, SourceSummary, SourceDetail, CreateSourceRequest, SourceSyncItem, SourceSyncList, SourceSyncStats, StartSyncRequest, SourceFile, SourceFileList.
     """
 
 
@@ -155,3 +155,27 @@ class StartSyncRequest(BaseModel):
         extra="forbid",
     )
     full: bool | None = False
+
+
+class SourceFile(BaseModel):
+    """
+    Файл в каталоге источника file/table. name — путь относительно каталога (posix), как external_id документа.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    name: str
+    size: Annotated[int, Field(ge=0)]
+    modified_at: AwareDatetime
+
+
+class SourceFileList(BaseModel):
+    """
+    Ответ GET …/sources/{source_id}/files: по имени.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    files: list[SourceFile]

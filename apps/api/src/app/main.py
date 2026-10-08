@@ -23,7 +23,12 @@ from app.modules.chat.public import (
     background_summary,
 )
 from app.modules.chat.public import router as chat_router
-from app.modules.knowledge.public import ArqSyncQueue, SqlCatalog
+from app.modules.knowledge.public import (
+    ArqSyncQueue,
+    LocalSourceFileStore,
+    SourceFileLimits,
+    SqlCatalog,
+)
 from app.modules.knowledge.public import admin_router as knowledge_admin_router
 from app.modules.leads.public import SqlLeadStore
 from app.modules.observability.public import Tracer, admin_router, build_tracer
@@ -124,6 +129,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.redis_url, socket_timeout=2, socket_connect_timeout=2
     )
     app.state.sync_queue = ArqSyncQueue(app.state.arq_redis)
+    # Файлы источников file/table из админки — в каталог, который читают коннекторы воркера.
+    app.state.source_files = LocalSourceFileStore(settings.knowledge_files_dir)
+    app.state.source_file_limits = SourceFileLimits()
     # Сессии админки для зависимостей ролей в любом модуле (ADR-0036).
     app.state.admin_authenticator = SqlAdminAuthenticator(app.state.session_factory)
     install_error_handlers(app)
@@ -132,7 +140,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "X-Widget-Key"],
         expose_headers=["X-Trace-Id", "Retry-After"],
     )

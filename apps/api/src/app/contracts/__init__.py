@@ -20,6 +20,8 @@ from app.contracts.generated.admin_events_schema import AgentEventItem, AgentEve
 from app.contracts.generated.admin_sources_schema import (
     CreateSourceRequest,
     SourceDetail,
+    SourceFile,
+    SourceFileList,
     SourceList,
     SourceSummary,
     SourceSyncItem,
@@ -167,6 +169,8 @@ __all__ = [
     "SendMessageRequest",
     "SlotDefinition",
     "SourceDetail",
+    "SourceFile",
+    "SourceFileList",
     "SourceItem",
     "SourceList",
     "SourceSummary",

@@ -7,11 +7,14 @@
 
 import os
 import shutil
+import uuid
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from app.modules.knowledge.domain.ingestion import SourceSpec
+from app.modules.knowledge.domain.source_admin import SourceFileInfo
 from app.modules.knowledge.domain.source_seed import MirrorStats
 
 
@@ -81,7 +84,8 @@ def files_cursor(files: Collection[SourceFile], fallback: str | None = None) -> 
 
 
 class LocalSourceFileStore:
-    """`SourceFileStore` на локальном диске: seed файлов источника из YAML тенанта (ADR-0019)."""
+    """`SourceFileStore` на локальном диске: seed файлов источника из YAML тенанта (ADR-0019)
+    и файлы из админки (ADR-0037)."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -106,6 +110,47 @@ class LocalSourceFileStore:
                 path.unlink()
                 removed += 1
         return MirrorStats(copied=copied, removed=removed, unchanged=unchanged)
+
+    def list_files(self, source: SourceSpec) -> list[SourceFileInfo]:
+        base = source_dir(self.root, source)
+        if not base.is_dir():
+            return []
+        result: list[SourceFileInfo] = []
+        for relative, path in _visible_files(base):
+            stat = path.stat()
+            modified_at = datetime.fromtimestamp(stat.st_mtime_ns / 1e9, tz=UTC)
+            result.append(SourceFileInfo(relative, stat.st_size, modified_at))
+        return sorted(result, key=lambda f: f.name)
+
+    def put_file(self, source: SourceSpec, name: str, data: bytes) -> SourceFileInfo:
+        target = source_dir(self.root, source)
+        destination = target / _plain_name(name)
+        target.mkdir(parents=True, exist_ok=True)
+        # Скрытый временный файл scan не читает; rename атомарен — синхронизация не увидит
+        # недописанный файл.
+        temporary = target / f".upload-{uuid.uuid4().hex}"
+        try:
+            temporary.write_bytes(data)
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        stat = destination.stat()
+        modified_at = datetime.fromtimestamp(stat.st_mtime_ns / 1e9, tz=UTC)
+        return SourceFileInfo(name, stat.st_size, modified_at)
+
+    def delete_file(self, source: SourceSpec, name: str) -> bool:
+        path = source_dir(self.root, source) / _plain_name(name)
+        if path.is_symlink() or not path.is_file():
+            return False
+        path.unlink()
+        return True
+
+
+def _plain_name(name: str) -> str:
+    """Имя файла в корне каталога источника: без путей и скрытых файлов."""
+    if not name or name != PurePosixPath(name).name or "\\" in name or name.startswith("."):
+        raise SourceFileError(f"недопустимое имя файла: {name!r}")
+    return name
 
 
 def _visible_files(base: Path) -> Iterator[tuple[str, Path]]:

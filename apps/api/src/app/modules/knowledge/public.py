@@ -45,6 +45,7 @@ from app.modules.knowledge.domain.ports import (
     SyncQueue,
     SyncStore,
 )
+from app.modules.knowledge.domain.source_admin import SourceFileLimits
 from app.modules.knowledge.domain.source_seed import (
     MirrorStats,
     SeedAction,
@@ -158,6 +159,7 @@ __all__ = [
     "SourceConnector",
     "SourceDeclaration",
     "SourceFileError",
+    "SourceFileLimits",
     "SourceFileStore",
     "SourceKind",
     "SourceRecord",

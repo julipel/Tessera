@@ -100,6 +100,10 @@ class TurnStream:
     После записи ответа длинная история сворачивается в сводку в фоне (`summaries`).
     С `agent_events` вместе с ответом записывается журнал хода (`TurnJournal`, P7-02);
     `trace_id` — запроса, в котором идёт ход, `retry_of` — заменённый повтором ответ.
+
+    Транзакция подготовки хода закрыта до стрима (`start_turn`/`retry_turn`), пока модель
+    отвечает, ход не держит соединение пула: хранилища берут его заново только в `save()`
+    и отпускают на `commit` (ADR-0034).
     """
 
     def __init__(
@@ -374,8 +378,8 @@ async def start_turn(
     agent_events: AgentEventStore | None = None,
     trace_id: str = "",
 ) -> TurnStream:
-    """Загрузить версию AgentConfig диалога, проверить и записать ввод пользователя
-    (и зафиксировать до начала стрима) и подготовить ход: загрузить историю.
+    """Загрузить версию AgentConfig диалога, проверить и записать ввод пользователя,
+    загрузить историю и зафиксировать всё до начала стрима.
 
     Отправка формы, которой нет в конфиге, или с неподходящими значениями —
     InvalidInputError. Повтор client_message_id — DuplicateMessageError: ход по этому вводу
@@ -390,14 +394,11 @@ async def start_turn(
     )
     if not created:
         raise DuplicateMessageError(f"сообщение {client_message_id} уже отправлено")
+    history = await messages.list_for(tenant_id, conversation_id)
+    # Последнее обращение к БД до стрима: commit отпускает соединение на время ответа модели
+    # (ADR-0034).
     await commit()
-    request = _turn_request(
-        conversation,
-        config,
-        message,
-        await messages.list_for(tenant_id, conversation_id),
-        trace_id,
-    )
+    request = _turn_request(conversation, config, message, history, trace_id)
     return TurnStream(
         conversation,
         request,

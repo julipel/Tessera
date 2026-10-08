@@ -35,7 +35,7 @@ from app.modules.agent.public import (
 )
 from app.modules.chat.api.router import get_turn_agent
 from app.modules.chat.api.sse import sse_stream
-from app.modules.chat.application.turns import TurnRegistry, start_turn
+from app.modules.chat.application.turns import TurnRegistry, retry_turn, start_turn
 from app.modules.chat.domain.entities import ToolCallEntry, TurnRequest
 from app.modules.chat.domain.ports import TurnAgent
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent, builtin_turn_agent
@@ -351,6 +351,63 @@ async def test_client_disconnect_saves_partial_answer_as_interrupted(
     _, assistant = (await _history(db_client, conversation_id)).messages
     assert (assistant.status, assistant.message_id) == ("interrupted", turn.message_id)
     assert [b.root.model_dump()["text"] for b in assistant.blocks] == ["Подбираю "]
+
+
+@pytest.mark.parametrize("retry", [False, True], ids=["send", "retry"])
+async def test_turn_holds_no_transaction_while_agent_answers(
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    db_client: AsyncClient,
+    use_agent: Any,
+    retry: bool,
+) -> None:
+    """ADR-0034: пока модель отвечает, соединение пула свободно — транзакция подготовки
+    хода закрыта до стрима, ответ пишется своей короткой транзакцией."""
+    stores = (
+        ConversationRepository(db_session),
+        MessageRepository(db_session),
+        ToolCallRepository(db_session),
+        TenantsAgentConfigs(db_session),
+    )
+    agent, registry = GatedAgent(), TurnRegistry()
+    if retry:
+        use_agent(FailingAgent(FLAKY))
+        failed_id = _parse_sse((await _send(db_client, conversation_id)).text)[-1][1].root
+        assert failed_id.message_id is not None
+        turn = await retry_turn(
+            shop,
+            conversation_id,
+            UUID(failed_id.message_id),
+            *stores,
+            agent,
+            db_session.commit,
+            registry,
+        )
+    else:
+        turn = await start_turn(
+            shop,
+            conversation_id,
+            uuid4(),
+            UserInput.model_validate(TEXT),
+            *stores,
+            agent,
+            db_session.commit,
+            registry,
+        )
+    assert not db_session.in_transaction()
+    events = turn.events()
+    await anext(events)  # turn_started
+    await anext(events)  # text_delta: агент ждёт внутри ответа
+    assert not db_session.in_transaction()
+
+    assert registry.cancel(shop, conversation_id, turn.turn_id)
+    rest = [e.root.type async for e in events]
+
+    assert rest == ["text_done", "done"]
+    assert not db_session.in_transaction()
+    assistant = (await _history(db_client, conversation_id)).messages[-1]
+    assert (assistant.message_id, assistant.status) == (turn.message_id, "interrupted")
 
 
 # --- POST /v1/conversations/{id}/turns/{turn_id}/cancel ---

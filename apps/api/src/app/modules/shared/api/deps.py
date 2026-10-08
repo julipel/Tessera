@@ -24,4 +24,6 @@ DbSession = Annotated[AsyncSession, Depends(get_session, scope="function")]
 
 # scope="request": сессия живёт до конца отправки ответа — для SSE-стрима, который пишет в БД
 # после возврата из эндпоинта. Фиксировать изменения стрим должен сам (commit), до `done`.
+# Между транзакциями сессия соединения не держит: стрим закрывает транзакцию перед долгим
+# ожиданием (ответ модели), иначе одновременных стримов не больше размера пула (ADR-0034).
 StreamDbSession = Annotated[AsyncSession, Depends(get_session, scope="request")]

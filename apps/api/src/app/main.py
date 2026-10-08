@@ -31,6 +31,7 @@ from app.modules.shared.public import (
     create_session_factory,
     install_error_handlers,
 )
+from app.modules.tenants.public import admin_router as tenants_admin_router
 from app.modules.tenants.public import public_router as tenants_public_router
 from app.settings import Settings
 
@@ -131,6 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(chat_router)
     app.include_router(access_router)
     app.include_router(admin_router)
+    app.include_router(tenants_admin_router)
     return app
 
 

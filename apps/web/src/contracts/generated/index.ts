@@ -131,6 +131,55 @@ export interface Contracts {
   [k: string]: unknown;
 }
 /**
+ * Версия конфига без содержимого.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AgentConfigVersionSummary".
+ */
+export interface AgentConfigVersionSummary {
+  id: string;
+  version: number;
+  /**
+   * draft → active → archived. Активная версия на тенанта одна; откат — активация архивной.
+   */
+  status: "draft" | "active" | "archived";
+  created_at: string;
+}
+/**
+ * Ответ GET /v1/admin/tenants/{tenant_id}/agent-configs: версии от новой к старой.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AgentConfigVersionList".
+ */
+export interface AgentConfigVersionList {
+  versions: AgentConfigVersionSummary[];
+}
+/**
+ * Версия конфига с содержимым в YAML. Комментарии исходного YAML не хранятся: в БД — JSON.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AgentConfigVersionDetail".
+ */
+export interface AgentConfigVersionDetail {
+  id: string;
+  version: number;
+  /**
+   * draft → active → archived. Активная версия на тенанта одна; откат — активация архивной.
+   */
+  status: "draft" | "active" | "archived";
+  created_at: string;
+  yaml: string;
+}
+/**
+ * Тело POST /v1/admin/tenants/{tenant_id}/agent-configs: AgentConfig в YAML (agent_config.schema.json). Сохраняется новым черновиком.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "CreateAgentConfigRequest".
+ */
+export interface CreateAgentConfigRequest {
+  yaml: string;
+}
+/**
  * Тело POST /v1/admin/auth/login. Email — логин, без учёта регистра.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -1117,6 +1166,23 @@ export interface HttpErrorBody {
     | "not_retryable";
   message: string;
   retryable: boolean;
+  /**
+   * Ошибки по местам ввода для invalid_input, если сервер их различает (AgentConfig в админке).
+   */
+  details?: ErrorDetail[];
+}
+/**
+ * Ошибка в одном месте ввода: loc — путь (ключи и индексы), пустой — весь ввод.
+ *
+ * This interface was referenced by `HttpError`'s JSON-Schema
+ * via the `definition` "ErrorDetail".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ErrorDetail".
+ */
+export interface ErrorDetail {
+  loc: (string | number)[];
+  message: string;
 }
 /**
  * Ответ GET /v1/public/config?locale=: то, что виджет/чат показывает до первого сообщения. Только публичная часть активного AgentConfig — без промпта, инструментов, моделей и лимитов.

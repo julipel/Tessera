@@ -3,7 +3,7 @@
 Контракт — `http_error.schema.json`, коды — docs/contracts.md §6.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal, get_args
 
 import structlog
@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.contracts import HttpError, HttpErrorBody
+from app.contracts import ErrorDetail, HttpError, HttpErrorBody
 
 # Дублирует enum из схемы ради типизации вызовов; совпадение проверяет тест.
 type ErrorCode = Literal[
@@ -49,7 +49,8 @@ logger = structlog.get_logger(__name__)
 
 
 class ApiError(Exception):
-    """Ошибка, которую роутер отдаёт клиенту как есть: статус, код и сообщение."""
+    """Ошибка, которую роутер отдаёт клиенту как есть: статус, код, сообщение и, если есть,
+    ошибки по местам ввода (`details`)."""
 
     def __init__(
         self,
@@ -57,12 +58,14 @@ class ApiError(Exception):
         code: ErrorCode,
         message: str,
         headers: Mapping[str, str] | None = None,
+        details: Sequence[ErrorDetail] | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
         self.headers = headers
+        self.details = details
 
 
 def error_response(
@@ -70,14 +73,22 @@ def error_response(
     code: ErrorCode,
     message: str,
     headers: Mapping[str, str] | None = None,
+    details: Sequence[ErrorDetail] | None = None,
 ) -> JSONResponse:
-    body = HttpError(error=HttpErrorBody(code=code, message=message, retryable=code in RETRYABLE))
-    return JSONResponse(body.model_dump(mode="json"), status_code=status_code, headers=headers)
+    error = HttpErrorBody(
+        code=code,
+        message=message,
+        retryable=code in RETRYABLE,
+        details=list(details) if details is not None else None,
+    )
+    # Без details поле не выводится: тело остальных ошибок не меняется.
+    body = HttpError(error=error).model_dump(mode="json", exclude_none=True)
+    return JSONResponse(body, status_code=status_code, headers=headers)
 
 
 async def _api_error(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, ApiError)
-    return error_response(exc.status_code, exc.code, exc.message, exc.headers)
+    return error_response(exc.status_code, exc.code, exc.message, exc.headers, exc.details)
 
 
 async def _http_exception(_: Request, exc: Exception) -> JSONResponse:

@@ -8,6 +8,18 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 
+class ErrorDetail(BaseModel):
+    """
+    Ошибка в одном месте ввода: loc — путь (ключи и индексы), пустой — весь ввод.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    loc: list[str | int]
+    message: str
+
+
 class HttpErrorBody(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -31,6 +43,10 @@ class HttpErrorBody(BaseModel):
     """
     message: str
     retryable: bool
+    details: list[ErrorDetail] | None = None
+    """
+    Ошибки по местам ввода для invalid_input, если сервер их различает (AgentConfig в админке).
+    """
 
 
 class HttpError(BaseModel):

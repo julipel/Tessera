@@ -21,7 +21,7 @@ from app.modules.access.public import (
     SqlAdminUserDirectory,
     upsert_admin_user,
 )
-from app.modules.shared.public import AdminPrincipal, AdminRole, TenantId
+from app.modules.shared.public import AdminPrincipal, AdminRole, InMemoryRateLimiter, TenantId
 from app.modules.tenants.public import SqlTenantDirectory
 
 AdminLogin = Callable[..., Awaitable[dict[str, str]]]  # фикстура admin_login из conftest
@@ -219,6 +219,8 @@ async def test_login_is_rate_limited_by_email_and_ip(
     app.state.settings = app.state.settings.model_copy(
         update={"rate_admin_login_per_email_per_hour": 2, "rate_admin_login_per_ip_per_min": 4}
     )
+    # Часы стоят в середине окна: на границе минуты счётчик IP обнулился бы посреди теста.
+    app.state.rate_limiter = InMemoryRateLimiter(now=lambda: 1_800_030.0)
     await _user(db_session, "anna@example.com", password=PASSWORD)
     wrong = {"email": "anna@example.com", "password": "wrong password!"}
 

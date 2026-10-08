@@ -1,6 +1,7 @@
 """Сущности тенанта и версии конфигурации агента."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -38,6 +39,7 @@ class AgentConfigVersion:
     version: int
     status: AgentConfigStatus
     config: dict[str, Any]
+    created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

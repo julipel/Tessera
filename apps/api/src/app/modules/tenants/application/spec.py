@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from app.contracts import AgentConfig
+from app.modules.tenants.application.config_editor import scenario_key_problems
 from app.modules.tenants.domain.errors import InvalidTenantSpecError
 from app.modules.tenants.domain.widget_keys import ORIGIN_PATTERN
 
@@ -45,11 +46,9 @@ class TenantSpec(BaseModel):
     @field_validator("agent_config")
     @classmethod
     def _unique_scenario_keys(cls, config: AgentConfig) -> AgentConfig:
-        # Ключ сценария — значение `active_scenario` в состоянии диалога: дубль неоднозначен.
-        keys = [s.key for s in config.prompt.scenarios or []]
-        duplicates = sorted({k for k in keys if keys.count(k) > 1})
-        if duplicates:
-            raise ValueError(f"повторяются ключи сценариев: {', '.join(duplicates)}")
+        problems = scenario_key_problems(config)
+        if problems:
+            raise ValueError(problems[0].message)
         return config
 
     def config_json(self) -> dict[str, Any]:

@@ -344,7 +344,10 @@ branding:
 Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `forbidden`, `not_found`,
 `duplicate_message`, `not_retryable`.
 
-## 7. API админки (P7-02, P8-01b; ADR-0028, ADR-0036)
+HTTP-ответ с `invalid_input` может нести `details: [{loc, message}]` — ошибки по местам ввода
+(`loc` — путь из ключей и индексов, пустой — весь ввод); пока — только AgentConfig в админке.
+
+## 7. API админки (P7-02, P8-01b, P8-02a; ADR-0028, ADR-0036)
 
 ### Вход и сессия
 
@@ -363,6 +366,27 @@ GET  /v1/admin/me          → 200 AdminMe {id, email, is_superadmin, membership
 `/v1/admin/tenants/{tenant_id}/…` требуют роли в этом тенанте (`viewer` < `editor`,
 суперадмин — все тенанты), иначе 403 `forbidden`. Роли и отключение читаются на каждом
 запросе — снятие роли действует сразу. Пользователей создаёт `make admin-user`.
+
+### Версии AgentConfig — роль `editor`
+
+```
+GET  /v1/admin/tenants/{tenant_id}/agent-configs               # admin_agent_config.schema.json
+  → 200 AgentConfigVersionList {versions: [{id, version, status, created_at}]}  # от новой к старой
+GET  /v1/admin/tenants/{tenant_id}/agent-configs/{id}       → 200 AgentConfigVersionDetail {…, yaml}
+POST /v1/admin/tenants/{tenant_id}/agent-configs  CreateAgentConfigRequest {yaml}
+  → 201 AgentConfigVersionDetail — новый черновик (draft)
+  → 422 invalid_input + details — YAML не разбирается или конфиг не проходит валидацию
+POST /v1/admin/tenants/{tenant_id}/agent-configs/{id}/activate → 200 AgentConfigVersionDetail
+  → 404 not_found — версии нет в этом тенанте; 422 invalid_input + details — см. ниже
+```
+
+Версии неизменяемы: сохранение создаёт новый черновик, активация делает версию `active`,
+прежнюю — `archived`; откат — активация архивной версии, повтор активации ничего не меняет.
+Начатые диалоги остаются на своей версии, новые начинаются на активной. Валидация — как у
+`make seed`: схема AgentConfig (§5) и уникальные ключи сценариев; при активации конфиг
+проверяется заново (схема могла измениться после сохранения). В БД — JSON как написан (без
+значений по умолчанию), `yaml` ответа собирается из него в порядке полей AgentConfig —
+комментарии исходного YAML не сохраняются.
 
 ### Журнал хода — роль `viewer`
 

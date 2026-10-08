@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "admin_agent_config.schema.json",
+  "title": "AdminAgentConfigSchema",
+  "description": "Версии AgentConfig в админке (docs/contracts.md §7). Файл без единого корневого типа — экспортируемые типы в $defs: AgentConfigVersionList, AgentConfigVersionSummary, AgentConfigVersionDetail, CreateAgentConfigRequest.",
+  "$defs": {
+    "AgentConfigVersionSummary": {
+      "type": "object",
+      "description": "Версия конфига без содержимого.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "version": { "type": "integer", "minimum": 1 },
+        "status": { "type": "string", "enum": ["draft", "active", "archived"], "description": "draft → active → archived. Активная версия на тенанта одна; откат — активация архивной." },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "version", "status", "created_at"],
+      "additionalProperties": false
+    },
+    "AgentConfigVersionList": {
+      "type": "object",
+      "description": "Ответ GET /v1/admin/tenants/{tenant_id}/agent-configs: версии от новой к старой.",
+      "properties": {
+        "versions": { "type": "array", "items": { "$ref": "#/$defs/AgentConfigVersionSummary" } }
+      },
+      "required": ["versions"],
+      "additionalProperties": false
+    },
+    "AgentConfigVersionDetail": {
+      "type": "object",
+      "description": "Версия конфига с содержимым в YAML. Комментарии исходного YAML не хранятся: в БД — JSON.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "version": { "type": "integer", "minimum": 1 },
+        "status": { "type": "string", "enum": ["draft", "active", "archived"], "description": "draft → active → archived. Активная версия на тенанта одна; откат — активация архивной." },
+        "created_at": { "type": "string", "format": "date-time" },
+        "yaml": { "type": "string" }
+      },
+      "required": ["id", "version", "status", "created_at", "yaml"],
+      "additionalProperties": false
+    },
+    "CreateAgentConfigRequest": {
+      "type": "object",
+      "description": "Тело POST /v1/admin/tenants/{tenant_id}/agent-configs: AgentConfig в YAML (agent_config.schema.json). Сохраняется новым черновиком.",
+      "properties": {
+        "yaml": { "type": "string", "minLength": 1, "maxLength": 200000 }
+      },
+      "required": ["yaml"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -4,6 +4,12 @@
 только внутренности `generated`, точка входа остаётся стабильной.
 """
 
+from app.contracts.generated.admin_agent_config_schema import (
+    AgentConfigVersionDetail,
+    AgentConfigVersionList,
+    AgentConfigVersionSummary,
+    CreateAgentConfigRequest,
+)
 from app.contracts.generated.admin_auth_schema import (
     AdminLoginRequest,
     AdminLoginResponse,
@@ -75,7 +81,7 @@ from app.contracts.generated.events_schema import (
     ToolStartedEvent,
     TurnStartedEvent,
 )
-from app.contracts.generated.http_error_schema import HttpError, HttpErrorBody
+from app.contracts.generated.http_error_schema import ErrorDetail, HttpError, HttpErrorBody
 from app.contracts.generated.public_config_schema import PublicAssistant, PublicConfig
 from app.contracts.generated.tools_schema import (
     HttpToolDefinition,
@@ -99,6 +105,9 @@ __all__ = [
     "AdminMe",
     "AdminMembership",
     "AgentConfig",
+    "AgentConfigVersionDetail",
+    "AgentConfigVersionList",
+    "AgentConfigVersionSummary",
     "AgentEventItem",
     "AgentEventList",
     "AssistantConfig",
@@ -112,6 +121,7 @@ __all__ = [
     "ComponentEvent",
     "Confirm",
     "ConfirmLabels",
+    "CreateAgentConfigRequest",
     "CreateConversationRequest",
     "CreateConversationResponse",
     "DoneData",
@@ -119,6 +129,7 @@ __all__ = [
     "DoneUsage",
     "Envelope",
     "ErrorData",
+    "ErrorDetail",
     "ErrorEvent",
     "Event",
     "Form",

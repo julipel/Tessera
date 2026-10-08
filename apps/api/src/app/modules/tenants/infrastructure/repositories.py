@@ -34,6 +34,7 @@ def _config(record: AgentConfigRecord) -> AgentConfigVersion:
         version=record.version,
         status=record.status,
         config=record.config,
+        created_at=record.created_at,
     )
 
 
@@ -78,6 +79,7 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
         return _config(record) if record else None
 
     async def list_versions(self, tenant_id: TenantId) -> Sequence[AgentConfigVersion]:
+        """От старой версии к новой."""
         stmt = self._scoped(tenant_id).order_by(AgentConfigRecord.version)
         return [_config(r) for r in (await self.session.execute(stmt)).scalars()]
 
@@ -90,6 +92,7 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
             tenant_id=tenant_id, version=version, status=AgentConfigStatus.DRAFT, config=config
         )
         await self.add(tenant_id, record)
+        await self.session.refresh(record)  # created_at — значение БД
         return _config(record)
 
     async def activate(self, tenant_id: TenantId, config_id: UUID) -> AgentConfigVersion:

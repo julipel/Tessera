@@ -32,9 +32,24 @@
           ]
         },
         "message": { "type": "string" },
-        "retryable": { "type": "boolean" }
+        "retryable": { "type": "boolean" },
+        "details": {
+          "type": "array",
+          "description": "Ошибки по местам ввода для invalid_input, если сервер их различает (AgentConfig в админке).",
+          "items": { "$ref": "#/$defs/ErrorDetail" }
+        }
       },
       "required": ["code", "message", "retryable"],
+      "additionalProperties": false
+    },
+    "ErrorDetail": {
+      "type": "object",
+      "description": "Ошибка в одном месте ввода: loc — путь (ключи и индексы), пустой — весь ввод.",
+      "properties": {
+        "loc": { "type": "array", "items": { "type": ["string", "integer"] } },
+        "message": { "type": "string" }
+      },
+      "required": ["loc", "message"],
       "additionalProperties": false
     }
   }

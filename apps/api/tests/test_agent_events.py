@@ -1,7 +1,7 @@
 """Журнал событий хода (AgentEvent, P7-02) и его эндпоинт админки (ADR-0028)."""
 
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -9,7 +9,6 @@ import anyio
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient, Response
-from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts import AgentEventList, UserInput
@@ -40,7 +39,7 @@ from app.modules.chat.infrastructure.repositories import (
 )
 from app.modules.memory.public import DialogState
 from app.modules.observability.public import AgentEventRepository
-from app.modules.shared.public import TenantId
+from app.modules.shared.public import AdminRole, TenantId
 from app.modules.tenants.public import (
     AgentConfigRepository,
     SqlTenantDirectory,
@@ -49,15 +48,9 @@ from app.modules.tenants.public import (
 )
 
 URL = "/v1/conversations"
-TOKEN = "adm-secret"
-ADMIN = {"Authorization": f"Bearer {TOKEN}"}
+AdminLogin = Callable[..., Awaitable[dict[str, str]]]  # фикстура admin_login из conftest
 TEXT = {"type": "text", "text": "Нужен подарок маме"}
 CARD = {"type": "info_card", "title": "Доставка", "body_markdown": "1-2 дня"}
-
-
-@pytest.fixture(autouse=True)
-def admin_token(app: FastAPI) -> None:
-    app.state.settings = app.state.settings.model_copy(update={"admin_api_token": SecretStr(TOKEN)})
 
 
 class ScriptedAgent:
@@ -109,6 +102,12 @@ async def shop(db_session: AsyncSession) -> TenantId:
 
 
 @pytest.fixture
+async def viewer(admin_login: AdminLogin, shop: TenantId) -> dict[str, str]:
+    """Сессия пользователя с ролью viewer в тенанте shop — журнал хода (ADR-0036)."""
+    return await admin_login("viewer@example.com", roles={shop: AdminRole.VIEWER})
+
+
+@pytest.fixture
 async def conversation_id(db_client: AsyncClient, shop: TenantId) -> UUID:
     response = await db_client.post(
         URL, json={"visitor_id": "v-1"}, headers={"X-Widget-Key": "wk_shop"}
@@ -135,14 +134,16 @@ def _sse(response: Response) -> list[dict[str, Any]]:
 
 
 async def _events(
-    client: AsyncClient, tenant_id: UUID, headers: dict[str, str] = ADMIN, **filters: Any
+    client: AsyncClient, tenant_id: UUID, headers: dict[str, str], **filters: Any
 ) -> Response:
     params = {k: str(v) for k, v in filters.items()}
     return await client.get(f"/v1/admin/tenants/{tenant_id}/events", params=params, headers=headers)
 
 
-async def _journal(client: AsyncClient, tenant_id: UUID, **filters: Any) -> list[dict[str, Any]]:
-    response = await _events(client, tenant_id, **filters)
+async def _journal(
+    client: AsyncClient, tenant_id: UUID, headers: dict[str, str], **filters: Any
+) -> list[dict[str, Any]]:
+    response = await _events(client, tenant_id, headers, **filters)
     assert response.status_code == 200
     return [
         e.model_dump(mode="json") for e in AgentEventList.model_validate(response.json()).events
@@ -150,7 +151,11 @@ async def _journal(client: AsyncClient, tenant_id: UUID, **filters: Any) -> list
 
 
 async def test_turn_events_are_logged_in_order_with_trace_id(
-    db_client: AsyncClient, shop: TenantId, conversation_id: UUID, use_agent: Any
+    db_client: AsyncClient,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
+    viewer: dict[str, str],
 ) -> None:
     state = DialogState(active_scenario="gift", slots={"gift": {"budget": "3000"}})
     use_agent(
@@ -173,7 +178,7 @@ async def test_turn_events_are_logged_in_order_with_trace_id(
 
     response = await _send(db_client, conversation_id, {TRACE_ID_HEADER: "trace-p7"})
     sse = _sse(response)
-    journal = await _journal(db_client, shop, conversation_id=conversation_id)
+    journal = await _journal(db_client, shop, viewer, conversation_id=conversation_id)
 
     assert [e["type"] for e in journal] == [
         "turn_started",
@@ -218,19 +223,27 @@ async def test_turn_events_are_logged_in_order_with_trace_id(
 
 
 async def test_generated_trace_id_matches_response_header(
-    db_client: AsyncClient, shop: TenantId, conversation_id: UUID, use_agent: Any
+    db_client: AsyncClient,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
+    viewer: dict[str, str],
 ) -> None:
     use_agent(ScriptedAgent([AnswerDelta("Да.")]))
 
     response = await _send(db_client, conversation_id)
     trace_id = response.headers[TRACE_ID_HEADER]
-    journal = await _journal(db_client, shop, trace_id=trace_id)
+    journal = await _journal(db_client, shop, viewer, trace_id=trace_id)
 
     assert [e["type"] for e in journal] == ["turn_started", "text", "turn_finished"]
 
 
 async def test_failed_turn_and_its_retry_are_logged(
-    db_client: AsyncClient, shop: TenantId, conversation_id: UUID, use_agent: Any
+    db_client: AsyncClient,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
+    viewer: dict[str, str],
 ) -> None:
     use_agent(ScriptedAgent(LLMError("503", retryable=True), [AnswerDelta("Готово.")]))
 
@@ -241,7 +254,7 @@ async def test_failed_turn_and_its_retry_are_logged(
     )
     retried = _sse(retry)
 
-    first = await _journal(db_client, shop, turn_id=failed[0]["turn_id"])
+    first = await _journal(db_client, shop, viewer, turn_id=failed[0]["turn_id"])
     assert [(e["type"], e["payload"].get("text")) for e in first] == [
         ("turn_started", None),
         ("text", "Сейчас "),
@@ -256,7 +269,7 @@ async def test_failed_turn_and_its_retry_are_logged(
             "retryable": True,
         },
     }
-    second = await _journal(db_client, shop, turn_id=retried[0]["turn_id"])
+    second = await _journal(db_client, shop, viewer, turn_id=retried[0]["turn_id"])
     assert second[0]["payload"]["retry_of"] == failed_id
     assert second[-1]["payload"]["status"] == "completed"
 
@@ -310,28 +323,31 @@ async def test_cancelled_turn_is_logged_as_interrupted(
 
 
 async def test_admin_events_auth_and_filters(
-    app: FastAPI,
     db_client: AsyncClient,
     db_session: AsyncSession,
     shop: TenantId,
     conversation_id: UUID,
     use_agent: Any,
+    viewer: dict[str, str],
+    admin_login: AdminLogin,
 ) -> None:
     use_agent(ScriptedAgent([AnswerDelta("Да.")]))
     await _send(db_client, conversation_id)
     other = await _tenant(db_session, "other")
+    query = {"conversation_id": conversation_id}
 
-    assert (
-        await _events(db_client, shop, headers={}, conversation_id=conversation_id)
-    ).status_code == 401
+    assert (await _events(db_client, shop, {}, **query)).status_code == 401
     wrong = {"Authorization": "Bearer nope"}
-    assert (
-        await _events(db_client, shop, headers=wrong, conversation_id=conversation_id)
-    ).status_code == 401
-    assert (await _events(db_client, shop)).status_code == 422
-    # Чужой тенант событий диалога не видит.
-    assert await _journal(db_client, other, conversation_id=conversation_id) == []
-
-    app.state.settings = app.state.settings.model_copy(update={"admin_api_token": None})
-    disabled = await _events(db_client, shop, conversation_id=conversation_id)
-    assert disabled.status_code == 404
+    assert (await _events(db_client, shop, wrong, **query)).status_code == 401
+    assert (await _events(db_client, shop, viewer)).status_code == 422
+    # Без роли в тенанте — 403, даже если роль есть в другом.
+    assert (await _events(db_client, other, viewer, **query)).status_code == 403
+    # Роль в другом тенанте: события диалога shop там не видны.
+    other_viewer = await admin_login("other@example.com", roles={other: AdminRole.VIEWER})
+    assert await _journal(db_client, other, other_viewer, **query) == []
+    assert (await _events(db_client, shop, other_viewer, **query)).status_code == 403
+    # Суперадмину доступны все тенанты, editor включает права viewer.
+    root = await admin_login("root@example.com", superadmin=True)
+    assert len(await _journal(db_client, shop, root, **query)) == 3
+    editor = await admin_login("editor@example.com", roles={shop: AdminRole.EDITOR})
+    assert len(await _journal(db_client, shop, editor, **query)) == 3

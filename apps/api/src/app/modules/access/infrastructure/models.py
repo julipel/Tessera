@@ -50,3 +50,18 @@ class AdminMembershipRecord(TenantScopedBase):
         )
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AdminSessionRecord(Base):
+    """Сессия админки — не TenantScopedBase: принадлежит пользователю, а не тенанту
+    (ADR-0036). Хранится только sha256 токена (`hash_session_token`)."""
+
+    __tablename__ = "admin_sessions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

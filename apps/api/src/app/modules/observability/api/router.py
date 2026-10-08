@@ -1,4 +1,4 @@
-"""API админки: журнал событий хода (docs/contracts.md §7)."""
+"""API админки: журнал событий хода (docs/contracts.md §7); доступ — роль viewer в тенанте."""
 
 from typing import Annotated
 from uuid import UUID
@@ -7,9 +7,9 @@ from fastapi import APIRouter, Query, status
 
 from app.contracts import AgentEventItem, AgentEventList
 from app.modules.observability.infrastructure.repositories import AgentEventRepository
-from app.modules.shared.public import AdminAccess, ApiError, DbSession, TenantId
+from app.modules.shared.public import AdminViewer, ApiError, DbSession, TenantId
 
-router = APIRouter(prefix="/v1/admin", tags=["admin"], dependencies=[AdminAccess])
+router = APIRouter(prefix="/v1/admin", tags=["admin"], dependencies=[AdminViewer])
 
 MAX_EVENTS = 1000
 

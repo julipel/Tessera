@@ -13,3 +13,7 @@ class WeakPasswordError(DomainError):
 
 class PasswordRequiredError(DomainError):
     """Новому пользователю нужен пароль."""
+
+
+class InvalidCredentialsError(DomainError):
+    """Неверный email или пароль, либо пользователь отключён — причину не раскрываем."""

@@ -51,5 +51,7 @@ HTTP-инструмент `HttpToolDefinition` для `check_stock`.
 Ограничения генерации: `if/then` (у `select` должны быть `options`) в Pydantic не переносится —
 проверять в коде, который строит форму. Вложенным объектам задаётся `title` (напр. `TextDeltaData`) —
 иначе генератор называет их `Data`, `Data1`… и имена сдвигаются при добавлении новых.
+- `admin_auth.schema.json` — вход в админку и текущий пользователь: `AdminLoginRequest`,
+  `AdminLoginResponse` (токен сессии), `AdminMe`, `AdminMembership` (P8-01b, ADR-0036)
 - `admin_events.schema.json` — ответ `GET /v1/admin/tenants/{tenant_id}/events`: журнал событий
   хода (`AgentEventList`, `AgentEventItem`; P7-02, ADR-0028)

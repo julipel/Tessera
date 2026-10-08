@@ -1,14 +1,19 @@
 """Репозитории модуля access (реализации портов из domain/ports.py)."""
 
 from collections.abc import Sequence
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.access.domain.entities import AdminRole, AdminUser, TenantMembership
-from app.modules.access.infrastructure.models import AdminMembershipRecord, AdminUserRecord
-from app.modules.shared.public import NotFoundError, TenantId, TenantRepository
+from app.modules.access.infrastructure.models import (
+    AdminMembershipRecord,
+    AdminSessionRecord,
+    AdminUserRecord,
+)
+from app.modules.shared.public import AdminPrincipal, NotFoundError, TenantId, TenantRepository
 
 
 def _user(record: AdminUserRecord) -> AdminUser:
@@ -30,6 +35,10 @@ class SqlAdminUserDirectory:
     async def get_by_email(self, email: str) -> AdminUser | None:
         record = await self._by(AdminUserRecord.email == email)
         return _user(record) if record else None
+
+    async def get_credentials(self, email: str) -> tuple[AdminUser, str] | None:
+        record = await self._by(AdminUserRecord.email == email)
+        return (_user(record), record.password_hash) if record else None
 
     async def create(self, email: str, password_hash: str, is_superadmin: bool) -> AdminUser:
         record = AdminUserRecord(
@@ -104,3 +113,54 @@ class AdminMembershipRepository(TenantRepository[AdminMembershipRecord]):
     async def _get(self, tenant_id: TenantId, user_id: UUID) -> AdminMembershipRecord | None:
         stmt = self._scoped(tenant_id).where(AdminMembershipRecord.user_id == user_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+
+class SqlAdminSessionStore:
+    """Сессии админки (ADR-0036). Как и пользователи, без тенанта: роли пользователя
+    читаются из admin_memberships всех его тенантов."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create(self, user_id: UUID, token_hash: str, expires_at: datetime) -> None:
+        self.session.add(
+            AdminSessionRecord(user_id=user_id, token_hash=token_hash, expires_at=expires_at)
+        )
+        await self.session.flush()
+
+    async def principal(self, token_hash: str, now: datetime) -> AdminPrincipal | None:
+        stmt = (
+            select(AdminUserRecord)
+            .join(AdminSessionRecord, AdminSessionRecord.user_id == AdminUserRecord.id)
+            .where(
+                AdminSessionRecord.token_hash == token_hash,
+                AdminSessionRecord.expires_at > now,
+                AdminUserRecord.is_active.is_(True),
+            )
+        )
+        user = (await self.session.execute(stmt)).scalar_one_or_none()
+        if user is None:
+            return None
+        memberships = await SqlAdminUserDirectory(self.session).memberships(user.id)
+        return AdminPrincipal(
+            user_id=user.id,
+            email=user.email,
+            is_superadmin=user.is_superadmin,
+            roles={m.tenant_id: m.role for m in memberships},
+        )
+
+    async def delete(self, token_hash: str) -> bool:
+        stmt = (
+            delete(AdminSessionRecord)
+            .where(AdminSessionRecord.token_hash == token_hash)
+            .returning(AdminSessionRecord.id)
+        )
+        return bool((await self.session.execute(stmt)).scalars().all())
+
+    async def delete_expired(self, user_id: UUID, now: datetime) -> int:
+        stmt = (
+            delete(AdminSessionRecord)
+            .where(AdminSessionRecord.user_id == user_id, AdminSessionRecord.expires_at <= now)
+            .returning(AdminSessionRecord.id)
+        )
+        return len((await self.session.execute(stmt)).scalars().all())

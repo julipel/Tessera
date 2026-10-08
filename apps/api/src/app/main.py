@@ -12,6 +12,8 @@ from redis.asyncio import Redis
 from app.api import health
 from app.knowledge_wiring import KnowledgeServices, build_knowledge_services
 from app.logs import TraceIdMiddleware, configure_logging
+from app.modules.access.public import SqlAdminAuthenticator
+from app.modules.access.public import router as access_router
 from app.modules.agent.public import LLMClients
 from app.modules.chat.public import (
     RedisTurnDirectory,
@@ -112,6 +114,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.catalog = SqlCatalog(app.state.session_factory)
     # Заявки create_lead: своя сессия и commit на заявку.
     app.state.leads = SqlLeadStore(app.state.session_factory)
+    # Сессии админки для зависимостей ролей в любом модуле (ADR-0036).
+    app.state.admin_authenticator = SqlAdminAuthenticator(app.state.session_factory)
     install_error_handlers(app)
     app.add_middleware(TraceIdMiddleware)  # после: снаружи обработчика 500
     # Последним — снаружи всех: preflight отвечается до остальной обработки.
@@ -119,12 +123,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-Widget-Key"],
+        allow_headers=["Authorization", "Content-Type", "X-Widget-Key"],
         expose_headers=["X-Trace-Id", "Retry-After"],
     )
     app.include_router(health.router)
     app.include_router(tenants_public_router)
     app.include_router(chat_router)
+    app.include_router(access_router)
     app.include_router(admin_router)
     return app
 

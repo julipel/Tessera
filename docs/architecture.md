@@ -420,11 +420,16 @@ Entity хранится в Postgres: нормализованные поля (`t
 
 ## 10. Мультитенантность
 
-- `TenantContext` определяется по ключу виджета (публичный) или по токену админки.
+- `TenantContext` определяется по ключу виджета (публичный) или по `tenant_id` в пути API
+  админки — с проверкой роли пользователя в этом тенанте.
 - Пользователи админки (ADR-0036, модуль `access`): `admin_users` — справочник без `tenant_id`
   (пользователь может работать в нескольких тенантах), роль в тенанте — `admin_memberships`
   (`viewer` — диалоги и журнал, `editor` — ещё конфиг и источники); `is_superadmin` — все
   тенанты. Пароль — scrypt с параметрами в хэше. Создание — `make admin-user`.
+  Вход выдаёт токен сессии (`admin_sessions`: sha256 токена, срок 12 ч), запрос админки
+  несёт его в `Authorization: Bearer`. Проверка — порт `AdminAuthenticator` в `shared.kernel`
+  (реализация в `access`) и зависимости `shared`: `AdminViewer`/`AdminEditor` для путей
+  `…/tenants/{tenant_id}/…` (401 — нет сессии, 403 — нет роли), `CurrentAdmin`.
 - Все репозитории принимают `tenant_id` явно; в тестах есть проверка изоляции.
 - AgentConfig версионируется: `draft` → `active`. Диалог запоминает версию конфига,
   с которой начался (для воспроизводимости и разбора).
@@ -455,6 +460,7 @@ Lead(id, tenant_id, conversation_id, form_key, fields JSONB, created_at)  # crea
 AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSONB, ts)
 AdminUser(id, email, password_hash, is_superadmin, is_active, created_at)  # без tenant_id
 AdminMembership(id, tenant_id, user_id, role, created_at)   # одна роль на тенант
+AdminSession(id, user_id, token_hash, expires_at, created_at)  # без tenant_id, sha256 токена
 ```
 
 ## 12. Надёжность
@@ -486,8 +492,8 @@ API), порт `RateLimiter` в `shared.kernel`; правила — настро
   (`TurnJournal`) и пишет вместе с ответом ассистента одной транзакцией, в т.ч. у прерванного
   и неудачного хода; trace_id — запроса хода (`X-Trace-Id`, `TraceIdMiddleware` кладёт его
   в `request.state`). Текст — блоками, не кусками стрима; результат инструмента — только
-  в ToolCall. Чтение — `GET /v1/admin/tenants/{id}/events` по токену из env до P8-01
-  (ADR-0028, contracts.md §7).
+  в ToolCall. Чтение — `GET /v1/admin/tenants/{id}/events` с ролью `viewer` в тенанте
+  (ADR-0028, ADR-0036, contracts.md §7).
 - Langfuse: трейсы LLM-вызовов, версия промпта, токены, стоимость (ADR-0029). Порт `Tracer`
   в `observability.kernel`, реализация — SDK Langfuse v4 (OpenTelemetry, свой TracerProvider);
   без ключей — `NoopTracer`. Трейс = ход: id из `X-Trace-Id` (32 hex — как есть, иначе

@@ -6,7 +6,7 @@ os.environ["APP_ENV"] = "test"
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Iterator, MutableMapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, MutableMapping
 from pathlib import Path
 from typing import Any
 
@@ -17,12 +17,23 @@ from alembic.config import Config
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import exc, make_url
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.cli import ensure_database
 from app.main import create_app
+from app.modules.access.public import (
+    AdminMembershipRepository,
+    SqlAdminAuthenticator,
+    SqlAdminUserDirectory,
+    upsert_admin_user,
+)
 from app.modules.chat.public import TurnRegistry
-from app.modules.shared.public import InMemoryRateLimiter, get_session
+from app.modules.shared.public import AdminRole, InMemoryRateLimiter, TenantId, get_session
 from app.settings import Settings
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
@@ -106,16 +117,54 @@ async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSessi
 
 
 @pytest.fixture
-async def db_client(app: FastAPI, db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+async def db_client(
+    app: FastAPI, db_connection: AsyncConnection, db_session: AsyncSession
+) -> AsyncIterator[AsyncClient]:
     """HTTP-клиент, чьи запросы работают в транзакции теста (откатывается после теста)."""
 
     async def session_override() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     app.dependency_overrides[get_session] = session_override
+    # Сессии админки проверяются своей сессией БД — тоже в транзакции теста.
+    app.state.admin_authenticator = SqlAdminAuthenticator(
+        async_sessionmaker(bind=db_connection, join_transaction_mode="create_savepoint")
+    )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+ADMIN_PASSWORD = "correct horse battery"
+
+type AdminLogin = Callable[..., Awaitable[dict[str, str]]]
+
+
+@pytest.fixture
+def admin_login(db_client: AsyncClient, db_session: AsyncSession) -> AdminLogin:
+    """Создать пользователя админки и войти: заголовки `Authorization` его сессии."""
+
+    async def login(
+        email: str = "admin@example.com",
+        *,
+        roles: Mapping[TenantId, AdminRole] | None = None,
+        superadmin: bool = False,
+    ) -> dict[str, str]:
+        await upsert_admin_user(
+            email,
+            users=SqlAdminUserDirectory(db_session),
+            memberships=AdminMembershipRepository(db_session),
+            password=ADMIN_PASSWORD,
+            is_superadmin=superadmin,
+            grants=roles,
+        )
+        response = await db_client.post(
+            "/v1/admin/auth/login", json={"email": email, "password": ADMIN_PASSWORD}
+        )
+        assert response.status_code == 200, response.text
+        return {"Authorization": f"Bearer {response.json()['token']}"}
+
+    return login
 
 
 @pytest.fixture

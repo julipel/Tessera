@@ -4,6 +4,12 @@
 только внутренности `generated`, точка входа остаётся стабильной.
 """
 
+from app.contracts.generated.admin_auth_schema import (
+    AdminLoginRequest,
+    AdminLoginResponse,
+    AdminMe,
+    AdminMembership,
+)
 from app.contracts.generated.admin_events_schema import AgentEventItem, AgentEventList
 from app.contracts.generated.agent_config_schema import (
     AgentConfig,
@@ -88,6 +94,10 @@ from app.contracts.generated.widget_embed_schema import WidgetEmbed
 __all__ = [
     "Action",
     "ActionInput",
+    "AdminLoginRequest",
+    "AdminLoginResponse",
+    "AdminMe",
+    "AdminMembership",
     "AgentConfig",
     "AgentEventItem",
     "AgentEventList",

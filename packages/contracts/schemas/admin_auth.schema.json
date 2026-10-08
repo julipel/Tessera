@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "admin_auth.schema.json",
+  "title": "AdminAuthSchema",
+  "description": "Вход в админку и текущий пользователь (docs/contracts.md §7, ADR-0036). Файл без единого корневого типа — экспортируемые типы в $defs: AdminLoginRequest, AdminLoginResponse, AdminMe, AdminMembership.",
+  "$defs": {
+    "AdminLoginRequest": {
+      "type": "object",
+      "description": "Тело POST /v1/admin/auth/login. Email — логин, без учёта регистра.",
+      "properties": {
+        "email": { "type": "string", "minLength": 1, "maxLength": 320 },
+        "password": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      },
+      "required": ["email", "password"],
+      "additionalProperties": false
+    },
+    "AdminLoginResponse": {
+      "type": "object",
+      "description": "Ответ на вход: токен сессии для `Authorization: Bearer <token>`. Сервер хранит только его sha256 — токен показывается один раз.",
+      "properties": {
+        "token": { "type": "string" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "me": { "$ref": "#/$defs/AdminMe" }
+      },
+      "required": ["token", "expires_at", "me"],
+      "additionalProperties": false
+    },
+    "AdminMe": {
+      "type": "object",
+      "description": "Ответ GET /v1/admin/me: кто вошёл и его роли в тенантах. Суперадмину доступны все тенанты, даже без ролей.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "email": { "type": "string" },
+        "is_superadmin": { "type": "boolean" },
+        "memberships": { "type": "array", "items": { "$ref": "#/$defs/AdminMembership" } }
+      },
+      "required": ["id", "email", "is_superadmin", "memberships"],
+      "additionalProperties": false
+    },
+    "AdminMembership": {
+      "type": "object",
+      "description": "Роль в тенанте: viewer — диалоги и журнал хода, editor — ещё конфиг агента и источники.",
+      "properties": {
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "tenant_slug": { "type": "string" },
+        "tenant_name": { "type": "string" },
+        "role": { "type": "string", "enum": ["viewer", "editor"] }
+      },
+      "required": ["tenant_id", "tenant_slug", "tenant_name", "role"],
+      "additionalProperties": false
+    }
+  }
+}

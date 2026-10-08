@@ -86,9 +86,11 @@ class Settings(BaseSettings):
     langfuse_host: str | None = None
     # Таймаут отправки пачки трейсов (фоновый поток SDK), с.
     langfuse_timeout_s: int = 30
-    # Токен API админки (`Authorization: Bearer …`) до пользователей админки (P8-01, ADR-0028);
-    # без токена эндпоинты админки отвечают 404.
-    admin_api_token: SecretStr | None = None
+    # Админка (ADR-0036): срок сессии после входа (без продления) и лимиты попыток входа
+    # (ADR-0030; 0 — правило выключено).
+    admin_session_ttl_hours: int = 12
+    rate_admin_login_per_ip_per_min: int = 10
+    rate_admin_login_per_email_per_hour: int = 20
 
     @field_validator("source_db_allowed_networks")
     @classmethod

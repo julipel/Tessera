@@ -344,10 +344,27 @@ branding:
 Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `forbidden`, `not_found`,
 `duplicate_message`, `not_retryable`.
 
-## 7. API админки: журнал хода (P7-02, ADR-0028)
+## 7. API админки (P7-02, P8-01b; ADR-0028, ADR-0036)
 
-Доступ — `Authorization: Bearer <ADMIN_API_TOKEN>` из env (до пользователей админки, P8-01).
-Токен не задан — `/v1/admin/*` отвечает 404, неверный или нет заголовка — 401.
+### Вход и сессия
+
+```
+POST /v1/admin/auth/login  AdminLoginRequest {email, password}   # admin_auth.schema.json
+  → 200 AdminLoginResponse {token, expires_at, me: AdminMe}
+  → 401 unauthorized — неверный email или пароль, пользователь отключён (причина не уточняется)
+  → 429 rate_limited + Retry-After — RATE_ADMIN_LOGIN_PER_IP_PER_MIN / _PER_EMAIL_PER_HOUR
+POST /v1/admin/auth/logout → 204   # закрывает сессию из Authorization
+GET  /v1/admin/me          → 200 AdminMe {id, email, is_superadmin, memberships[]}
+```
+
+Остальные запросы `/v1/admin/*` несут `Authorization: Bearer <token>`. Токен непрозрачный,
+сервер хранит только его sha256; срок — `ADMIN_SESSION_TTL_HOURS` (12 ч) от входа, без продления.
+Нет сессии, она истекла или закрыта, пользователь отключён — 401 `unauthorized`. Пути
+`/v1/admin/tenants/{tenant_id}/…` требуют роли в этом тенанте (`viewer` < `editor`,
+суперадмин — все тенанты), иначе 403 `forbidden`. Роли и отключение читаются на каждом
+запросе — снятие роли действует сразу. Пользователей создаёт `make admin-user`.
+
+### Журнал хода — роль `viewer`
 
 ```
 GET /v1/admin/tenants/{tenant_id}/events?conversation_id=…&turn_id=…&trace_id=…

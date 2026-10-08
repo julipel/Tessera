@@ -4,7 +4,7 @@
 чтобы они попали в `Base.metadata`.
 """
 
-from app.modules.access.public import AdminMembershipRecord, AdminUserRecord
+from app.modules.access.public import AdminMembershipRecord, AdminSessionRecord, AdminUserRecord
 from app.modules.chat.public import ConversationRecord, MessageRecord, ToolCallRecord
 from app.modules.knowledge.public import (
     ChunkRecord,
@@ -35,6 +35,7 @@ _registered = (
     AgentEventRecord,
     AdminUserRecord,
     AdminMembershipRecord,
+    AdminSessionRecord,
 )
 
 __all__ = ["metadata"]

@@ -131,6 +131,51 @@ export interface Contracts {
   [k: string]: unknown;
 }
 /**
+ * Тело POST /v1/admin/auth/login. Email — логин, без учёта регистра.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AdminLoginRequest".
+ */
+export interface AdminLoginRequest {
+  email: string;
+  password: string;
+}
+/**
+ * Ответ на вход: токен сессии для `Authorization: Bearer <token>`. Сервер хранит только его sha256 — токен показывается один раз.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AdminLoginResponse".
+ */
+export interface AdminLoginResponse {
+  token: string;
+  expires_at: string;
+  me: AdminMe;
+}
+/**
+ * Ответ GET /v1/admin/me: кто вошёл и его роли в тенантах. Суперадмину доступны все тенанты, даже без ролей.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AdminMe".
+ */
+export interface AdminMe {
+  id: string;
+  email: string;
+  is_superadmin: boolean;
+  memberships: AdminMembership[];
+}
+/**
+ * Роль в тенанте: viewer — диалоги и журнал хода, editor — ещё конфиг агента и источники.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AdminMembership".
+ */
+export interface AdminMembership {
+  tenant_id: string;
+  tenant_slug: string;
+  tenant_name: string;
+  role: "viewer" | "editor";
+}
+/**
  * Ответ GET /v1/admin/tenants/{tenant_id}/events: события в порядке ходов (ts) и внутри хода (seq).
  *
  * This interface was referenced by `Contracts`'s JSON-Schema

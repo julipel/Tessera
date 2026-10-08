@@ -1,3 +1,6 @@
+import os from "node:os";
+import path from "node:path";
+
 // Окружение e2e: своя база `app_e2e` (pytest использует `app_test` с откатом транзакций).
 // 127.0.0.2, а не localhost: в WSL с networkingMode=mirrored подключение к ещё не открытому
 // порту 127.0.0.1 висит ~2 мин вместо отказа, и проверка webServer Playwright зависает.
@@ -33,4 +36,8 @@ export const E2E_ENV: Record<string, string> = {
   // трейсы e2e-диалогов в проект Langfuse.
   LANGFUSE_PUBLIC_KEY: "",
   LANGFUSE_SECRET_KEY: "",
+  // Файлы источников из админки — не в data/knowledge репозитория.
+  KNOWLEDGE_FILES_DIR: path.join(os.tmpdir(), "tessera-e2e-knowledge"),
+  // Своя база Redis: синхронизации, поставленные e2e, не попадут в очередь dev-воркера.
+  REDIS_URL: process.env.E2E_REDIS_URL ?? "redis://localhost:6379/15",
 };

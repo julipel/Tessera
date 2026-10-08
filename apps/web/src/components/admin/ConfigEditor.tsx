@@ -1,17 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { AgentConfigVersionDetail, AgentConfigVersionSummary, ErrorDetail } from "@/contracts";
+import type { AgentConfigVersionDetail, AgentConfigVersionSummary } from "@/contracts";
 import { ApiError } from "@/lib/api/client";
 import type { AdminSession } from "@/lib/admin/useAdminSession";
 import { primaryButton, secondaryButton } from "./AdminShell";
+import { type Problem, ProblemView, toProblem } from "./ProblemView";
 
 const STATUS_LABELS = { draft: "черновик", active: "активна", archived: "архив" } as const;
-
-interface Problem {
-  message: string;
-  details: ErrorDetail[];
-}
 
 /**
  * Версии AgentConfig тенанта (docs/contracts.md §7): YAML выбранной версии в редакторе,
@@ -33,8 +29,7 @@ export function ConfigEditor({ session, tenantId }: { session: AdminSession; ten
       if (e instanceof ApiError && e.status === 403) {
         return setProblem({ message: "Нет доступа: конфиг меняет роль editor", details: [] });
       }
-      const message = e instanceof Error ? e.message : String(e);
-      setProblem({ message, details: (e instanceof ApiError && e.body.details) || [] });
+      setProblem(toProblem(e));
     },
     [expire],
   );
@@ -97,7 +92,7 @@ export function ConfigEditor({ session, tenantId }: { session: AdminSession; ten
   }
 
   if (versions === null) {
-    return problem ? <ProblemView problem={problem} /> : <p className="text-chat-muted">Загрузка…</p>;
+    return problem ? <ProblemView problem={problem} title="Конфиг не прошёл проверку" /> : <p className="text-chat-muted">Загрузка…</p>;
   }
 
   return (
@@ -156,7 +151,7 @@ export function ConfigEditor({ session, tenantId }: { session: AdminSession; ten
             {notice}
           </p>
         )}
-        {problem && <ProblemView problem={problem} />}
+        {problem && <ProblemView problem={problem} title="Конфиг не прошёл проверку" />}
       </section>
     </div>
   );
@@ -172,26 +167,4 @@ async function load(api: AdminSession["api"], tenantId: string, openId?: string)
   const { versions } = await api.listConfigs(tenantId);
   const target = versions.find((v) => v.id === openId) ?? versions.find((v) => v.status === "active");
   return { versions, open: target ? await api.getConfig(tenantId, target.id) : null };
-}
-
-function ProblemView({ problem }: { problem: Problem }) {
-  return (
-    <div role="alert" className="rounded-chat border border-chat-danger p-3 text-sm text-chat-danger">
-      {problem.details.length > 0 ? (
-        <>
-          <p className="font-medium">Конфиг не прошёл проверку:</p>
-          <ul className="mt-1 list-disc pl-5">
-            {problem.details.map((d, i) => (
-              <li key={i}>
-                {d.loc.length > 0 && <code className="mr-1">{d.loc.join(".")}</code>}
-                {d.message}
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : (
-        <p>{problem.message}</p>
-      )}
-    </div>
-  );
 }

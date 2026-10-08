@@ -529,8 +529,13 @@ API), порт `RateLimiter` в `shared.kernel`; правила — настро
   (`lib/admin/api.ts`), каждый запрос несёт его в `Authorization: Bearer`; нет токена или
   ответ 401 — на вход. `/admin` — тенанты из `me.memberships`, `/admin/tenants/[id]/config` —
   версии AgentConfig: YAML в `textarea`, «Сохранить черновик» (ошибки — по `details`),
-  «Активировать» / «Откатить на эту версию». e2e — `e2e/admin.spec.ts` на своём тенанте
-  `e2e-admin` (`e2e/fixtures/admin-tenant.yaml`).
+  «Активировать» / «Откатить на эту версию». `/admin/tenants/[id]/sources` (P8-03c) —
+  источники со статусом последней синхронизации и добавление (website/file/table, ошибки по
+  `details`); `…/sources/[sourceId]` — конфиг, файлы (загрузка телом запроса, удаление),
+  «Синхронизировать» (полная — флажком), история с ошибками элементов; пока синхронизация
+  ждёт или идёт — опрос раз в 3 с. Изменения — роль editor, viewer только смотрит.
+  e2e — `e2e/admin.spec.ts` на своём тенанте `e2e-admin` (`e2e/fixtures/admin-tenant.yaml`);
+  файлы источников e2e — во временном каталоге, очередь — в Redis `/15` (воркера в e2e нет).
 - Встраиваемый виджет (P5-06, ADR-0022): `<script src="…/widget.js" data-key="wk_…">` на сайте
   тенанта рисует кнопку и по первому открытию — iframe `/widget?key=…` (тот же чат, в шапке
   «Свернуть» → `postMessage {type: "tessera:collapse"}`; `widget.js` принимает его только от

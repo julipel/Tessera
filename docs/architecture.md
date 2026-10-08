@@ -520,7 +520,13 @@ API), порт `RateLimiter` в `shared.kernel`; правила — настро
 
 ## 14. Frontend
 
-- `apps/web`: Next.js. Страницы: чат (полноэкранный), демо-страница виджета, админка (позже).
+- `apps/web`: Next.js. Страницы: чат (полноэкранный), демо-страница виджета, админка.
+- Админка (P8-02b, `/admin`): вход `/admin/login` — токен сессии в `localStorage`
+  (`lib/admin/api.ts`), каждый запрос несёт его в `Authorization: Bearer`; нет токена или
+  ответ 401 — на вход. `/admin` — тенанты из `me.memberships`, `/admin/tenants/[id]/config` —
+  версии AgentConfig: YAML в `textarea`, «Сохранить черновик» (ошибки — по `details`),
+  «Активировать» / «Откатить на эту версию». e2e — `e2e/admin.spec.ts` на своём тенанте
+  `e2e-admin` (`e2e/fixtures/admin-tenant.yaml`).
 - Встраиваемый виджет (P5-06, ADR-0022): `<script src="…/widget.js" data-key="wk_…">` на сайте
   тенанта рисует кнопку и по первому открытию — iframe `/widget?key=…` (тот же чат, в шапке
   «Свернуть» → `postMessage {type: "tessera:collapse"}`; `widget.js` принимает его только от

@@ -9,6 +9,10 @@ export const WEB_URL = `http://${HOST}:${WEB_PORT}`;
 export const WIDGET_KEY = "wk_e2e_demo_beauty";
 // Второй демо-тенант (config/tenants/demo-garden.yaml) — другой брендинг на том же ядре.
 export const GARDEN_WIDGET_KEY = "wk_e2e_demo_garden";
+// Админка (admin.spec.ts): тенант из e2e/fixtures/admin-tenant.yaml и его editor.
+export const ADMIN_TENANT_SLUG = "e2e-admin";
+export const ADMIN_EMAIL = "editor@e2e.test";
+export const ADMIN_PASSWORD = "e2e editor password";
 // Мок OpenAI (e2e/mock-llm.mjs): демо-тенант на provider openai — ходит в Responses API мока.
 export const MOCK_LLM_PORT = 8002;
 export const MOCK_LLM_URL = `http://${HOST}:${MOCK_LLM_PORT}`;

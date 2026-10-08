@@ -102,7 +102,7 @@ export class ChatApi {
   }
 }
 
-async function errorBody(resp: Response): Promise<HttpErrorBody> {
+export async function errorBody(resp: Response): Promise<HttpErrorBody> {
   try {
     const body = (await resp.json()) as { error?: HttpErrorBody };
     if (body.error) return body.error;

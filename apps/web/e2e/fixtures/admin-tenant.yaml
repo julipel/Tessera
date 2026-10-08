@@ -1,0 +1,17 @@
+# Тенант e2e админки (admin.spec.ts): свой, чтобы активация конфига не меняла демо-тенантов,
+# на которых параллельно идут тесты чата. global-setup сеет его заново — активной снова
+# становится эта версия.
+tenant:
+  slug: e2e-admin
+  name: E2E Админка
+agent_config:
+  assistant:
+    name: Ассистент E2E
+    greeting: Здравствуйте!
+    fallback_message: Не получилось ответить.
+  model:
+    primary: { provider: openai, name: test-model }
+  limits: {}
+  prompt:
+    tenant: Ты — консультант.
+  tools: {}

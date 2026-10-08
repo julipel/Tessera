@@ -261,6 +261,131 @@ export interface AgentEventItem {
   ts: string;
 }
 /**
+ * Счётчики синхронизации. errors — ошибки отдельных элементов (не больше 20), синхронизация при них продолжается.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SourceSyncStats".
+ */
+export interface SourceSyncStats {
+  discovered: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  deleted: number;
+  failed: number;
+  incremental: boolean;
+  errors: string[];
+}
+/**
+ * Синхронизация источника. error — почему синхронизация не удалась целиком (status failed).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SourceSyncItem".
+ */
+export interface SourceSyncItem {
+  id: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  /**
+   * null — синхронизация ещё не закончилась.
+   */
+  stats: SourceSyncStats | null;
+  error: string | null;
+}
+/**
+ * Ответ GET …/sources/{source_id}/syncs: последние синхронизации, от новой к старой.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SourceSyncList".
+ */
+export interface SourceSyncList {
+  syncs: SourceSyncItem[];
+}
+/**
+ * Источник со счётчиками данных и последней синхронизацией (любого статуса).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SourceSummary".
+ */
+export interface SourceSummary {
+  id: string;
+  /**
+   * Ключ источника в тенанте. null — только у источников, созданных до P8-03 без имени.
+   */
+  name: string | null;
+  /**
+   * Вид коннектора. В админке создаются только website, file, table; http_api и database — в YAML тенанта (секреты, ADR-0017).
+   */
+  kind: "website" | "file" | "table" | "http_api" | "database";
+  /**
+   * Где объявлен источник. yaml — в config/tenants/<slug>.yaml, его меняет только make seed; admin — создан в админке.
+   */
+  origin: "yaml" | "admin";
+  status: "active" | "paused";
+  created_at: string;
+  documents: number;
+  entities: number;
+  last_sync: SourceSyncItem | null;
+}
+/**
+ * Ответ GET /v1/admin/tenants/{tenant_id}/sources: по имени.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SourceList".
+ */
+export interface SourceList {
+  sources: SourceSummary[];
+}
+/**
+ * Источник с конфигом в YAML (в конфиге нет секретов — только имена env, ADR-0017).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SourceDetail".
+ */
+export interface SourceDetail {
+  id: string;
+  name: string | null;
+  /**
+   * Вид коннектора. В админке создаются только website, file, table; http_api и database — в YAML тенанта (секреты, ADR-0017).
+   */
+  kind: "website" | "file" | "table" | "http_api" | "database";
+  /**
+   * Где объявлен источник. yaml — в config/tenants/<slug>.yaml, его меняет только make seed; admin — создан в админке.
+   */
+  origin: "yaml" | "admin";
+  status: "active" | "paused";
+  created_at: string;
+  documents: number;
+  entities: number;
+  last_sync: SourceSyncItem | null;
+  config_yaml: string;
+}
+/**
+ * Тело POST /v1/admin/tenants/{tenant_id}/sources. config_yaml — конфиг коннектора (docs/architecture.md §8); у file пустой.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "CreateSourceRequest".
+ */
+export interface CreateSourceRequest {
+  name: string;
+  /**
+   * Вид коннектора. В админке создаются только website, file, table; http_api и database — в YAML тенанта (секреты, ADR-0017).
+   */
+  kind: "website" | "file" | "table" | "http_api" | "database";
+  config_yaml: string;
+}
+/**
+ * Тело POST …/sources/{source_id}/sync. full — полная синхронизация (удаляет пропавшие элементы); иначе инкрементальная, если у источника есть курсор.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "StartSyncRequest".
+ */
+export interface StartSyncRequest {
+  full?: boolean;
+}
+/**
  * Конфигурация тенанта (поле config JSONB таблицы AgentConfig). Вся бизнес-специфика — здесь, не в коде ядра.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema

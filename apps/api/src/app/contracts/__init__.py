@@ -17,6 +17,16 @@ from app.contracts.generated.admin_auth_schema import (
     AdminMembership,
 )
 from app.contracts.generated.admin_events_schema import AgentEventItem, AgentEventList
+from app.contracts.generated.admin_sources_schema import (
+    CreateSourceRequest,
+    SourceDetail,
+    SourceList,
+    SourceSummary,
+    SourceSyncItem,
+    SourceSyncList,
+    SourceSyncStats,
+    StartSyncRequest,
+)
 from app.contracts.generated.agent_config_schema import (
     AgentConfig,
     AssistantConfig,
@@ -124,6 +134,7 @@ __all__ = [
     "CreateAgentConfigRequest",
     "CreateConversationRequest",
     "CreateConversationResponse",
+    "CreateSourceRequest",
     "DoneData",
     "DoneEvent",
     "DoneUsage",
@@ -155,8 +166,15 @@ __all__ = [
     "ScenarioConfig",
     "SendMessageRequest",
     "SlotDefinition",
+    "SourceDetail",
     "SourceItem",
+    "SourceList",
+    "SourceSummary",
+    "SourceSyncItem",
+    "SourceSyncList",
+    "SourceSyncStats",
     "Sources",
+    "StartSyncRequest",
     "StatusData",
     "StatusEvent",
     "SuggestionItem",

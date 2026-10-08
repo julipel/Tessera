@@ -21,11 +21,18 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.modules.knowledge.domain.entities import SourceKind, SourceStatus, SyncStatus
+from app.modules.knowledge.domain.entities import (
+    SourceKind,
+    SourceOrigin,
+    SourceStatus,
+    SyncStatus,
+)
 from app.modules.shared.public import TenantScopedBase
 
 
-def _str_enum[E: (SourceKind, SourceStatus, SyncStatus)](enum: type[E], name: str) -> Enum:
+def _str_enum[E: (SourceKind, SourceOrigin, SourceStatus, SyncStatus)](
+    enum: type[E], name: str
+) -> Enum:
     # VARCHAR + CHECK вместо нативного ENUM Postgres: новые значения без ALTER TYPE.
     return Enum(
         enum,
@@ -61,6 +68,12 @@ class SourceRecord(TenantScopedBase):
     tenant_id: Mapped[UUID] = _tenant_fk()
     name: Mapped[str | None] = mapped_column(String(64))
     kind: Mapped[SourceKind] = mapped_column(_str_enum(SourceKind, "kind"))
+    # Из YAML тенанта (seed) или из админки (ADR-0037): seed не трогает источники админки.
+    origin: Mapped[SourceOrigin] = mapped_column(
+        _str_enum(SourceOrigin, "origin"),
+        default=SourceOrigin.YAML,
+        server_default=SourceOrigin.YAML.value,
+    )
     config: Mapped[dict[str, Any]] = mapped_column(
         JSONB, default=dict, server_default=text("'{}'::jsonb")
     )
@@ -75,6 +88,7 @@ class SourceSyncRecord(TenantScopedBase):
     __tablename__ = "source_syncs"
     __table_args__ = (
         Index("ix_source_syncs_source_id_started_at", "source_id", "started_at"),
+        Index("ix_source_syncs_source_id_created_at", "source_id", "created_at"),
         # Не больше одной активной синхронизации на источник — защита от параллельного запуска.
         Index(
             "uq_source_syncs_source_id_active",
@@ -88,6 +102,10 @@ class SourceSyncRecord(TenantScopedBase):
     source_id: Mapped[UUID] = _source_fk()
     status: Mapped[SyncStatus] = mapped_column(
         _str_enum(SyncStatus, "status"), default=SyncStatus.PENDING
+    )
+    # clock_timestamp, а не now(): порядок запросов внутри одной транзакции тоже различим.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.clock_timestamp()
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

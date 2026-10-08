@@ -13,6 +13,14 @@ class SourceKind(StrEnum):
     DATABASE = "database"
 
 
+class SourceOrigin(StrEnum):
+    """Где объявлен источник: в YAML тенанта (меняет только `make seed`) или в админке
+    (ADR-0037)."""
+
+    YAML = "yaml"
+    ADMIN = "admin"
+
+
 class SourceStatus(StrEnum):
     """`paused` — источник не синхронизируется по расписанию, данные остаются в поиске."""
 

@@ -8,7 +8,7 @@ from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules.knowledge.domain.catalog import CatalogEntity, CatalogPage, CatalogQuery
-from app.modules.knowledge.domain.entities import SourceKind, SyncStatus
+from app.modules.knowledge.domain.entities import SourceKind, SourceOrigin, SyncStatus
 from app.modules.knowledge.domain.ingestion import ChunkDraft, DocumentItem, EntityItem
 from app.modules.knowledge.domain.source_seed import RegisteredSource
 from app.modules.knowledge.infrastructure.catalog_query import (
@@ -38,13 +38,35 @@ class SourceRepository(TenantRepository[SourceRecord]):
     async def get_by_name(self, tenant_id: TenantId, name: str) -> RegisteredSource | None:
         stmt = self._scoped(tenant_id).where(SourceRecord.name == name)
         record = (await self.session.execute(stmt)).scalar_one_or_none()
-        return None if record is None else RegisteredSource(record.id, record.kind, record.config)
+        if record is None:
+            return None
+        return RegisteredSource(record.id, record.kind, record.config, record.origin)
 
     async def create(
         self, tenant_id: TenantId, name: str, kind: SourceKind, config: dict[str, Any]
     ) -> UUID:
         record = SourceRecord(tenant_id=tenant_id, name=name, kind=kind, config=config)
         return (await self.add(tenant_id, record)).id
+
+    async def create_unique(
+        self,
+        tenant_id: TenantId,
+        name: str,
+        kind: SourceKind,
+        config: dict[str, Any],
+        origin: SourceOrigin,
+    ) -> UUID | None:
+        """Новый источник или None, если имя в тенанте занято (гонку решает уникальный индекс)."""
+        stmt = (
+            insert(SourceRecord)
+            .values(tenant_id=tenant_id, name=name, kind=kind, config=config, origin=origin)
+            .on_conflict_do_nothing(
+                index_elements=[SourceRecord.tenant_id, SourceRecord.name],
+                index_where=SourceRecord.name.is_not(None),
+            )
+            .returning(SourceRecord.id)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def update_config(
         self, tenant_id: TenantId, source_id: UUID, config: dict[str, Any]
@@ -109,6 +131,34 @@ class SourceSyncRepository(TenantRepository[SourceSyncRecord]):
                 return sync_id
         raise RuntimeError(f"не удалось открыть синхронизацию источника {source_id}")
 
+    async def recent(
+        self, tenant_id: TenantId, source_ids: Collection[UUID], *, per_source: int
+    ) -> list[SourceSyncRecord]:
+        """Последние `per_source` синхронизаций каждого источника, от новой к старой."""
+        ranked = (
+            select(
+                SourceSyncRecord.id,
+                func.row_number()
+                .over(
+                    partition_by=SourceSyncRecord.source_id,
+                    order_by=(SourceSyncRecord.created_at.desc(), SourceSyncRecord.id.desc()),
+                )
+                .label("rank"),
+            )
+            .where(
+                SourceSyncRecord.tenant_id == tenant_id,
+                SourceSyncRecord.source_id.in_(source_ids),
+            )
+            .subquery()
+        )
+        stmt = (
+            select(SourceSyncRecord)
+            .join(ranked, ranked.c.id == SourceSyncRecord.id)
+            .where(SourceSyncRecord.tenant_id == tenant_id, ranked.c.rank <= per_source)
+            .order_by(SourceSyncRecord.created_at.desc(), SourceSyncRecord.id.desc())
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
     async def set_fields(self, tenant_id: TenantId, sync_id: UUID, **values: Any) -> None:
         stmt = (
             update(SourceSyncRecord)
@@ -126,6 +176,15 @@ class _SourceItemRepository[ModelT: (DocumentRecord, EntityRecord)](TenantReposi
             self.model.tenant_id == tenant_id, self.model.source_id == source_id
         )
         return {ext: digest for ext, digest in await self.session.execute(stmt)}
+
+    async def counts(self, tenant_id: TenantId, *criteria: ColumnElement[bool]) -> dict[UUID, int]:
+        """Число записей по источникам тенанта."""
+        stmt = (
+            select(self.model.source_id, func.count())
+            .where(self.model.tenant_id == tenant_id, *criteria)
+            .group_by(self.model.source_id)
+        )
+        return {source_id: count for source_id, count in await self.session.execute(stmt)}
 
     async def delete_by_external_ids(
         self, tenant_id: TenantId, source_id: UUID, external_ids: Collection[str]

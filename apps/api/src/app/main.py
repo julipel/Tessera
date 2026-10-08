@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
+from arq.connections import ArqRedis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import SecretStr
@@ -22,7 +23,8 @@ from app.modules.chat.public import (
     background_summary,
 )
 from app.modules.chat.public import router as chat_router
-from app.modules.knowledge.public import SqlCatalog
+from app.modules.knowledge.public import ArqSyncQueue, SqlCatalog
+from app.modules.knowledge.public import admin_router as knowledge_admin_router
 from app.modules.leads.public import SqlLeadStore
 from app.modules.observability.public import Tracer, admin_router, build_tracer
 from app.modules.shared.public import (
@@ -57,6 +59,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await redis.aclose()
     subscriber: Redis = app.state.redis_subscriber
     await subscriber.aclose()
+    jobs: ArqRedis = app.state.arq_redis
+    await jobs.aclose()
     await app.state.engine.dispose()
 
 
@@ -115,6 +119,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.catalog = SqlCatalog(app.state.session_factory)
     # Заявки create_lead: своя сессия и commit на заявку.
     app.state.leads = SqlLeadStore(app.state.session_factory)
+    # Синхронизации источников из админки — в очередь воркера (arq, тот же Redis).
+    app.state.arq_redis = ArqRedis.from_url(
+        settings.redis_url, socket_timeout=2, socket_connect_timeout=2
+    )
+    app.state.sync_queue = ArqSyncQueue(app.state.arq_redis)
     # Сессии админки для зависимостей ролей в любом модуле (ADR-0036).
     app.state.admin_authenticator = SqlAdminAuthenticator(app.state.session_factory)
     install_error_handlers(app)
@@ -133,6 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(access_router)
     app.include_router(admin_router)
     app.include_router(tenants_admin_router)
+    app.include_router(knowledge_admin_router)
     return app
 
 

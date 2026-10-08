@@ -1,5 +1,6 @@
 """Публичный интерфейс модуля knowledge — единственная точка входа для других модулей."""
 
+from app.modules.knowledge.api.admin_router import router as admin_router
 from app.modules.knowledge.application.chunking import MarkdownChunker
 from app.modules.knowledge.application.ingestion import run_sync
 from app.modules.knowledge.application.search import KnowledgeSearch
@@ -181,6 +182,7 @@ __all__ = [
     "WebsiteConnector",
     "WebsiteSourceConfig",
     "WebsiteSourceError",
+    "admin_router",
     "build_web_client",
     "content_hash",
     "create_http_reranker",

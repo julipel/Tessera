@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "admin_sources.schema.json",
+  "title": "AdminSourcesSchema",
+  "description": "Источники знаний в админке (docs/contracts.md §7, ADR-0037). Файл без единого корневого типа — экспортируемые типы в $defs: SourceList, SourceSummary, SourceDetail, CreateSourceRequest, SourceSyncItem, SourceSyncList, SourceSyncStats, StartSyncRequest.",
+  "$defs": {
+    "SourceSyncStats": {
+      "type": "object",
+      "description": "Счётчики синхронизации. errors — ошибки отдельных элементов (не больше 20), синхронизация при них продолжается.",
+      "properties": {
+        "discovered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unchanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deleted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "incremental": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "discovered",
+        "created",
+        "updated",
+        "unchanged",
+        "deleted",
+        "failed",
+        "incremental",
+        "errors"
+      ]
+    },
+    "SourceSyncItem": {
+      "type": "object",
+      "description": "Синхронизация источника. error — почему синхронизация не удалась целиком (status failed).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "succeeded",
+            "failed"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "stats": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SourceSyncStats"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null — синхронизация ещё не закончилась."
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "stats",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "SourceSyncList": {
+      "type": "object",
+      "description": "Ответ GET …/sources/{source_id}/syncs: последние синхронизации, от новой к старой.",
+      "properties": {
+        "syncs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceSyncItem"
+          }
+        }
+      },
+      "required": [
+        "syncs"
+      ],
+      "additionalProperties": false
+    },
+    "SourceSummary": {
+      "type": "object",
+      "description": "Источник со счётчиками данных и последней синхронизацией (любого статуса).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Ключ источника в тенанте. null — только у источников, созданных до P8-03 без имени."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "website",
+            "file",
+            "table",
+            "http_api",
+            "database"
+          ],
+          "description": "Вид коннектора. В админке создаются только website, file, table; http_api и database — в YAML тенанта (секреты, ADR-0017)."
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "yaml",
+            "admin"
+          ],
+          "description": "Где объявлен источник. yaml — в config/tenants/<slug>.yaml, его меняет только make seed; admin — создан в админке."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "paused"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "documents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "entities": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_sync": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SourceSyncItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "origin",
+        "status",
+        "created_at",
+        "documents",
+        "entities",
+        "last_sync"
+      ],
+      "additionalProperties": false
+    },
+    "SourceList": {
+      "type": "object",
+      "description": "Ответ GET /v1/admin/tenants/{tenant_id}/sources: по имени.",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceSummary"
+          }
+        }
+      },
+      "required": [
+        "sources"
+      ],
+      "additionalProperties": false
+    },
+    "SourceDetail": {
+      "type": "object",
+      "description": "Источник с конфигом в YAML (в конфиге нет секретов — только имена env, ADR-0017).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "website",
+            "file",
+            "table",
+            "http_api",
+            "database"
+          ],
+          "description": "Вид коннектора. В админке создаются только website, file, table; http_api и database — в YAML тенанта (секреты, ADR-0017)."
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "yaml",
+            "admin"
+          ],
+          "description": "Где объявлен источник. yaml — в config/tenants/<slug>.yaml, его меняет только make seed; admin — создан в админке."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "paused"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "documents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "entities": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_sync": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SourceSyncItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "config_yaml": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "origin",
+        "status",
+        "created_at",
+        "documents",
+        "entities",
+        "last_sync",
+        "config_yaml"
+      ],
+      "additionalProperties": false
+    },
+    "CreateSourceRequest": {
+      "type": "object",
+      "description": "Тело POST /v1/admin/tenants/{tenant_id}/sources. config_yaml — конфиг коннектора (docs/architecture.md §8); у file пустой.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "maxLength": 64
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "website",
+            "file",
+            "table",
+            "http_api",
+            "database"
+          ],
+          "description": "Вид коннектора. В админке создаются только website, file, table; http_api и database — в YAML тенанта (секреты, ADR-0017)."
+        },
+        "config_yaml": {
+          "type": "string",
+          "maxLength": 100000
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "config_yaml"
+      ],
+      "additionalProperties": false
+    },
+    "StartSyncRequest": {
+      "type": "object",
+      "description": "Тело POST …/sources/{source_id}/sync. full — полная синхронизация (удаляет пропавшие элементы); иначе инкрементальная, если у источника есть курсор.",
+      "properties": {
+        "full": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

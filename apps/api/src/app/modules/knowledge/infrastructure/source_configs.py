@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from app.modules.knowledge.domain.entities import SourceKind
+from app.modules.knowledge.domain.errors import InvalidSourceError, SourceProblem
 from app.modules.knowledge.infrastructure.database_connector import DatabaseSourceConfig
 from app.modules.knowledge.infrastructure.http_api_connector import HttpApiSourceConfig
 from app.modules.knowledge.infrastructure.table_connector import TableSourceConfig
@@ -19,13 +20,17 @@ _MODELS: dict[SourceKind, type[BaseModel]] = {
 
 
 def validate_source_config(kind: SourceKind, config: dict[str, Any]) -> None:
-    """Невалидный конфиг — ValueError. Для `file` конфиг пустой: каталог задаёт платформа."""
+    """Невалидный конфиг — InvalidSourceError (ValueError) с местами ошибок внутри конфига.
+    Для `file` конфиг пустой: каталог задаёт платформа."""
     model = _MODELS.get(kind)
     if model is None:
         if config:
-            raise ValueError(f"у источника {kind} нет настроек, config должен быть пустым")
+            raise InvalidSourceError(f"у источника {kind} нет настроек, config должен быть пустым")
         return
     try:
         model.model_validate(config)
     except ValidationError as e:
-        raise ValueError(f"неверный конфиг источника {kind}: {e}") from None
+        raise InvalidSourceError(
+            f"неверный конфиг источника {kind}: {e}",
+            [SourceProblem(tuple(err["loc"]), err["msg"]) for err in e.errors()],
+        ) from None

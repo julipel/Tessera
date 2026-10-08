@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.modules.knowledge.domain.entities import SourceKind
+from app.modules.knowledge.domain.entities import SourceKind, SourceOrigin
 from app.modules.knowledge.domain.errors import InvalidSourceDeclarationError
 from app.modules.knowledge.domain.ingestion import SourceSpec
 from app.modules.knowledge.domain.ports import SourceFileStore, SourceRegistry
@@ -87,6 +87,12 @@ async def seed_sources(
                 tenant_id, declaration.name, declaration.kind, declaration.config
             )
             action = SeedAction.CREATED
+        elif existing.origin is SourceOrigin.ADMIN:
+            # Источник создан в админке (ADR-0037): YAML не перехватывает его по имени.
+            raise InvalidSourceDeclarationError(
+                f"источник {declaration.name!r}: имя занято источником из админки — "
+                "объявите источник с другим именем"
+            )
         elif existing.kind is not declaration.kind:
             # Документы и сущности источника — данные его коннектора: смена вида их не перенесёт.
             raise InvalidSourceDeclarationError(

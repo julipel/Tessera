@@ -20,6 +20,7 @@ from app.modules.knowledge.domain.ingestion import (
     SourceSpec,
     SyncJob,
 )
+from app.modules.knowledge.domain.source_admin import SourceOverview, SyncRun
 from app.modules.knowledge.domain.source_seed import MirrorStats, RegisteredSource
 from app.modules.shared.kernel import TenantId
 
@@ -171,3 +172,27 @@ class SourceFileStore(Protocol):
         """Сделать каталог источника копией `from_dir`: новые и изменённые файлы копируются,
         лишние удаляются; скрытые файлы и симлинки пропускаются. Синхронный (файловый I/O)."""
         ...
+
+
+class SourceAdminStore(Protocol):
+    """Источники тенанта для админки (ADR-0037). Транзакцией управляет вызывающий код."""
+
+    async def list_sources(self, tenant_id: TenantId) -> list[SourceOverview]:
+        """По имени; источники без имени — в конце."""
+        ...
+
+    async def get_source(self, tenant_id: TenantId, source_id: UUID) -> SourceOverview | None: ...
+
+    async def create_source(
+        self, tenant_id: TenantId, name: str, kind: SourceKind, config: dict[str, Any]
+    ) -> UUID | None:
+        """Источник из админки; None — имя в тенанте занято."""
+        ...
+
+    async def recent_syncs(self, tenant_id: TenantId, source_id: UUID, limit: int) -> list[SyncRun]:
+        """От новой к старой."""
+        ...
+
+    async def get_sync(self, tenant_id: TenantId, sync_id: UUID) -> SyncRun | None: ...
+
+    async def commit(self) -> None: ...

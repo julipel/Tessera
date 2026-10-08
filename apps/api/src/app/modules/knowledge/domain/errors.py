@@ -1,5 +1,8 @@
 """Ошибки модуля knowledge."""
 
+from collections.abc import Sequence
+from dataclasses import dataclass
+
 from app.modules.shared.kernel import DomainError
 
 
@@ -25,3 +28,20 @@ class CatalogError(DomainError):
 
 class InvalidSourceDeclarationError(DomainError):
     """Декларация источников тенанта (YAML, ADR-0019) невалидна: имя, вид, конфиг, файлы."""
+
+
+@dataclass(frozen=True, slots=True)
+class SourceProblem:
+    """Ошибка в месте ввода источника: `loc` — путь из ключей и индексов, пустой — весь ввод."""
+
+    loc: tuple[str | int, ...]
+    message: str
+
+
+class InvalidSourceError(DomainError, ValueError):
+    """Источник не прошёл проверку: имя, вид, YAML или конфиг коннектора. ValueError —
+    для seed, который сообщает о неверном конфиге текстом."""
+
+    def __init__(self, message: str, problems: Sequence[SourceProblem] = ()) -> None:
+        super().__init__(message)
+        self.problems = list(problems) or [SourceProblem((), message)]

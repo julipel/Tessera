@@ -347,7 +347,7 @@ branding:
 HTTP-ответ с `invalid_input` может нести `details: [{loc, message}]` — ошибки по местам ввода
 (`loc` — путь из ключей и индексов, пустой — весь ввод); пока — только AgentConfig в админке.
 
-## 7. API админки (P7-02, P8-01b, P8-02a; ADR-0028, ADR-0036)
+## 7. API админки (P7-02, P8-01b, P8-02a, P8-03a; ADR-0028, ADR-0036, ADR-0037)
 
 ### Вход и сессия
 
@@ -387,6 +387,31 @@ POST /v1/admin/tenants/{tenant_id}/agent-configs/{id}/activate → 200 AgentConf
 проверяется заново (схема могла измениться после сохранения). В БД — JSON как написан (без
 значений по умолчанию), `yaml` ответа собирается из него в порядке полей AgentConfig —
 комментарии исходного YAML не сохраняются.
+
+### Источники знаний — чтение `viewer`, изменения `editor`
+
+```
+GET  /v1/admin/tenants/{tenant_id}/sources                     # admin_sources.schema.json
+  → 200 SourceList {sources: SourceSummary[]}   # по имени
+       SourceSummary {id, name, kind, origin, status, created_at, documents, entities, last_sync}
+GET  /v1/admin/tenants/{tenant_id}/sources/{id}             → 200 SourceDetail {…, config_yaml}
+POST /v1/admin/tenants/{tenant_id}/sources  CreateSourceRequest {name, kind, config_yaml}
+  → 201 SourceDetail
+  → 422 invalid_input + details — loc: name (занято), kind (не website/file/table),
+        config_yaml[, …путь в конфиге] (YAML не разбирается, конфиг не проходит модель коннектора)
+GET  /v1/admin/tenants/{tenant_id}/sources/{id}/syncs       → 200 SourceSyncList {syncs}  # 20 последних
+POST /v1/admin/tenants/{tenant_id}/sources/{id}/sync  StartSyncRequest {full?}
+  → 202 SourceSyncItem — синхронизация в очереди воркера; уже ждущая или идущая — она же
+```
+
+Источник другого тенанта — 404 `not_found`. `origin`: `yaml` — из YAML тенанта, меняет его
+только `make seed`, админка лишь запускает синхронизацию; `admin` — создан в админке, `make seed`
+с таким именем — ошибка (ADR-0037). `http_api` и `database` создаются только в YAML (секреты,
+ADR-0017). `documents` — документы без описаний сущностей, `entities` — сущности. `last_sync` —
+последняя синхронизация любого статуса. `SourceSyncItem {id, status, created_at, started_at,
+finished_at, stats, error}`: `stats` — null до завершения, иначе счётчики `discovered`, `created`,
+`updated`, `unchanged`, `deleted`, `failed`, `incremental` и `errors` (ошибки элементов, ≤ 20);
+`error` — почему синхронизация не удалась целиком.
 
 ### Журнал хода — роль `viewer`
 

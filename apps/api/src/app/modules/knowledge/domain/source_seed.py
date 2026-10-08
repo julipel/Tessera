@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from app.modules.knowledge.domain.entities import SourceKind
+from app.modules.knowledge.domain.entities import SourceKind, SourceOrigin
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +25,7 @@ class RegisteredSource:
     id: UUID
     kind: SourceKind
     config: dict[str, Any]
+    origin: SourceOrigin = SourceOrigin.YAML
 
 
 class SeedAction(StrEnum):

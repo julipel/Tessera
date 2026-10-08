@@ -111,3 +111,24 @@ class TurnAgent(Protocol):
     Ошибка провайдера — исключение `LLMError` из потока; остальные исключения — сбой хода."""
 
     def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]: ...
+
+
+class TurnDirectory(Protocol):
+    """Ходы всех процессов API — для отмены хода из любого процесса (ADR-0035).
+
+    Недоступность хранилища не ломает ход: реализация логирует сбой, а отмена работает
+    только в процессе со стримом."""
+
+    async def register(self, turn_id: UUID, tenant_id: TenantId, conversation_id: UUID) -> None:
+        """Ход начался в этом процессе."""
+        ...
+
+    async def unregister(self, turn_id: UUID) -> None:
+        """Ход закончился."""
+        ...
+
+    async def request_cancel(
+        self, turn_id: UUID, tenant_id: TenantId, conversation_id: UUID
+    ) -> bool:
+        """Передать отмену процессу хода. False — хода нет, он завершён или чужой."""
+        ...

@@ -53,6 +53,7 @@ from app.modules.chat.domain.ports import (
     MessageStore,
     ToolCallStore,
     TurnAgent,
+    TurnDirectory,
 )
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.public import form_values_problem
@@ -150,7 +151,7 @@ class TurnStream:
 
     async def events(self) -> AsyncGenerator[Event]:
         # В реестре только начатые стримы: снимает с реестра close() при закрытии стрима.
-        self.registry.add(self)
+        await self.registry.add(self)
         # message_id нет только у turn_started (envelope.schema.json).
         yield self._event("turn_started", {})
         self.journal.record(
@@ -285,7 +286,7 @@ class TurnStream:
                 await asyncio.wait([self._agent_task])
             await self.save(MessageStatus.INTERRUPTED)
         finally:
-            self.registry.remove(self)
+            await self.registry.remove(self)
 
     async def save(self, status: MessageStatus, error: _TurnError | None = None) -> None:
         """Записать ответ с накопленными блоками, ошибкой хода и завершёнными вызовами
@@ -551,30 +552,47 @@ def _report_cancelled(queue: asyncio.Queue[_QueueItem], task: asyncio.Task[None]
 class TurnRegistry:
     """Текущие ходы процесса — для явной отмены (POST .../turns/{turn_id}/cancel).
 
-    Только в памяти процесса: при нескольких воркерах отмена срабатывает, лишь если
-    попала в процесс со стримом. Межпроцессная отмена — P7.
+    Ходы процесса — в памяти. С `directory` ход виден и другим процессам API: отмена,
+    попавшая в процесс без стрима, передаётся процессу хода, и тот вызывает `cancel_local`
+    (ADR-0035). Без `directory` отмена срабатывает только в процессе со стримом.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, directory: TurnDirectory | None = None) -> None:
         self._turns: dict[UUID, TurnStream] = {}
+        self._directory = directory
 
     def __contains__(self, turn_id: object) -> bool:
         return turn_id in self._turns
 
-    def add(self, turn: TurnStream) -> None:
+    async def add(self, turn: TurnStream) -> None:
         self._turns[turn.turn_id] = turn
+        if self._directory is not None:
+            await self._directory.register(
+                turn.turn_id, turn.conversation.tenant_id, turn.conversation.id
+            )
 
-    def remove(self, turn: TurnStream) -> None:
-        self._turns.pop(turn.turn_id, None)
+    async def remove(self, turn: TurnStream) -> None:
+        if self._turns.pop(turn.turn_id, None) is not None and self._directory is not None:
+            await self._directory.unregister(turn.turn_id)
 
-    def cancel(self, tenant_id: TenantId, conversation_id: UUID, turn_id: UUID) -> bool:
+    async def cancel(self, tenant_id: TenantId, conversation_id: UUID, turn_id: UUID) -> bool:
         """False — хода нет, он завершён или чужой (тенант/диалог): для клиента это одно и то же."""
         turn = self._turns.get(turn_id)
-        if turn is None or (turn.conversation.tenant_id, turn.conversation.id) != (
-            tenant_id,
-            conversation_id,
-        ):
+        if turn is None:
+            if self._directory is None or not await self._directory.request_cancel(
+                turn_id, tenant_id, conversation_id
+            ):
+                return False
+            logger.info("turn_cancel_forwarded", turn_id=str(turn_id))
+            return True
+        if (turn.conversation.tenant_id, turn.conversation.id) != (tenant_id, conversation_id):
             return False
         turn.cancel()
         logger.info("turn_cancel_requested", turn_id=str(turn_id))
         return True
+
+    def cancel_local(self, turn_id: UUID) -> None:
+        """Отмена, переданная другим процессом (владелец хода уже проверен им)."""
+        if (turn := self._turns.get(turn_id)) is not None:
+            turn.cancel()
+            logger.info("turn_cancel_received", turn_id=str(turn_id))

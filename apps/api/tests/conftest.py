@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_e
 
 from app.cli import ensure_database
 from app.main import create_app
+from app.modules.chat.public import TurnRegistry
 from app.modules.shared.public import InMemoryRateLimiter, get_session
 from app.settings import Settings
 
@@ -52,6 +53,8 @@ def app(settings: Settings) -> FastAPI:
     app = create_app(settings)
     # Лимиты — в памяти и свои на тест: Redis-счётчики делились бы между тестами (ADR-0030).
     app.state.rate_limiter = InMemoryRateLimiter()
+    # Ходы — только в процессе теста: межпроцессная отмена — в test_turn_directory.py.
+    app.state.turn_registry = TurnRegistry()
     return app
 
 

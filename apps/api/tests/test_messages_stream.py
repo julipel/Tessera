@@ -401,7 +401,7 @@ async def test_turn_holds_no_transaction_while_agent_answers(
     await anext(events)  # text_delta: агент ждёт внутри ответа
     assert not db_session.in_transaction()
 
-    assert registry.cancel(shop, conversation_id, turn.turn_id)
+    assert await registry.cancel(shop, conversation_id, turn.turn_id)
     rest = [e.root.type async for e in events]
 
     assert rest == ["text_done", "done"]
@@ -515,7 +515,7 @@ async def test_cancel_before_agent_start_skips_agent(
     events = turn.events()
     first = await anext(events)
 
-    assert registry.cancel(shop, conversation_id, turn.turn_id)
+    assert await registry.cancel(shop, conversation_id, turn.turn_id)
     rest = [e.model_dump() async for e in events]
 
     assert first.root.type == "turn_started"

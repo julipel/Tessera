@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +13,12 @@ from app.api import health
 from app.knowledge_wiring import KnowledgeServices, build_knowledge_services
 from app.logs import TraceIdMiddleware, configure_logging
 from app.modules.agent.public import LLMClients
-from app.modules.chat.public import SummaryScheduler, TurnRegistry, background_summary
+from app.modules.chat.public import (
+    RedisTurnDirectory,
+    SummaryScheduler,
+    TurnRegistry,
+    background_summary,
+)
 from app.modules.chat.public import router as chat_router
 from app.modules.knowledge.public import SqlCatalog
 from app.modules.leads.public import SqlLeadStore
@@ -30,7 +35,14 @@ from app.settings import Settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Отмены ходов из других процессов API (ADR-0035).
+    turns: TurnRegistry = app.state.turn_registry
+    directory: RedisTurnDirectory = app.state.turn_directory
+    cancel_listener = asyncio.create_task(directory.listen(turns.cancel_local))
     yield
+    cancel_listener.cancel()
+    with suppress(asyncio.CancelledError):
+        await cancel_listener
     summaries: SummaryScheduler = app.state.summary_scheduler
     await summaries.aclose()
     knowledge: KnowledgeServices | None = app.state.knowledge
@@ -40,6 +52,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await asyncio.to_thread(tracer.shutdown)  # отправка накопленных трейсов — блокирующая
     redis: Redis = app.state.redis
     await redis.aclose()
+    subscriber: Redis = app.state.redis_subscriber
+    await subscriber.aclose()
     await app.state.engine.dispose()
 
 
@@ -64,7 +78,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.redis_url, socket_timeout=0.5, socket_connect_timeout=0.5
     )
     app.state.rate_limiter = RedisRateLimiter(app.state.redis)
-    app.state.turn_registry = TurnRegistry()  # текущие ходы процесса — для отмены
+    # Подписка на отмены ходов ждёт сообщений без таймаута чтения — свой клиент.
+    app.state.redis_subscriber = Redis.from_url(
+        settings.redis_url, socket_connect_timeout=0.5, health_check_interval=30
+    )
+    # Текущие ходы — для отмены из любого процесса API (ADR-0035).
+    app.state.turn_directory = RedisTurnDirectory(app.state.redis, app.state.redis_subscriber)
+    app.state.turn_registry = TurnRegistry(app.state.turn_directory)
     app.state.llm_clients = LLMClients(
         openai_api_key=_secret(settings.openai_api_key),
         openai_base_url=settings.openai_base_url,

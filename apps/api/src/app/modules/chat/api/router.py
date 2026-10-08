@@ -284,6 +284,6 @@ async def cancel_turn(
 ) -> Response:
     """Стрим хода закончится `done{interrupted}`. 404 — хода нет, он завершён или чужой."""
     structlog.contextvars.bind_contextvars(conversation_id=str(conversation_id))
-    if not registry.cancel(tenant_id, conversation_id, turn_id):
+    if not await registry.cancel(tenant_id, conversation_id, turn_id):
         raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", f"ход {turn_id} не выполняется")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

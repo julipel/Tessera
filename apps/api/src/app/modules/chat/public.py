@@ -14,6 +14,7 @@ from app.modules.chat.infrastructure.models import (
     MessageRecord,
     ToolCallRecord,
 )
+from app.modules.chat.infrastructure.turn_directory import RedisTurnDirectory
 
 __all__ = [
     "ChatMessage",
@@ -22,6 +23,7 @@ __all__ = [
     "MessageRecord",
     "MessageRole",
     "MessageStatus",
+    "RedisTurnDirectory",
     "SummaryScheduler",
     "ToolCallRecord",
     "TurnRegistry",

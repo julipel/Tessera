@@ -294,7 +294,7 @@ async def test_cancelled_turn_is_logged_as_interrupted(
 
     async def cancel_after_first_chunk() -> None:
         await agent.first_sent.wait()
-        registry.cancel(shop, conversation_id, turn.turn_id)
+        await registry.cancel(shop, conversation_id, turn.turn_id)
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(cancel_after_first_chunk)

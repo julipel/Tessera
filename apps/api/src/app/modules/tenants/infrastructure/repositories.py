@@ -43,6 +43,10 @@ class SqlTenantDirectory:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def get(self, tenant_id: TenantId) -> Tenant | None:
+        record = await self.session.get(TenantRecord, tenant_id)
+        return _tenant(record) if record else None
+
     async def get_by_slug(self, slug: str) -> Tenant | None:
         stmt = select(TenantRecord).where(TenantRecord.slug == slug)
         record = (await self.session.execute(stmt)).scalar_one_or_none()

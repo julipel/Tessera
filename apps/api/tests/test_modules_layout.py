@@ -7,6 +7,7 @@ import pytest
 import app.modules
 
 MODULES = [
+    "access",
     "tenants",
     "chat",
     "agent",

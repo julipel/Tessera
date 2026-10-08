@@ -6,7 +6,7 @@ HAS_API := $(wildcard $(API)/pyproject.toml)
 HAS_WEB := $(wildcard $(WEB)/package.json)
 
 .PHONY: up down ps install check check-fast test lint-py typecheck-py arch lint-web typecheck-web test-web \
-        contracts contracts-check migrate migration eval eval-diff loadtest seed sync pilot dev-api dev-web worker
+        contracts contracts-check migrate migration eval eval-diff loadtest seed sync pilot admin-user dev-api dev-web worker
 
 # --wait: команда завершается, когда все сервисы прошли healthcheck
 up:
@@ -76,6 +76,11 @@ migration:
 
 seed:
 	cd $(API) && uv run python -m app.cli seed
+
+# Пользователь админки (ADR-0036): make admin-user email=a@b.c [args="--tenant demo-beauty=editor"].
+# Пароль нового пользователя — ADMIN_PASSWORD или ввод; см. --help у `python -m app.cli admin-user`.
+admin-user:
+	cd $(API) && uv run python -m app.cli admin-user $(email) $(args)
 
 # Синхронизация источников тенантов в этом процессе, без воркера (ADR-0019).
 # make sync [t="demo-beauty"] [s="kb"] — тенант / источник; по умолчанию все из config/tenants.

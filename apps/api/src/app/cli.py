@@ -1,15 +1,29 @@
 """Служебные команды: `python -m app.cli seed [файлы...]`, `python -m app.cli sync [slug...]`,
-`python -m app.cli ensure-db`."""
+`python -m app.cli admin-user EMAIL …`, `python -m app.cli ensure-db`."""
 
 import argparse
 import asyncio
+import getpass
+import os
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.modules.access.public import (
+    MIN_PASSWORD_LENGTH,
+    AdminMembershipRepository,
+    AdminRole,
+    InvalidEmailError,
+    PasswordRequiredError,
+    SqlAdminUserDirectory,
+    WeakPasswordError,
+    normalize_email,
+    upsert_admin_user,
+)
 from app.modules.knowledge.public import (
     InvalidSourceDeclarationError,
     LocalSourceFileStore,
@@ -82,6 +96,79 @@ def widget_keys_by_slug(value: str | None, slugs: list[str]) -> dict[str, str]:
             raise ValueError(f"ключ виджета не в формате slug=key: {pair!r}")
         keys[slug] = key
     return {slug: key for slug, key in keys.items() if slug in slugs}
+
+
+def parse_grants(values: list[str]) -> dict[str, AdminRole]:
+    """Роли в тенантах: `slug=role` (viewer, editor); последняя для slug побеждает."""
+    grants: dict[str, AdminRole] = {}
+    for value in values:
+        slug, sep, role = (part.strip() for part in value.partition("="))
+        if not sep or not slug or role not in AdminRole:
+            roles = ", ".join(AdminRole)
+            raise ValueError(f"роль не в формате slug=role ({roles}): {value!r}")
+        grants[slug] = AdminRole(role)
+    return grants
+
+
+def read_password(
+    environ: Mapping[str, str] = os.environ,
+    prompt: Callable[[str], str] = getpass.getpass,
+) -> str:
+    """Пароль из ADMIN_PASSWORD (для скриптов) или ввод дважды без эха."""
+    if password := environ.get("ADMIN_PASSWORD"):
+        return password
+    password = prompt(f"Пароль (не короче {MIN_PASSWORD_LENGTH} символов): ")
+    if prompt("Повторите пароль: ") != password:
+        raise ValueError("пароли не совпадают")
+    return password
+
+
+async def admin_user(
+    email: str,
+    *,
+    password: str | None,
+    is_superadmin: bool | None,
+    is_active: bool | None,
+    grants: dict[str, AdminRole],
+    revokes: list[str],
+    settings: Settings,
+) -> bool:
+    """Создать или изменить пользователя админки. False — неизвестный slug тенанта."""
+    engine = create_engine(settings.database_url)
+    try:
+        async with create_session_factory(engine)() as session, session.begin():
+            directory = SqlTenantDirectory(session)
+            tenant_ids: dict[str, TenantId] = {}
+            for slug in [*grants, *revokes]:
+                tenant = await directory.get_by_slug(slug)
+                if tenant is None:
+                    print(f"{slug}: тенант не найден — сначала make seed", file=sys.stderr)
+                    return False
+                tenant_ids[slug] = tenant.id
+            result = await upsert_admin_user(
+                email,
+                users=SqlAdminUserDirectory(session),
+                memberships=AdminMembershipRepository(session),
+                password=password,
+                is_superadmin=is_superadmin,
+                is_active=is_active,
+                grants={tenant_ids[slug]: role for slug, role in grants.items()},
+                revokes=[tenant_ids[slug] for slug in revokes],
+            )
+            roles = []
+            for membership in result.memberships:
+                tenant = await directory.get(membership.tenant_id)
+                roles.append(f"{tenant.slug if tenant else membership.tenant_id}={membership.role}")
+        user = result.user
+        flags = [
+            "создан" if result.created else "обновлён",
+            *(["суперадмин"] if user.is_superadmin else []),
+            *([] if user.is_active else ["отключён"]),
+        ]
+        print(f"{user.email}: {', '.join(flags)}; роли: {', '.join(roles) or 'нет'}")
+        return True
+    finally:
+        await engine.dispose()
 
 
 def load_specs(paths: list[Path]) -> list[tuple[TenantSpec, list[SourceDeclaration]]]:
@@ -237,8 +324,41 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="по курсору; по умолчанию полная — видит и смену конфига источника",
     )
+    user_cmd = sub.add_parser(
+        "admin-user",
+        help="создать или изменить пользователя админки",
+        description=(
+            "Новому пользователю нужен пароль: ADMIN_PASSWORD из env или ввод с клавиатуры. "
+            "Существующему пароль меняется только с --reset-password."
+        ),
+    )
+    user_cmd.add_argument("email")
+    user_cmd.add_argument(
+        "--tenant",
+        action="append",
+        default=[],
+        metavar="SLUG=ROLE",
+        help="роль в тенанте: viewer или editor (можно несколько)",
+    )
+    user_cmd.add_argument(
+        "--revoke", action="append", default=[], metavar="SLUG", help="снять роль в тенанте"
+    )
+    user_cmd.add_argument(
+        "--superadmin",
+        action=argparse.BooleanOptionalAction,
+        help="все тенанты и пользователи (--no-superadmin — снять)",
+    )
+    user_cmd.add_argument(
+        "--active",
+        action=argparse.BooleanOptionalAction,
+        help="--no-active — отключить вход, --active — включить",
+    )
+    user_cmd.add_argument("--reset-password", action="store_true", help="задать новый пароль")
     sub.add_parser("ensure-db", help="создать базу из DATABASE_URL, если её нет")
     args = parser.parse_args(argv)
+
+    if args.command == "admin-user":
+        return _admin_user_command(args)
 
     if args.command == "ensure-db":
         url = Settings().database_url
@@ -275,6 +395,43 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     asyncio.run(seed(specs, widget_keys, args.reset_widget_key, settings))
     return 0
+
+
+def _admin_user_command(args: argparse.Namespace) -> int:
+    settings = Settings()
+    try:
+        grants = parse_grants(args.tenant)
+        password = None
+        if args.reset_password or not asyncio.run(_admin_user_exists(args.email, settings)):
+            password = read_password()
+        ok = asyncio.run(
+            admin_user(
+                args.email,
+                password=password,
+                is_superadmin=args.superadmin,
+                is_active=args.active,
+                grants=grants,
+                revokes=args.revoke,
+                settings=settings,
+            )
+        )
+    except (ValueError, InvalidEmailError, WeakPasswordError, PasswordRequiredError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    except EOFError:
+        print("пароль не введён: без терминала задайте ADMIN_PASSWORD", file=sys.stderr)
+        return 1
+    return 0 if ok else 1
+
+
+async def _admin_user_exists(email: str, settings: Settings) -> bool:
+    engine = create_engine(settings.database_url)
+    try:
+        async with create_session_factory(engine)() as session:
+            users = SqlAdminUserDirectory(session)
+            return await users.get_by_email(normalize_email(email)) is not None
+    finally:
+        await engine.dispose()
 
 
 def _tenant_files() -> list[Path]:

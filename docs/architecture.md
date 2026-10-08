@@ -28,6 +28,7 @@
 | `leads` | Заявки пользователей (`create_lead`): хранение по тенанту |
 | `memory` | Состояние диалога (слоты, показанные сущности), суммаризация истории |
 | `observability` | AgentEvent-лог, трейсы, метрики, стоимость |
+| `access` | Пользователи админки, роли в тенантах, вход (ADR-0036) |
 | `shared` | Базовые типы, ошибки, tenant context, утилиты БД (без бизнес-логики) |
 
 Зависимости модулей (только через `public.py`):
@@ -38,6 +39,7 @@ chat ──► agent ──► tools ──► knowledge
   │        │  └──► memory
   │        └─────► tenants
   └──────────────► tenants
+access ──────────► tenants
 все ─────────────► observability, shared
 ```
 
@@ -419,6 +421,10 @@ Entity хранится в Postgres: нормализованные поля (`t
 ## 10. Мультитенантность
 
 - `TenantContext` определяется по ключу виджета (публичный) или по токену админки.
+- Пользователи админки (ADR-0036, модуль `access`): `admin_users` — справочник без `tenant_id`
+  (пользователь может работать в нескольких тенантах), роль в тенанте — `admin_memberships`
+  (`viewer` — диалоги и журнал, `editor` — ещё конфиг и источники); `is_superadmin` — все
+  тенанты. Пароль — scrypt с параметрами в хэше. Создание — `make admin-user`.
 - Все репозитории принимают `tenant_id` явно; в тестах есть проверка изоляции.
 - AgentConfig версионируется: `draft` → `active`. Диалог запоминает версию конфига,
   с которой начался (для воспроизводимости и разбора).
@@ -447,6 +453,8 @@ Message(id, conversation_id, tenant_id, role, status, content, input JSONB, bloc
 ToolCall(id, message_id, tenant_id, name, arguments JSONB, result JSONB, error, duration_ms)
 Lead(id, tenant_id, conversation_id, form_key, fields JSONB, created_at)  # create_lead
 AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSONB, ts)
+AdminUser(id, email, password_hash, is_superadmin, is_active, created_at)  # без tenant_id
+AdminMembership(id, tenant_id, user_id, role, created_at)   # одна роль на тенант
 ```
 
 ## 12. Надёжность

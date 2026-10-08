@@ -80,6 +80,7 @@ name = "Слои внутри модуля: api → application | infrastructure
 type = "layers"
 layers = ["api", "application | infrastructure", "domain"]
 containers = [
+    "app.modules.access",
     "app.modules.tenants",
     "app.modules.chat",
     "app.modules.agent",
@@ -97,7 +98,7 @@ exhaustive_ignores = ["public", "kernel"]
 name = "Направление зависимостей между модулями"
 type = "layers"
 layers = [
-    "app.modules.chat",
+    "app.modules.chat | app.modules.access",
     "app.modules.agent",
     "app.modules.tools | app.modules.memory | app.modules.tenants",
     "app.modules.knowledge | app.modules.leads",
@@ -130,6 +131,17 @@ source_modules = ["app.modules.agent"]
 forbidden_modules = ["fastapi", "starlette"]
 
 # Внутренности модуля доступны только ему самому; остальным — только public.py.
+
+[[tool.importlinter.contracts]]
+name = "access: доступ извне только через public.py"
+type = "protected"
+protected_modules = [
+    "app.modules.access.domain",
+    "app.modules.access.application",
+    "app.modules.access.infrastructure",
+    "app.modules.access.api",
+]
+allowed_importers = ["app.modules.access"]
 
 [[tool.importlinter.contracts]]
 name = "tenants: доступ извне только через public.py"

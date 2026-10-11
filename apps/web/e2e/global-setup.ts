@@ -4,6 +4,7 @@ import {
   ADMIN_EMAIL,
   ADMIN_PASSWORD,
   ADMIN_TENANT_SLUG,
+  ADMIN_WIDGET_KEY,
   E2E_ENV,
   GARDEN_WIDGET_KEY,
   WIDGET_KEY,
@@ -25,6 +26,15 @@ export default function globalSetup(): void {
   run("alembic", "upgrade", "head");
   const keys = `demo-beauty=${WIDGET_KEY},demo-garden=${GARDEN_WIDGET_KEY}`;
   run("python", "-m", "app.cli", "seed", "--widget-key", keys, "--reset-widget-key");
-  run("python", "-m", "app.cli", "seed", path.resolve("e2e/fixtures/admin-tenant.yaml"));
+  run(
+    "python",
+    "-m",
+    "app.cli",
+    "seed",
+    path.resolve("e2e/fixtures/admin-tenant.yaml"),
+    "--widget-key",
+    `${ADMIN_TENANT_SLUG}=${ADMIN_WIDGET_KEY}`,
+    "--reset-widget-key",
+  );
   run("python", "-m", "app.cli", "admin-user", ADMIN_EMAIL, "--tenant", `${ADMIN_TENANT_SLUG}=editor`, "--reset-password");
 }

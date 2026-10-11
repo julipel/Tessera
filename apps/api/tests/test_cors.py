@@ -1,5 +1,6 @@
 """CORS для веб-чата: браузер шлёт `X-Widget-Key`, поэтому перед запросом идёт preflight."""
 
+import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -49,15 +50,22 @@ async def test_trace_id_exposed_to_browser(settings: Settings) -> None:
     assert resp.headers["x-trace-id"]
 
 
-async def test_preflight_allows_delete_for_admin(settings: Settings) -> None:
-    # Удаление файла источника в админке (P8-03b).
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        # Удаление файла источника (P8-03b), оценка ответа (P8-04a).
+        ("DELETE", "/v1/admin/tenants/t/sources/s/files/a.md"),
+        ("PUT", "/v1/admin/tenants/t/conversations/c/messages/m/rating"),
+    ],
+)
+async def test_preflight_allows_admin_methods(settings: Settings, method: str, path: str) -> None:
     headers = {
         "Origin": CHAT_ORIGIN,
-        "Access-Control-Request-Method": "DELETE",
+        "Access-Control-Request-Method": method,
         "Access-Control-Request-Headers": "authorization",
     }
     async with AsyncClient(transport=ASGITransport(app=_app(settings)), base_url="http://t") as ac:
-        resp = await ac.options("/v1/admin/tenants/t/sources/s/files/a.md", headers=headers)
+        resp = await ac.options(path, headers=headers)
 
     assert resp.status_code == 200
-    assert "DELETE" in resp.headers["access-control-allow-methods"]
+    assert method in resp.headers["access-control-allow-methods"]

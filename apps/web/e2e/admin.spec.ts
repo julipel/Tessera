@@ -1,7 +1,8 @@
 import { expect, type Page, test } from "@playwright/test";
-import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./env";
+import { randomUUID } from "node:crypto";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_WIDGET_KEY, API_URL } from "./env";
 
-// Админка: вход, версии конфига и источники тенанта e2e-admin (e2e/fixtures/admin-tenant.yaml).
+// Админка: вход, версии конфига, источники и диалоги тенанта e2e-admin (e2e/fixtures/admin-tenant.yaml).
 // Тесты меняют активную версию одного тенанта — по очереди.
 test.describe.configure({ mode: "serial" });
 
@@ -114,4 +115,58 @@ test("источники: ошибка конфига, файловый исто
 
   await page.getByRole("link", { name: "← Источники" }).click();
   await expect(page.getByRole("row", { name: new RegExp(name) })).toContainText("в очереди");
+});
+
+test("диалоги: список, ход по шагам, оценка ответа", async ({ page, request }) => {
+  // Диалог с ходом, где мок вызывает suggest_replies (e2e/mock-llm.mjs, слово «варианты»).
+  const headers = { "X-Widget-Key": ADMIN_WIDGET_KEY };
+  const created = await request.post(`${API_URL}/v1/conversations`, {
+    headers,
+    data: { visitor_id: `e2e-${Date.now()}` },
+  });
+  expect(created.ok()).toBe(true);
+  const { conversation_id } = (await created.json()) as { conversation_id: string };
+  const question = `покажи варианты ${Date.now()}`;
+  const turn = await request.post(`${API_URL}/v1/conversations/${conversation_id}/messages`, {
+    headers,
+    data: { client_message_id: randomUUID(), input: { type: "text", text: question } },
+  });
+  expect(await turn.text()).toContain("event: done");
+
+  await login(page);
+  await page.getByRole("link", { name: "Диалоги" }).click();
+  await expect(page.getByRole("heading", { name: /^Диалоги/ })).toBeVisible();
+  const row = page.getByRole("row", { name: new RegExp(question) });
+  await expect(row).toContainText("2");
+  await row.getByRole("link", { name: question }).click();
+
+  const answer = page.getByRole("article");
+  await expect(answer).toContainText(`Вы написали: ${question}`);
+  await answer.getByText(/^Ход по шагам/).click();
+  const steps = answer.getByRole("list", { name: "Шаги хода" });
+  await expect(steps).toContainText("начало хода");
+  await expect(steps).toContainText("suggest_replies");
+  await expect(steps).toContainText("быстрые ответы");
+  await expect(steps.getByRole("listitem").last()).toContainText("итог completed");
+
+  // Плохая оценка с комментарием → диалог в фильтре «только с плохой оценкой».
+  await answer.getByLabel("Комментарий к оценке").fill("не ответил на вопрос");
+  await answer.getByRole("button", { name: "👎 Плохо" }).click();
+  await expect(answer.getByRole("status")).toHaveText("Оценка сохранена");
+  await expect(answer.getByRole("button", { name: "👎 Плохо" })).toHaveAttribute("aria-pressed", "true");
+  await expect(answer).toContainText(ADMIN_EMAIL);
+
+  await page.reload();
+  await expect(page.getByRole("article").getByLabel("Комментарий к оценке")).toHaveValue("не ответил на вопрос");
+  await page.getByRole("link", { name: "← Диалоги" }).click();
+  await page.getByLabel("Только с плохой оценкой").check();
+  await expect(page.getByRole("row", { name: new RegExp(question) })).toContainText("👎 1");
+
+  // Снятая оценка — диалога в фильтре больше нет.
+  await page.getByRole("row", { name: new RegExp(question) }).getByRole("link").click();
+  await page.getByRole("article").getByRole("button", { name: "Снять оценку" }).click();
+  await expect(page.getByRole("article").getByRole("status")).toHaveText("Оценка снята");
+  await page.getByRole("link", { name: "← Диалоги" }).click();
+  await page.getByLabel("Только с плохой оценкой").check();
+  await expect(page.getByRole("row", { name: new RegExp(question) })).toHaveCount(0);
 });

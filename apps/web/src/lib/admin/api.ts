@@ -4,10 +4,15 @@ import type {
   AdminLoginRequest,
   AdminLoginResponse,
   AdminMe,
+  ConversationDetail,
+  ConversationList,
   AgentConfigVersionDetail,
+  AgentEventList,
   AgentConfigVersionList,
   CreateAgentConfigRequest,
   CreateSourceRequest,
+  MessageRating,
+  RateMessageRequest,
   SourceDetail,
   SourceFile,
   SourceFileList,
@@ -135,6 +140,49 @@ export class AdminApi {
     await this.request(filesPath(tenantId, sourceId, name), { method: "DELETE" });
   }
 
+  /** Диалоги от новых к старым; `before` — `next_before` предыдущей страницы. */
+  async listConversations(
+    tenantId: string,
+    options: { before?: string | null; rating?: "good" | "bad" | null; limit?: number } = {},
+  ): Promise<ConversationList> {
+    const query = new URLSearchParams();
+    if (options.before) query.set("before", options.before);
+    if (options.rating) query.set("rating", options.rating);
+    if (options.limit) query.set("limit", String(options.limit));
+    const suffix = query.size > 0 ? `?${query}` : "";
+    return (await this.request(`${conversationsPath(tenantId)}${suffix}`)).json() as Promise<ConversationList>;
+  }
+
+  async getConversation(tenantId: string, conversationId: string): Promise<ConversationDetail> {
+    const resp = await this.request(conversationsPath(tenantId, conversationId));
+    return (await resp.json()) as ConversationDetail;
+  }
+
+  /** Журнал хода диалога: события по ходам (ts) и внутри хода (seq), до 1000. */
+  async listEvents(tenantId: string, conversationId: string): Promise<AgentEventList> {
+    const query = new URLSearchParams({ conversation_id: conversationId });
+    const resp = await this.request(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/events?${query}`);
+    return (await resp.json()) as AgentEventList;
+  }
+
+  /** Оценка ответа ассистента; повторная заменяет прежнюю. */
+  async rateMessage(
+    tenantId: string,
+    conversationId: string,
+    messageId: string,
+    request: RateMessageRequest,
+  ): Promise<MessageRating> {
+    const resp = await this.request(ratingPath(tenantId, conversationId, messageId), {
+      method: "PUT",
+      body: JSON.stringify(request),
+    });
+    return (await resp.json()) as MessageRating;
+  }
+
+  async clearRating(tenantId: string, conversationId: string, messageId: string): Promise<void> {
+    await this.request(ratingPath(tenantId, conversationId, messageId), { method: "DELETE" });
+  }
+
   private async request(path: string, init: RequestInit = {}): Promise<Response> {
     const resp = await fetch(new URL(path, this.baseUrl), {
       ...init,
@@ -161,4 +209,13 @@ function sourcesPath(tenantId: string, sourceId?: string): string {
 function filesPath(tenantId: string, sourceId: string, name?: string): string {
   const base = `${sourcesPath(tenantId, sourceId)}/files`;
   return name ? `${base}/${encodeURIComponent(name)}` : base;
+}
+
+function conversationsPath(tenantId: string, conversationId?: string): string {
+  const base = `/v1/admin/tenants/${encodeURIComponent(tenantId)}/conversations`;
+  return conversationId ? `${base}/${encodeURIComponent(conversationId)}` : base;
+}
+
+function ratingPath(tenantId: string, conversationId: string, messageId: string): string {
+  return `${conversationsPath(tenantId, conversationId)}/messages/${encodeURIComponent(messageId)}/rating`;
 }

@@ -3,7 +3,7 @@ import type { AdminMe } from "@/contracts";
 
 const ROLE_LABELS = { viewer: "просмотр", editor: "редактор" } as const;
 
-/** Тенанты, где у пользователя есть роль. Источники видны любой роли, конфиг — editor. */
+/** Тенанты, где у пользователя есть роль. Диалоги и источники видны любой роли, конфиг — editor. */
 export function TenantList({ me }: { me: AdminMe }) {
   if (me.memberships.length === 0) {
     return (
@@ -26,6 +26,12 @@ export function TenantList({ me }: { me: AdminMe }) {
                 {m.tenant_slug} · {ROLE_LABELS[m.role]}
               </div>
             </div>
+            <Link
+              href={`/admin/tenants/${m.tenant_id}/conversations`}
+              className="text-sm text-chat-primary hover:underline"
+            >
+              Диалоги
+            </Link>
             <Link
               href={`/admin/tenants/${m.tenant_id}/sources`}
               className="text-sm text-chat-primary hover:underline"

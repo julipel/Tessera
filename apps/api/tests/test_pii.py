@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from app.modules.observability.domain.pii import HIDDEN, mask_pii
+from app.modules.observability.domain.pii import HIDDEN, has_contact, mask_pii
 from app.modules.observability.kernel import GenerationInfo, TurnTraceInfo
 from app.modules.observability.public import LangfuseTracer
 
@@ -28,6 +28,7 @@ from app.modules.observability.public import LangfuseTracer
 )
 def test_contacts_are_masked(text: str, masked: str) -> None:
     assert mask_pii(text) == masked
+    assert has_contact(text)
 
 
 @pytest.mark.parametrize(
@@ -44,6 +45,7 @@ def test_contacts_are_masked(text: str, masked: str) -> None:
 )
 def test_ordinary_texts_are_unchanged(text: str) -> None:
     assert mask_pii(text) == text
+    assert not has_contact(text)
 
 
 def test_form_values_and_lead_fields_are_hidden_entirely() -> None:

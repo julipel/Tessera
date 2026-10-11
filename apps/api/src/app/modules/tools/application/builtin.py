@@ -15,6 +15,7 @@ from typing import Any
 import structlog
 
 from app.contracts import AgentConfig, ScenarioConfig, SlotDefinition
+from app.modules.observability.kernel import has_contact
 from app.modules.tools.application.catalog import (
     GET_ENTITY,
     SEARCH_CATALOG,
@@ -48,11 +49,17 @@ _DESCRIPTION = (
 )
 _FACTS_DESCRIPTION = (
     "Короткие новые факты о пользователе и запросе вне слотов. Только то, чего ещё нет "
-    "в состоянии диалога: не пересказывай известные факты и не повторяй слоты и поля заявки."
+    "в состоянии диалога: не пересказывай известные факты и не повторяй слоты и поля заявки. "
+    "Не упоминай имя и контакты клиента (пиши «клиент») и не записывай заявку и её поля — "
+    "они хранятся в заявке."
 )
 _FORGET_FACTS_DESCRIPTION = (
     "Факты из состояния диалога (дословно), которые устарели или уточнились. Чтобы уточнить "
     "факт, передай новую формулировку в facts, а прежнюю — сюда."
+)
+_CONTACTS_DROPPED = (
+    "Записано в состояние диалога, кроме фактов с контактами: контакты клиента — только "
+    "в форме заявки."
 )
 _SCENARIO_DESCRIPTION = (
     "Сценарий диалога: отметь, как только понял задачу клиента, и смени, если задача "
@@ -163,6 +170,12 @@ def _dialog_state_handler(scenarios: Sequence[ScenarioConfig]) -> ToolHandler:
         }
         if "scenario" in arguments:
             patch["active_scenario"] = arguments["scenario"]
+        # Контакты клиента в состояние диалога не пишем: оно уходит в промпт каждого хода
+        # и хранится в диалоге, а контакты нужны только в заявке (P7-07b, ADR-0032).
+        facts = patch.get("facts") or []
+        if any(has_contact(fact) for fact in facts):
+            patch["facts"] = [fact for fact in facts if not has_contact(fact)]
+            return ToolResult(content=_CONTACTS_DROPPED, state_patch=patch)
         return ToolResult(content="Записано в состояние диалога.", state_patch=patch)
 
     return update_dialog_state

@@ -14,6 +14,7 @@ turns:
       values: { name: "Анна", contact: "@anna_test", time: "будни после 18", comment: "кислоты и сыворотки" }
     expect:
       # ADR-0021: вызов create_lead на этом ходе не создаёт заявку — реестр отдаёт confirm.
+      facts_not_contain: ["Анна", "anna_test"]  # поля заявки — не в facts (P7-07b)
       components: [confirm]
       judge: "Перед созданием заявки показывает подтверждение (кнопки подтверждения — компонент confirm; вызов create_lead на этом ходе только готовит заявку и не создаёт её)"
   - input:
@@ -21,5 +22,6 @@ turns:
       action_id: confirm
       payload: {}
     expect:
+      facts_not_contain: ["Анна", "anna_test"]  # поля заявки — не в facts (P7-07b)
       tools_called: [create_lead]
       judge: "Подтверждает, что заявка создана, говорит, чего ожидать дальше (по базе знаний), не выдумывает сроки"

@@ -1,6 +1,7 @@
 """Типы observability без фреймворков — для domain-слоёв других модулей (ADR-0008)."""
 
 from app.modules.observability.domain.events import AgentEventEntry
+from app.modules.observability.domain.pii import has_contact
 from app.modules.observability.domain.tracing import (
     GenerationInfo,
     GenerationTrace,
@@ -18,4 +19,5 @@ __all__ = [
     "Tracer",
     "TurnTrace",
     "TurnTraceInfo",
+    "has_contact",
 ]

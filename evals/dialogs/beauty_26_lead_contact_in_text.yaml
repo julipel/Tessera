@@ -1,0 +1,17 @@
+id: beauty_26_lead_contact_in_text
+tenant: demo-beauty
+scenario: skincare_selection
+tags: [lead, tools, state]
+# P7-07b: имя и телефон клиент пишет текстом в чат — в facts их нет (контакты только в заявке).
+turns:
+  - user: "Хочу консультацию косметолога, перезвоните мне, пожалуйста. Меня зовут Юлия, телефон +7 912 345-67-89, удобно вечером"
+    expect:
+      facts_not_contain: ["Юлия", "9123456789"]
+      judge: "Предлагает оформить заявку на консультацию: показывает форму или сразу готовит заявку с подтверждением; не выдумывает сроки звонка"
+  - input:
+      type: action
+      action_id: confirm
+      payload: {}
+    expect:
+      tools_called: [create_lead]
+      facts_not_contain: ["Юлия", "9123456789"]

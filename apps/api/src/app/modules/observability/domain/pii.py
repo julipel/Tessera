@@ -5,7 +5,8 @@ ADR-0032).
 значения отправленных форм (`values`), полей заявки (`fields`) и факты о клиенте (`facts`:
 аргументы `update_dialog_state` и состояние диалога в Runtime-слое промпта) целиком: имена
 и адреса шаблонами не поймать. Имена в свободном тексте сообщений не маскируются — известное
-ограничение.
+ограничение. `has_contact` — те же шаблоны для проверки факта перед записью в состояние
+диалога (P7-07b).
 """
 
 import json
@@ -44,6 +45,11 @@ def mask_pii(data: Any) -> Any:
     return data
 
 
+def has_contact(text: str) -> bool:
+    """Есть ли в строке e-mail, телефон, номер карты или Telegram-ник (шаблоны `mask_pii`)."""
+    return _mask_contacts(text) != text
+
+
 def _hide_values(value: Any) -> Any:
     if isinstance(value, dict):
         return dict.fromkeys(value, HIDDEN)
@@ -65,6 +71,10 @@ def _mask_text(text: str) -> str:
                 return json.dumps(mask_pii(parsed), ensure_ascii=False)
     text = _hide_facts(text)
     text = _FORM_SUBMIT.sub(_form_submit, text)
+    return _mask_contacts(text)
+
+
+def _mask_contacts(text: str) -> str:
     text = _EMAIL.sub("[email]", text)
     text = _HANDLE.sub("[handle]", text)
     return _DIGITS.sub(_digits, text)

@@ -174,6 +174,20 @@ async def test_valid_arguments_become_state_patch() -> None:
     assert result.state_patch == arguments
 
 
+async def test_facts_with_contacts_are_not_written() -> None:
+    # P7-07b: контакты — только в заявке; слоты и остальные факты записываются.
+    result = await execute(
+        {
+            "slots": {"skin_type": "сухая"},
+            "facts": ["Просит перезвонить на +7 912 345-67-89", "спешит", "пишите anna@mail.ru"],
+        }
+    )
+
+    assert result.ok
+    assert result.state_patch == {"slots": {"skin_type": "сухая"}, "facts": ["спешит"]}
+    assert "контакт" in str(result.content)
+
+
 @pytest.mark.parametrize(
     "arguments",
     [

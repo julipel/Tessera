@@ -103,6 +103,17 @@ def _max_facts(expected: int, outcome: TurnOutcome) -> list[str]:
     return [f"фактов в состоянии {count} > {expected}"] if count > expected else []
 
 
+def _facts_not_contain(expected: list[str], outcome: TurnOutcome) -> list[str]:
+    """Без регистра, пробелов и знаков: «9123456789» находит и «+7 912 345-67-89»."""
+    facts = [_letters_and_digits(fact) for fact in outcome.facts]
+    found = [s for s in expected if any(_letters_and_digits(s) in fact for fact in facts)]
+    return [f"есть в фактах: {', '.join(map(repr, found))}"] if found else []
+
+
+def _letters_and_digits(text: str) -> str:
+    return "".join(c for c in text.casefold() if c.isalnum())
+
+
 # Порог доли букв алфавита языка: русские названия товаров в английском ответе (их не
 # переводят) под него укладываются, ответ целиком на другом языке — нет.
 _SCRIPT_SHARE = 0.6
@@ -138,6 +149,7 @@ _CHECKS: dict[str, Callable[[Any, TurnOutcome], list[str]]] = {
     "components": _components,
     "state_contains": _state_contains,
     "max_facts": _max_facts,
+    "facts_not_contain": _facts_not_contain,
     "must_contain": _must_contain,
     "must_not_contain": _must_not_contain,
     "reply_language": _reply_language,

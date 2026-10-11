@@ -91,7 +91,24 @@ def test_all_reference_dialogs_load() -> None:
     dialogs = load_dialogs()
 
     assert len(dialogs) >= 15
-    assert all(d.tenant == "demo-beauty" for d in dialogs)
+    assert {d.tenant for d in dialogs} == {"demo-beauty", "demo-garden"}
+
+
+@pytest.mark.parametrize("dialog", load_dialogs(), ids=lambda d: d.id)
+def test_reference_dialog_matches_tenant_config(dialog: Dialog) -> None:
+    """Сценарий, слоты, инструменты и формы эталона есть в конфиге его тенанта: опечатка
+    в эталоне иначе всплывёт только провалом живого прогона."""
+    config = TenantConfigs().get(dialog.tenant)
+    scenarios = {s["key"]: s for s in config["prompt"].get("scenarios", [])}
+    slots = {name for s in scenarios.values() for name in s.get("slots", {})}
+    tools = set(config["tools"]["builtin"])
+
+    assert dialog.scenario is None or dialog.scenario in scenarios
+    for turn in dialog.turns:
+        assert set(turn.expect.state_contains) <= slots
+        assert set(turn.expect.tools_called) | set(turn.expect.tools_not_called) <= tools
+        if turn.input is not None and turn.input.root.type == "form_submit":
+            assert turn.input.root.form_id in config.get("forms", {})
 
 
 def test_turn_needs_exactly_one_of_user_and_input() -> None:

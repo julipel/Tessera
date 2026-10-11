@@ -4,11 +4,16 @@
 реплики пользователя через агента и проверяет ожидания на каждом ходе. Отчёты — в `reports/`
 (в .gitignore).
 
+Тенанты: `beauty_*` — `demo-beauty` (пилот, docs/pilot.md), `garden_*` — `demo-garden` (садовый
+центр, P8-05). Базовые линии P6-03 — по `beauty_*`: сравнивайте прогоны с одинаковым фильтром
+(`make eval f=beauty`), иначе `make eval-diff` покажет garden как «Новое».
+
 ## Запуск
 
 ```bash
 make eval                 # все диалоги
 make eval f=beauty_14     # подстрока id или тег (f=lead)
+make eval f=garden        # диалоги одного тенанта — по префиксу id (beauty_, garden_)
 cd apps/api && uv run python -m evals.run --concurrency 1 -v   # флаги: --help
 ```
 

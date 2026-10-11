@@ -1,0 +1,18 @@
+id: garden_08_en_houseplant
+tenant: demo-garden
+scenario: plant_selection
+locale: en-US
+tags: [language, plants, catalog]
+turns:
+  - user: "I need a plant for a dark office corner that survives if I forget to water it"
+    expect:
+      tools_called: [search_catalog]
+      components: [product_carousel]
+      state_contains: { placement: indoor }
+      reply_language: en
+      judge: "Отвечает по-английски (названия из каталога могут остаться по-русски); показывает теневыносливые комнатные растения с редким поливом (замиокулькас, сансевиерия и т.п.) и объясняет выбор по атрибутам каталога"
+  - user: "How often should I water the first one?"
+    expect:
+      clarifies: false
+      reply_language: en
+      judge: "Отвечает по-английски по данным каталога или базы знаний о поливе этого растения; не переспрашивает, о каком растении речь"

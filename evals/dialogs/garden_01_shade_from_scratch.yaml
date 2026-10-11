@@ -1,0 +1,16 @@
+id: garden_01_shade_from_scratch
+tenant: demo-garden
+scenario: plant_selection
+tags: [plants, clarification]
+turns:
+  - user: "Что можно посадить у забора?"
+    expect:
+      clarifies: true
+      max_questions: 1
+      tools_not_called: [show_entities]
+  - user: "Это северная сторона, солнца почти нет. Дача в Подмосковье"
+    expect:
+      tools_called: [search_catalog]
+      components: [product_carousel]
+      state_contains: { placement: garden, light: shade }
+      judge: "Показывает тенелюбивые садовые растения, зимующие в Подмосковье (зона не больше 4); объясняет выбор по атрибутам из каталога (например, освещение, зона зимостойкости, высота), а не общими словами"

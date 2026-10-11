@@ -1,0 +1,25 @@
+id: garden_06_lead_landscape
+tenant: demo-garden
+scenario: landscape_visit
+tags: [lead, tools]
+turns:
+  - user: "Купили участок 10 соток, там пустое поле. Хочу, чтобы кто-то приехал и помог всё спланировать"
+    expect:
+      tools_called: [show_form]
+      components: [form]
+      judge: "Кратко рассказывает о выезде ландшафтного дизайнера по базе знаний (стоимость, что входит) и предлагает заполнить форму; не выдумывает цен"
+  - input:
+      type: form_submit
+      form_id: landscape_visit
+      values: { name: "Олег", phone: "+79990001122", location: "Истра", plot_size: "6_15", comment: "газон и живая изгородь" }
+    expect:
+      # ADR-0021: вызов create_lead на этом ходе не создаёт заявку — реестр отдаёт confirm.
+      components: [confirm]
+      judge: "Перед созданием заявки показывает подтверждение (кнопки подтверждения — компонент confirm; вызов create_lead на этом ходе только готовит заявку и не создаёт её)"
+  - input:
+      type: action
+      action_id: confirm
+      payload: {}
+    expect:
+      tools_called: [create_lead]
+      judge: "Подтверждает, что заявка создана, и говорит, что менеджер перезвонит в течение рабочего дня (по базе знаний); не выдумывает дату выезда"

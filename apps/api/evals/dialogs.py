@@ -30,6 +30,7 @@ class Expect(BaseModel):
     tools_not_called: list[str] = Field(default_factory=list)
     components: list[str] = Field(default_factory=list)
     state_contains: dict[str, Any] = Field(default_factory=dict)
+    max_facts: int | None = Field(default=None, ge=0)
     must_contain: list[str] = Field(default_factory=list)
     must_not_contain: list[str] = Field(default_factory=list)
     reply_language: Literal["ru", "en", "sv"] | None = None

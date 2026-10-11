@@ -46,6 +46,14 @@ _DESCRIPTION = (
     "что передаёшь в scenario. Чтобы стереть слот, передай null. Вызывай "
     "в одном шаге с другими инструментами (поиском, показом), а не отдельным шагом."
 )
+_FACTS_DESCRIPTION = (
+    "Короткие новые факты о пользователе и запросе вне слотов. Только то, чего ещё нет "
+    "в состоянии диалога: не пересказывай известные факты и не повторяй слоты и поля заявки."
+)
+_FORGET_FACTS_DESCRIPTION = (
+    "Факты из состояния диалога (дословно), которые устарели или уточнились. Чтобы уточнить "
+    "факт, передай новую формулировку в facts, а прежнюю — сюда."
+)
 _SCENARIO_DESCRIPTION = (
     "Сценарий диалога: отметь, как только понял задачу клиента, и смени, если задача "
     "сменилась. null — задача не подходит ни под один сценарий."
@@ -119,7 +127,12 @@ def update_dialog_state_tool(scenarios: Iterable[ScenarioConfig]) -> ToolDefinit
         "facts": {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
-            "description": "Короткие факты о пользователе и запросе.",
+            "description": _FACTS_DESCRIPTION,
+        },
+        "forget_facts": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "description": _FORGET_FACTS_DESCRIPTION,
         },
     }
     if scenarios:
@@ -145,7 +158,9 @@ def _dialog_state_handler(scenarios: Sequence[ScenarioConfig]) -> ToolHandler:
         scenario = arguments.get("scenario", ctx.active_scenario)
         if problem := _foreign_slots(arguments.get("slots") or {}, scenario, declared):
             return ToolResult(error=ToolError("validation_error", problem, retryable=False))
-        patch = {key: arguments[key] for key in ("slots", "facts") if key in arguments}
+        patch = {
+            key: arguments[key] for key in ("slots", "facts", "forget_facts") if key in arguments
+        }
         if "scenario" in arguments:
             patch["active_scenario"] = arguments["scenario"]
         return ToolResult(content="Записано в состояние диалога.", state_patch=patch)

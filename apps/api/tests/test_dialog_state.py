@@ -1,5 +1,7 @@
-"""DialogState (P2-09, P6-05): слияние патчей, слоты по сценариям, JSON для хранения и промпта."""
+"""DialogState (P2-09, P6-05, P6-06): слияние патчей, слоты по сценариям, замена фактов,
+JSON для хранения и промпта."""
 
+from app.modules.memory.domain.dialog_state import MAX_FACTS
 from app.modules.memory.public import DialogState, PendingConfirmation
 
 
@@ -26,6 +28,31 @@ def test_apply_merges_slots_of_active_scenario_and_appends_unique_lists() -> Non
         active_scenario="gift",
     )
     assert state.slots == {"gift": {"budget": 3000, "relation": "сестра"}}  # исходное то же
+
+
+def test_forget_facts_replaces_refined_fact() -> None:
+    # Уточнённый факт — новой строкой в facts, прежняя — в forget_facts (ADR-0039).
+    state = DialogState(facts=("Ищет унисекс-аромат; не любит сладкие.", "аллергия"))
+
+    updated = state.apply(
+        {
+            "forget_facts": ["Ищет унисекс-аромат; не любит сладкие.", "такого нет"],
+            "facts": ["Ищет унисекс-аромат на осень; не любит сладкие ароматы."],
+        }
+    )
+
+    assert updated.facts == ("аллергия", "Ищет унисекс-аромат на осень; не любит сладкие ароматы.")
+
+
+def test_facts_over_limit_drop_oldest() -> None:
+    state = DialogState(facts=tuple(f"факт {i}" for i in range(MAX_FACTS)))
+
+    updated = state.apply({"facts": ["новый"]})
+
+    assert len(updated.facts) == MAX_FACTS
+    assert updated.facts[0] == "факт 1" and updated.facts[-1] == "новый"
+    restored = DialogState.from_dict({"facts": [f"f{i}" for i in range(MAX_FACTS + 5)]})
+    assert restored.facts == tuple(f"f{i}" for i in range(5, MAX_FACTS + 5))
 
 
 def test_slots_go_to_scenario_of_patch_and_previous_scenario_keeps_its_own() -> None:

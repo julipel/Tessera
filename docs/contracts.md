@@ -225,12 +225,15 @@ class ToolError(BaseModel):
 `state_patch` — частичное обновление DialogState (architecture.md §7):
 ```json
 { "slots": { "budget": 3000, "skin_type": null }, "facts": ["аллергия на отдушки"],
+  "forget_facts": ["аллергия"],
   "shown_entities": ["e_1"], "active_scenario": "skincare",
   "pending_confirmation": { "confirm_id": "cf_1", "tool": "create_lead", "arguments": {} } }
 ```
 Все ключи необязательны. `slots` сливаются со слотами сценария патча (`active_scenario` патча,
 иначе текущего; без сценария не пишутся; хранятся по сценариям, ADR-0026), `null` удаляет слот;
-`facts` и `shown_entities` дописываются без повторов; `active_scenario` и
+`forget_facts` убирает факты с точно таким текстом (уточнённый факт — новая строка в `facts`,
+прежняя — в `forget_facts`, ADR-0039), затем `facts` и `shown_entities` дописываются без
+повторов; фактов в состоянии не больше 20 (старые отбрасываются); `active_scenario` и
 `pending_confirmation` заменяются (`null` снимает ожидание; ставит его только Registry). Патчи
 неуспешных вызовов не применяются. Аргументы `update_dialog_state` — по слотам сценариев
 AgentConfig (лишний слот или неверный тип — `validation_error`); слот с одним именем и разными
@@ -246,7 +249,7 @@ AgentConfig (лишний слот или неверный тип — `validatio
 | `search_catalog(query?, filters?, sort?, limit?)` | структурный поиск Entity: фильтры по полям и `filterable_attributes`, `query` — полнотекстовый (ADR-0016) |
 | `get_entity(entity_id)` | детали сущности; неизвестный id — `not_found` |
 | `show_entities(entity_ids, layout: "cards" \| "carousel" \| "comparison", title?)` | UI-компоненты по id из БД (ADR-0004) |
-| `update_dialog_state(slots?, facts?, scenario?)` | запись собранной информации и выбор сценария |
+| `update_dialog_state(slots?, facts?, forget_facts?, scenario?)` | запись собранной информации и выбор сценария |
 | `suggest_replies(options)` | 1–4 быстрых ответа (≤ 40 символов) от лица пользователя → SSE `suggestions` (ADR-0020) |
 | `show_form(form_key)` | компонент `form` из `forms` конфига тенанта |
 | `create_lead(form_key, fields)` | заявка по полям формы (side_effect, requires_confirmation, ADR-0021); поля — строки, проверяются по форме |

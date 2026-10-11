@@ -223,11 +223,13 @@ class DialogRunner:
             conversation.state = collector.state
         conversation.components.extend(collector.components)
         conversation.add(MessageRole.ASSISTANT, text)
+        state = DialogState.from_dict(conversation.state)
         result.outcome = TurnOutcome(
             text=text,
             tools_called=tuple(collector.tools),
             components=tuple(c.get("type", "?") for c in collector.components),
-            slots=dict(DialogState.from_dict(conversation.state).active_slots),
+            slots=dict(state.active_slots),
+            facts=state.facts,
             component_data=tuple(collector.components),
         )
         result.finish = collector.finish

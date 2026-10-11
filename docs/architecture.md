@@ -164,7 +164,7 @@ async def run_turn(ctx: TurnContext) -> AsyncIterator[AgentEvent]:
   в процессе API со своей сессией БД, одна на диалог (`chat.SummaryScheduler`, ADR-0024);
   ошибка сводки на ход не влияет, потерянную при рестарте задачу ставит следующий ход.
 - **Состояние (DialogState)** — JSON: слоты по сценариям (заданы схемой сценария в AgentConfig,
-  напр. budget, size, purpose; `{сценарий: {слот: значение}}`, ADR-0026), `shown_entities` (id показанных товаров), `facts` (что пользователь сообщил),
+  напр. budget, size, purpose; `{сценарий: {слот: значение}}`, ADR-0026), `shown_entities` (id показанных товаров), `facts` (что пользователь сообщил; уточнённый факт заменяется через `forget_facts`, не больше 20, ADR-0039),
   `active_scenario`, `pending_confirmation` (вызов, ждущий подтверждения, ADR-0021; в промпт
   не попадает). Обновляется инструментом `update_dialog_state` и результатами инструментов
   (`state_patch`, формат — contracts.md §4). Передаётся модели в Runtime-слое промпта — поэтому

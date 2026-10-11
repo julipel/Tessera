@@ -29,13 +29,14 @@ class CheckResult:
 @dataclass(frozen=True, slots=True)
 class TurnOutcome:
     """Что агент сделал за ход: текст ответа, имена вызванных инструментов и типы
-    UI-компонентов (в порядке появления), слоты DialogState после хода. `component_data` —
+    UI-компонентов (в порядке появления), слоты и факты DialogState после хода. `component_data` —
     сами компоненты (для судьи: цены и строки таблиц модель в тексте не пишет, ADR-0004)."""
 
     text: str = ""
     tools_called: tuple[str, ...] = ()
     components: tuple[str, ...] = ()
     slots: dict[str, Any] = field(default_factory=dict)
+    facts: tuple[str, ...] = ()
     component_data: tuple[dict[str, Any], ...] = ()
 
 
@@ -97,6 +98,11 @@ def _state_contains(expected: dict[str, Any], outcome: TurnOutcome) -> list[str]
     return problems
 
 
+def _max_facts(expected: int, outcome: TurnOutcome) -> list[str]:
+    count = len(outcome.facts)
+    return [f"фактов в состоянии {count} > {expected}"] if count > expected else []
+
+
 # Порог доли букв алфавита языка: русские названия товаров в английском ответе (их не
 # переводят) под него укладываются, ответ целиком на другом языке — нет.
 _SCRIPT_SHARE = 0.6
@@ -131,6 +137,7 @@ _CHECKS: dict[str, Callable[[Any, TurnOutcome], list[str]]] = {
     "tools_not_called": _tools_not_called,
     "components": _components,
     "state_contains": _state_contains,
+    "max_facts": _max_facts,
     "must_contain": _must_contain,
     "must_not_contain": _must_not_contain,
     "reply_language": _reply_language,

@@ -9,6 +9,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+# Больше фактов в состоянии не держим: самые старые отбрасываются (Runtime-слой промпта
+# не растёт без конца, ADR-0039).
+MAX_FACTS = 20
+
 
 @dataclass(frozen=True, slots=True)
 class PendingConfirmation:
@@ -32,9 +36,9 @@ class PendingConfirmation:
 @dataclass(frozen=True, slots=True)
 class DialogState:
     """`slots` — значения слотов по сценариям (`{сценарий: {слот: значение}}`, ADR-0026);
-    `facts` — что пользователь сообщил вне слотов; `shown_entities` — id уже показанных
-    сущностей; `active_scenario` — ключ сценария; `pending_confirmation` — вызов, ждущий
-    подтверждения пользователя."""
+    `facts` — что пользователь сообщил вне слотов (не больше `MAX_FACTS`); `shown_entities` —
+    id уже показанных сущностей; `active_scenario` — ключ сценария; `pending_confirmation` —
+    вызов, ждущий подтверждения пользователя."""
 
     slots: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     facts: tuple[str, ...] = ()
@@ -45,13 +49,17 @@ class DialogState:
     def apply(self, patch: Mapping[str, Any]) -> "DialogState":
         """Новое состояние с патчем: слоты патча (плоские) сливаются со слотами сценария
         патча — `active_scenario` патча, если он есть, иначе текущего; без сценария слоты
-        не записываются (`null` удаляет слот). Факты и показанные сущности дописываются без
-        повторов, `active_scenario` и `pending_confirmation` заменяются (`null`
-        в `pending_confirmation` снимает ожидание). Неизвестные ключи патча игнорируются."""
+        не записываются (`null` удаляет слот). Факты из `forget_facts` (точный текст)
+        убираются, затем факты и показанные сущности дописываются без повторов; сверх
+        `MAX_FACTS` отбрасываются самые старые факты (ADR-0039). `active_scenario`
+        и `pending_confirmation` заменяются (`null` в `pending_confirmation` снимает
+        ожидание). Неизвестные ключи патча игнорируются."""
         active = patch.get("active_scenario", self.active_scenario)
         return DialogState(
             slots=_merge_slots(self.slots, active, patch.get("slots") or {}),
-            facts=_append_unique(self.facts, patch.get("facts")),
+            facts=_append_unique(
+                _without(self.facts, patch.get("forget_facts")), patch.get("facts")
+            )[-MAX_FACTS:],
             shown_entities=_append_unique(self.shown_entities, patch.get("shown_entities")),
             active_scenario=active,
             pending_confirmation=_pending(patch, self.pending_confirmation),
@@ -135,6 +143,12 @@ def _pending(
         return current
     value = patch["pending_confirmation"]
     return None if value is None else PendingConfirmation.from_dict(value)
+
+
+def _without(current: tuple[str, ...], forget: Sequence[Any] | None) -> tuple[str, ...]:
+    if not forget:
+        return current
+    return tuple(item for item in current if item not in forget)
 
 
 def _append_unique(current: tuple[str, ...], new: Sequence[Any] | None) -> tuple[str, ...]:

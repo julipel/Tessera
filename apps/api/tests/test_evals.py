@@ -153,6 +153,7 @@ def test_checks_pass_on_matching_outcome() -> None:
             "tools_not_called": ["create_lead"],
             "components": ["product_carousel"],
             "state_contains": {"skin_type": "dry", "concerns": ["dullness"], "budget": 3000},
+            "max_facts": 1,
             "must_contain": ["КРЕМ"],
             "must_not_contain": ["не могу помочь"],
         }
@@ -162,6 +163,7 @@ def test_checks_pass_on_matching_outcome() -> None:
         tools_called=("update_dialog_state", "search_catalog"),
         components=("product_carousel",),
         slots={"skin_type": "dry", "concerns": ["dullness", "acne"], "budget": 3000.0},
+        facts=("спешит",),
     )
 
     assert set(statuses(check_turn(expect, outcome)).values()) == {CheckStatus.PASSED}
@@ -174,6 +176,7 @@ def test_checks_fail_with_details() -> None:
             "tools_not_called": ["create_lead"],
             "components": ["form"],
             "state_contains": {"skin_type": "dry", "concerns": ["dullness"], "budget": 1},
+            "max_facts": 1,
             "must_contain": ["крем"],
             "must_not_contain": ["Скидка"],
         }
@@ -182,6 +185,7 @@ def test_checks_fail_with_details() -> None:
         text="Скидка 50%!",
         tools_called=("create_lead",),
         slots={"skin_type": "oily", "concerns": "dullness"},
+        facts=("ищет унисекс", "ищет унисекс на осень"),
     )
 
     results = {r.name: r for r in check_turn(expect, outcome)}
@@ -194,6 +198,7 @@ def test_checks_fail_with_details() -> None:
         "skin_type: ожидалось 'dry', есть 'oily'; "
         "concerns: ожидалось ['dullness'], есть 'dullness'; нет слота budget"
     )
+    assert results["max_facts"].detail == "фактов в состоянии 2 > 1"
     assert results["must_contain"].detail == "нет в ответе: 'крем'"
     assert results["must_not_contain"].detail == "есть в ответе: 'Скидка'"
 

@@ -170,6 +170,7 @@ def _turn_json(turn: TurnResult) -> dict[str, Any]:
         "tools_called": list(turn.outcome.tools_called),
         "components": list(turn.outcome.components),
         "slots": turn.outcome.slots,
+        "facts": list(turn.outcome.facts),
         "input_tokens": turn.input_tokens,
         "output_tokens": turn.output_tokens,
         "judge_input_tokens": turn.judge_input_tokens,
@@ -207,6 +208,7 @@ def _render_turn(turn: TurnResult) -> list[str]:
         f"Инструменты: {', '.join(outcome.tools_called) or '—'} · "
         f"компоненты: {', '.join(outcome.components) or '—'} · "
         f"слоты: `{json.dumps(outcome.slots, ensure_ascii=False)}` · "
+        f"факты: `{json.dumps(list(outcome.facts), ensure_ascii=False)}` · "
         f"{turn.finish or '—'}, {turn.duration_ms} мс"
     )
     if turn.tool_steps:

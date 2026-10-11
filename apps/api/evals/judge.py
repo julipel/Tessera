@@ -25,7 +25,7 @@ from evals.checks import JUDGE_CHECKS, CheckResult, CheckStatus, TurnOutcome
 from evals.dialogs import Expect
 
 # Меняется вместе с JUDGE_SYSTEM: прогоны с разными версиями судьи сравнивать напрямую нельзя.
-JUDGE_PROMPT_VERSION = "3"
+JUDGE_PROMPT_VERSION = "4"
 
 JUDGE_SYSTEM = """\
 Ты — строгий и беспристрастный оценщик ответов AI-консультанта интернет-магазина.
@@ -146,6 +146,7 @@ def render_task(
         f"Показанные UI-компоненты: {', '.join(outcome.components) or 'нет'}",
         *_describe_components(outcome.component_data),
         f"Сохранённые сведения о запросе: {outcome.slots or 'нет'}",
+        f"Сохранённые факты о клиенте: {list(outcome.facts) or 'нет'}",
         "",
         "## Рубрика",
         "",

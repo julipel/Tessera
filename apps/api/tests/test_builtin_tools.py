@@ -165,6 +165,7 @@ async def test_valid_arguments_become_state_patch() -> None:
     arguments = {
         "slots": {"skin_type": "сухая", "concerns": ["акне"], "budget": None},
         "facts": ["аллергия на отдушки"],
+        "forget_facts": ["аллергия"],
     }
 
     result = await execute(arguments)
@@ -181,6 +182,7 @@ async def test_valid_arguments_become_state_patch() -> None:
         {"slots": {"concerns": ["морщины"]}},  # элемент массива вне enum
         {"slots": {"is_surprise": "да"}},  # неверный тип
         {"facts": [""]},
+        {"forget_facts": [""]},
         {"scenario": "support"},  # сценария нет в конфиге
         {"active_scenario": "gift"},  # сценарий выбирается аргументом scenario
     ],

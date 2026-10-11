@@ -55,7 +55,8 @@ class ActiveConfig:
 class ChatMessage:
     """`content` — плоский текст для контекста модели; `input` — только у user;
     `blocks` — только у assistant, в порядке первого появления block_id в стриме;
-    `error` — `{code, message, retryable}` у неудачного ответа (как SSE-событие `error`)."""
+    `error` — `{code, message, retryable}` у неудачного ответа (как SSE-событие `error`);
+    `replaced_by` — id ответа, заменившего этот при повторе (ADR-0023)."""
 
     id: UUID
     tenant_id: TenantId
@@ -68,6 +69,7 @@ class ChatMessage:
     client_message_id: UUID | None
     created_at: datetime
     error: dict[str, Any] | None = None
+    replaced_by: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

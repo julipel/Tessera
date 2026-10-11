@@ -5,7 +5,12 @@
 """
 
 from app.modules.access.public import AdminMembershipRecord, AdminSessionRecord, AdminUserRecord
-from app.modules.chat.public import ConversationRecord, MessageRecord, ToolCallRecord
+from app.modules.chat.public import (
+    ConversationRecord,
+    MessageRatingRecord,
+    MessageRecord,
+    ToolCallRecord,
+)
 from app.modules.knowledge.public import (
     ChunkRecord,
     DocumentRecord,
@@ -36,6 +41,7 @@ _registered = (
     AdminUserRecord,
     AdminMembershipRecord,
     AdminSessionRecord,
+    MessageRatingRecord,
 )
 
 __all__ = ["metadata"]

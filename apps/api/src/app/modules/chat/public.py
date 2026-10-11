@@ -3,6 +3,7 @@
 `LoopTurnAgent` и типы запроса хода экспортируются для раннера эвалов (ADR-0011).
 """
 
+from app.modules.chat.api.admin_router import router as admin_router
 from app.modules.chat.api.router import router
 from app.modules.chat.api.summaries import background_summary
 from app.modules.chat.application.summaries import SummaryScheduler
@@ -11,6 +12,7 @@ from app.modules.chat.domain.entities import ChatMessage, MessageRole, MessageSt
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent, builtin_turn_agent
 from app.modules.chat.infrastructure.models import (
     ConversationRecord,
+    MessageRatingRecord,
     MessageRecord,
     ToolCallRecord,
 )
@@ -20,6 +22,7 @@ __all__ = [
     "ChatMessage",
     "ConversationRecord",
     "LoopTurnAgent",
+    "MessageRatingRecord",
     "MessageRecord",
     "MessageRole",
     "MessageStatus",
@@ -28,6 +31,7 @@ __all__ = [
     "ToolCallRecord",
     "TurnRegistry",
     "TurnRequest",
+    "admin_router",
     "background_summary",
     "builtin_turn_agent",
     "router",

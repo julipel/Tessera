@@ -463,6 +463,8 @@ Message(id, conversation_id, tenant_id, role, status, content, input JSONB, bloc
 ToolCall(id, message_id, tenant_id, name, arguments JSONB, result JSONB, error, duration_ms)
 Lead(id, tenant_id, conversation_id, form_key, fields JSONB, created_at)  # create_lead
 AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSONB, ts)
+MessageRating(id, tenant_id, conversation_id, message_id, rating, comment, rated_by,
+              rated_by_email, updated_at)  # оценка ответа сотрудником, одна на сообщение
 AdminUser(id, email, password_hash, is_superadmin, is_active, created_at)  # без tenant_id
 AdminMembership(id, tenant_id, user_id, role, created_at)   # одна роль на тенант
 AdminSession(id, user_id, token_hash, expires_at, created_at)  # без tenant_id, sha256 токена

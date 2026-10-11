@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "admin_conversations.schema.json",
+  "title": "AdminConversationsSchema",
+  "description": "Диалоги в админке (docs/contracts.md §7, ADR-0038). Файл без единого корневого типа — экспортируемые типы в $defs: ConversationList, ConversationSummary, ConversationDetail, ConversationRatings, AdminMessage, AdminToolCall, ToolCallError, MessageRating, RateMessageRequest.",
+  "$defs": {
+    "ConversationRatings": {
+      "type": "object",
+      "description": "Число ответов диалога с оценкой good и bad.",
+      "properties": {
+        "good": { "type": "integer", "minimum": 0 },
+        "bad": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["good", "bad"],
+      "additionalProperties": false
+    },
+    "ConversationSummary": {
+      "type": "object",
+      "description": "Строка списка диалогов. messages — все сообщения, включая заменённые при повторе; preview — начало первого ввода клиента (≤ 200 символов); last_message_at — null, пока сообщений нет.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "last_message_at": { "type": ["string", "null"], "format": "date-time" },
+        "channel": { "type": "string", "enum": ["web"] },
+        "language": { "type": ["string", "null"] },
+        "agent_config_id": { "type": "string", "format": "uuid" },
+        "agent_config_version": { "type": "integer", "minimum": 1 },
+        "messages": { "type": "integer", "minimum": 0 },
+        "preview": { "type": ["string", "null"] },
+        "ratings": { "$ref": "#/$defs/ConversationRatings" }
+      },
+      "required": [
+        "id",
+        "created_at",
+        "last_message_at",
+        "channel",
+        "language",
+        "agent_config_id",
+        "agent_config_version",
+        "messages",
+        "preview",
+        "ratings"
+      ],
+      "additionalProperties": false
+    },
+    "ConversationList": {
+      "type": "object",
+      "description": "Ответ GET /v1/admin/tenants/{tenant_id}/conversations: от новых к старым. next_before — курсор следующей страницы (параметр before), null — страница последняя.",
+      "properties": {
+        "conversations": { "type": "array", "items": { "$ref": "#/$defs/ConversationSummary" } },
+        "next_before": { "type": ["string", "null"] }
+      },
+      "required": ["conversations", "next_before"],
+      "additionalProperties": false
+    },
+    "MessageRating": {
+      "type": "object",
+      "description": "Оценка ответа ассистента сотрудником. rated_by — email автора на момент оценки.",
+      "properties": {
+        "rating": { "type": "string", "enum": ["good", "bad"] },
+        "comment": { "type": ["string", "null"] },
+        "rated_by": { "type": ["string", "null"] },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["rating", "comment", "rated_by", "updated_at"],
+      "additionalProperties": false
+    },
+    "RateMessageRequest": {
+      "type": "object",
+      "description": "Тело PUT …/conversations/{id}/messages/{message_id}/rating. Повторная оценка заменяет прежнюю.",
+      "properties": {
+        "rating": { "type": "string", "enum": ["good", "bad"] },
+        "comment": { "type": ["string", "null"], "maxLength": 2000 }
+      },
+      "required": ["rating"],
+      "additionalProperties": false
+    },
+    "ToolCallError": {
+      "type": "object",
+      "description": "Ошибка вызова инструмента.",
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    },
+    "AdminToolCall": {
+      "type": "object",
+      "description": "Вызов инструмента в ответе. arguments — объект или исходная строка, если модель прислала не JSON-объект; result — результат для модели (null при ошибке); error — {code, message}.",
+      "properties": {
+        "tool_call_id": { "type": "string" },
+        "name": { "type": "string" },
+        "arguments": { "type": ["object", "string"] },
+        "result": { "type": ["object", "string", "null"] },
+        "error": {
+          "anyOf": [{ "$ref": "#/$defs/ToolCallError" }, { "type": "null" }]
+        },
+        "duration_ms": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["tool_call_id", "name", "arguments", "result", "error", "duration_ms"],
+      "additionalProperties": false
+    },
+    "AdminMessage": {
+      "type": "object",
+      "description": "Сообщение диалога в админке: как HistoryMessage, плюс заменённые при повторе ответы (replaced_by — id нового ответа), вызовы инструментов и оценка (только у assistant).",
+      "properties": {
+        "message_id": { "type": "string", "format": "uuid" },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "status": { "type": "string", "enum": ["completed", "interrupted", "failed"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "input": { "$ref": "user_input.schema.json" },
+        "blocks": {
+          "type": "array",
+          "items": { "$ref": "conversations.schema.json#/$defs/MessageBlock" }
+        },
+        "error": { "$ref": "conversations.schema.json#/$defs/MessageError" },
+        "replaced_by": { "type": ["string", "null"], "format": "uuid" },
+        "tool_calls": { "type": "array", "items": { "$ref": "#/$defs/AdminToolCall" } },
+        "rating": {
+          "anyOf": [{ "$ref": "#/$defs/MessageRating" }, { "type": "null" }]
+        }
+      },
+      "required": [
+        "message_id",
+        "role",
+        "status",
+        "created_at",
+        "blocks",
+        "replaced_by",
+        "tool_calls",
+        "rating"
+      ],
+      "additionalProperties": false
+    },
+    "ConversationDetail": {
+      "type": "object",
+      "description": "Ответ GET …/conversations/{id}: диалог, состояние (DialogState), сводка ранней истории и все сообщения по времени. Ход по шагам — журнал GET …/events?conversation_id=…",
+      "properties": {
+        "conversation": { "$ref": "#/$defs/ConversationSummary" },
+        "state": { "type": "object" },
+        "history_summary": { "type": ["string", "null"] },
+        "messages": { "type": "array", "items": { "$ref": "#/$defs/AdminMessage" } }
+      },
+      "required": ["conversation", "state", "history_summary", "messages"],
+      "additionalProperties": false
+    }
+  }
+}

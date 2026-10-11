@@ -22,6 +22,7 @@ from app.modules.chat.public import (
     TurnRegistry,
     background_summary,
 )
+from app.modules.chat.public import admin_router as chat_admin_router
 from app.modules.chat.public import router as chat_router
 from app.modules.knowledge.public import (
     ArqSyncQueue,
@@ -151,6 +152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_router)
     app.include_router(tenants_admin_router)
     app.include_router(knowledge_admin_router)
+    app.include_router(chat_admin_router)
     return app
 
 

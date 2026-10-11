@@ -25,7 +25,7 @@ from app.modules.shared.public import TenantId, TenantRepository
 from app.modules.tenants.public import AgentConfigRepository
 
 
-def _conversation(record: ConversationRecord) -> Conversation:
+def conversation_entity(record: ConversationRecord) -> Conversation:
     return Conversation(
         id=record.id,
         tenant_id=TenantId(record.tenant_id),
@@ -40,7 +40,7 @@ def _conversation(record: ConversationRecord) -> Conversation:
     )
 
 
-def _message(record: MessageRecord) -> ChatMessage:
+def message_entity(record: MessageRecord) -> ChatMessage:
     return ChatMessage(
         id=record.id,
         tenant_id=TenantId(record.tenant_id),
@@ -53,6 +53,7 @@ def _message(record: MessageRecord) -> ChatMessage:
         client_message_id=record.client_message_id,
         created_at=record.created_at,
         error=record.error,
+        replaced_by=record.replaced_by,
     )
 
 
@@ -76,11 +77,11 @@ class ConversationRepository(TenantRepository[ConversationRecord]):
         )
         await self.add(tenant_id, record)
         await self.session.refresh(record)  # created_at задаёт БД
-        return _conversation(record)
+        return conversation_entity(record)
 
     async def find(self, tenant_id: TenantId, conversation_id: UUID) -> Conversation | None:
         record = await self.get(tenant_id, conversation_id)
-        return _conversation(record) if record else None
+        return conversation_entity(record) if record else None
 
     async def update_state(
         self, tenant_id: TenantId, conversation_id: UUID, state: dict[str, Any]
@@ -134,7 +135,7 @@ class MessageRepository(TenantRepository[MessageRecord]):
             )
             .order_by(MessageRecord.created_at, MessageRecord.id)
         )
-        return [_message(r) for r in (await self.session.execute(stmt)).scalars()]
+        return [message_entity(r) for r in (await self.session.execute(stmt)).scalars()]
 
     async def mark_replaced(self, tenant_id: TenantId, message_id: UUID, replaced_by: UUID) -> bool:
         # Условный UPDATE вместо «прочитать, затем записать»: из двух одновременных повторов
@@ -174,14 +175,14 @@ class MessageRepository(TenantRepository[MessageRecord]):
         )
         created = (await self.session.execute(stmt)).scalar_one_or_none()
         if created is not None:
-            return _message(created), True
+            return message_entity(created), True
         existing = await self.session.execute(
             self._scoped(tenant_id).where(
                 MessageRecord.conversation_id == message.conversation_id,
                 MessageRecord.client_message_id == message.client_message_id,
             )
         )
-        return _message(existing.scalar_one()), False
+        return message_entity(existing.scalar_one()), False
 
 
 class ToolCallRepository(TenantRepository[ToolCallRecord]):

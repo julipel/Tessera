@@ -31,3 +31,11 @@ class MessageNotFoundError(NotFoundError):
 class RetryNotAllowedError(DomainError):
     """Ответ нельзя повторить: он не последний в диалоге, не неудачный, ошибка не
     повторяемая или его уже заменил другой повтор (ADR-0023)."""
+
+
+class NotAssistantMessageError(DomainError):
+    """Оценить можно только ответ ассистента (ADR-0038)."""
+
+
+class InvalidCursorError(DomainError):
+    """Курсор страницы списка диалогов не разбирается."""

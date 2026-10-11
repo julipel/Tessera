@@ -19,10 +19,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.modules.chat.domain.entities import Channel, MessageRole, MessageStatus
+from app.modules.chat.domain.review import Rating
 from app.modules.shared.public import TenantScopedBase
 
 
-def _str_enum[E: (Channel, MessageRole, MessageStatus)](enum: type[E], name: str) -> Enum:
+def _str_enum[E: (Channel, MessageRole, MessageStatus, Rating)](enum: type[E], name: str) -> Enum:
     # VARCHAR + CHECK вместо нативного ENUM Postgres: новые значения без ALTER TYPE.
     return Enum(
         enum,
@@ -41,7 +42,11 @@ _CREATED_AT = text("clock_timestamp()")
 
 class ConversationRecord(TenantScopedBase):
     __tablename__ = "conversations"
-    __table_args__ = (Index("ix_conversations_tenant_id_visitor_id", "tenant_id", "visitor_id"),)
+    __table_args__ = (
+        Index("ix_conversations_tenant_id_visitor_id", "tenant_id", "visitor_id"),
+        # Список диалогов админки: от новых к старым (ADR-0038).
+        Index("ix_conversations_tenant_id_created_at_id", "tenant_id", "created_at", "id"),
+    )
 
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE"), index=True
@@ -116,5 +121,35 @@ class ToolCallRecord(TenantScopedBase):
     error: Mapped[dict[str, str] | None] = mapped_column(JSONB)
     duration_ms: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=_CREATED_AT
+    )
+
+
+class MessageRatingRecord(TenantScopedBase):
+    """Оценка ответа ассистента сотрудником (ADR-0038): одна на сообщение."""
+
+    __tablename__ = "message_ratings"
+    __table_args__ = (
+        UniqueConstraint("message_id", name="uq_message_ratings_message_id"),
+        Index("ix_message_ratings_tenant_id_conversation_id", "tenant_id", "conversation_id"),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    # conversation_id дублирует связь через messages: фильтр и счётчики списка без join.
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE")
+    )
+    message_id: Mapped[UUID] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"))
+    rating: Mapped[Rating] = mapped_column(_str_enum(Rating, "rating"))
+    comment: Mapped[str | None] = mapped_column(Text)
+    # Пользователь админки (модуль access) — связь только в БД; email — на момент оценки.
+    rated_by: Mapped[UUID | None] = mapped_column(ForeignKey("admin_users.id", ondelete="SET NULL"))
+    rated_by_email: Mapped[str | None] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=_CREATED_AT
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=_CREATED_AT
     )

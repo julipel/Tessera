@@ -2,6 +2,18 @@
 // Сгенерировано из packages/contracts/schemas — не редактировать, запустить `make contracts`.
 
 /**
+ * Ввод пользователя в POST .../messages: текст, нажатие action-кнопки или отправка формы.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "UserInput".
+ */
+export type UserInput = TextInput | ActionInput | FormSubmitInput;
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "MessageBlock".
+ */
+export type MessageBlock = TextBlock | ComponentBlock;
+/**
  * UI-компонент, отправляемый в чат инструментом бэкенда. Discriminated union по type. Все цены/URL — из данных, не от модели.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -17,18 +29,6 @@ export type Component =
   | ComparisonTable
   | Form
   | Confirm;
-/**
- * Ввод пользователя в POST .../messages: текст, нажатие action-кнопки или отправка формы.
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "UserInput".
- */
-export type UserInput = TextInput | ActionInput | FormSubmitInput;
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "MessageBlock".
- */
-export type MessageBlock = TextBlock | ComponentBlock;
 /**
  * Полный SSE-конверт (Envelope + типизированный data) для каждого значения type. Discriminated union по type.
  *
@@ -223,6 +223,384 @@ export interface AdminMembership {
   tenant_slug: string;
   tenant_name: string;
   role: "viewer" | "editor";
+}
+/**
+ * Число ответов диалога с оценкой good и bad.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ConversationRatings".
+ */
+export interface ConversationRatings {
+  good: number;
+  bad: number;
+}
+/**
+ * Строка списка диалогов. messages — все сообщения, включая заменённые при повторе; preview — начало первого ввода клиента (≤ 200 символов); last_message_at — null, пока сообщений нет.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ConversationSummary".
+ */
+export interface ConversationSummary {
+  id: string;
+  created_at: string;
+  last_message_at: string | null;
+  channel: "web";
+  language: string | null;
+  agent_config_id: string;
+  agent_config_version: number;
+  messages: number;
+  preview: string | null;
+  ratings: ConversationRatings;
+}
+/**
+ * Ответ GET /v1/admin/tenants/{tenant_id}/conversations: от новых к старым. next_before — курсор следующей страницы (параметр before), null — страница последняя.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ConversationList".
+ */
+export interface ConversationList {
+  conversations: ConversationSummary[];
+  next_before: string | null;
+}
+/**
+ * Оценка ответа ассистента сотрудником. rated_by — email автора на момент оценки.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "MessageRating".
+ */
+export interface MessageRating {
+  rating: "good" | "bad";
+  comment: string | null;
+  rated_by: string | null;
+  updated_at: string;
+}
+/**
+ * Тело PUT …/conversations/{id}/messages/{message_id}/rating. Повторная оценка заменяет прежнюю.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "RateMessageRequest".
+ */
+export interface RateMessageRequest {
+  rating: "good" | "bad";
+  comment?: string | null;
+}
+/**
+ * Ошибка вызова инструмента.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ToolCallError".
+ */
+export interface ToolCallError {
+  code: string;
+  message: string;
+}
+/**
+ * Вызов инструмента в ответе. arguments — объект или исходная строка, если модель прислала не JSON-объект; result — результат для модели (null при ошибке); error — {code, message}.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AdminToolCall".
+ */
+export interface AdminToolCall {
+  tool_call_id: string;
+  name: string;
+  arguments: {} | string;
+  result: {} | string | null;
+  error: ToolCallError | null;
+  duration_ms: number;
+}
+/**
+ * Сообщение диалога в админке: как HistoryMessage, плюс заменённые при повторе ответы (replaced_by — id нового ответа), вызовы инструментов и оценка (только у assistant).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "AdminMessage".
+ */
+export interface AdminMessage {
+  message_id: string;
+  role: "user" | "assistant";
+  status: "completed" | "interrupted" | "failed";
+  created_at: string;
+  input?: UserInput;
+  blocks: MessageBlock[];
+  error?: MessageError;
+  replaced_by: string | null;
+  tool_calls: AdminToolCall[];
+  rating: MessageRating | null;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "TextInput".
+ */
+export interface TextInput {
+  type: "text";
+  text: string;
+}
+/**
+ * Нажатие Action-кнопки компонента (см. components.schema.json).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ActionInput".
+ */
+export interface ActionInput {
+  type: "action";
+  action_id: string;
+  /**
+   * Что увидел пользователь (подпись кнопки, при необходимости с названием позиции): показывается в истории и передаётся модели. Нет — вместо подписи action_id.
+   */
+  label?: string;
+  payload?: {};
+}
+/**
+ * Отправка формы (component.type=form). Ключи values соответствуют FormField.name.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FormSubmitInput".
+ */
+export interface FormSubmitInput {
+  type: "form_submit";
+  form_id: string;
+  /**
+   * Что увидел пользователь (заголовок формы): показывается в истории вместо form_id. Модели не передаётся — она получает form_id и values.
+   */
+  label?: string;
+  values: {};
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "TextBlock".
+ */
+export interface TextBlock {
+  type: "text";
+  block_id: string;
+  text: string;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ComponentBlock".
+ */
+export interface ComponentBlock {
+  type: "component";
+  block_id: string;
+  component: Component;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ProductCard".
+ */
+export interface ProductCard {
+  type: "product_card";
+  entity_id: string;
+  title: string;
+  subtitle?: string | null;
+  image_url?: string | null;
+  /**
+   * Нет у позиции цены (услуга, «цена по запросу») — null.
+   */
+  price?: Price | null;
+  badges?: string[];
+  url?: string | null;
+  actions?: Action[];
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "Price".
+ */
+export interface Price {
+  amount: number;
+  /**
+   * ISO 4217, напр. RUB.
+   */
+  currency: string;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "Action".
+ */
+export interface Action {
+  action_id: string;
+  label: string;
+  style?: "primary" | "secondary" | "link";
+  payload?: {};
+  /**
+   * Если задан — кнопка является ссылкой, клик не отправляет input.type=action.
+   */
+  url?: string | null;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ProductCarousel".
+ */
+export interface ProductCarousel {
+  type: "product_carousel";
+  title?: string | null;
+  /**
+   * @minItems 1
+   */
+  items: [ProductCard, ...ProductCard[]];
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "InfoCard".
+ */
+export interface InfoCard {
+  type: "info_card";
+  title: string;
+  body_markdown: string;
+  image_url?: string | null;
+  url?: string | null;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ImageComponent".
+ */
+export interface ImageComponent {
+  type: "image";
+  url: string;
+  alt: string;
+  caption?: string | null;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "LinkList".
+ */
+export interface LinkList {
+  type: "link_list";
+  /**
+   * @minItems 1
+   */
+  items: [LinkListItem, ...LinkListItem[]];
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "LinkListItem".
+ */
+export interface LinkListItem {
+  title: string;
+  url: string;
+  description?: string | null;
+}
+/**
+ * Источники из search_knowledge — объяснимость ответа.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "Sources".
+ */
+export interface Sources {
+  type: "sources";
+  /**
+   * @minItems 1
+   */
+  items: [SourceItem, ...SourceItem[]];
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SourceItem".
+ */
+export interface SourceItem {
+  title: string;
+  url: string;
+  snippet?: string | null;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ComparisonTable".
+ */
+export interface ComparisonTable {
+  type: "comparison_table";
+  /**
+   * @minItems 2
+   */
+  columns: [string, string, ...string[]];
+  /**
+   * @minItems 1
+   */
+  rows: [ComparisonTableRow, ...ComparisonTableRow[]];
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ComparisonTableRow".
+ */
+export interface ComparisonTableRow {
+  label: string;
+  values: string[];
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "Form".
+ */
+export interface Form {
+  type: "form";
+  form_id: string;
+  title: string;
+  /**
+   * @minItems 1
+   */
+  fields: [FormField, ...FormField[]];
+  submit_label?: string;
+}
+/**
+ * Поле формы. kind=select требует options.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FormField".
+ */
+export interface FormField {
+  name: string;
+  label: string;
+  /**
+   * text — короткая строка (в т.ч. телефон/телеграм одним полем, см. пилот beauty); phone/email — со встроенной валидацией на клиенте; textarea — многострочный комментарий; select — выбор из options; date — дата.
+   */
+  kind: "text" | "phone" | "email" | "textarea" | "select" | "date";
+  required?: boolean;
+  options?: FormFieldOption[];
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FormFieldOption".
+ */
+export interface FormFieldOption {
+  label: string;
+  value: string;
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "Confirm".
+ */
+export interface Confirm {
+  type: "confirm";
+  confirm_id: string;
+  text: string;
+  confirm_action: Action;
+  cancel_action?: Action;
+}
+/**
+ * Ошибка хода — данные SSE-события error (events.schema.json ErrorData).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "MessageError".
+ */
+export interface MessageError {
+  code:
+    | "llm_unavailable"
+    | "turn_timeout"
+    | "step_limit"
+    | "invalid_input"
+    | "conversation_not_found"
+    | "rate_limited"
+    | "internal";
+  message: string;
+  retryable: boolean;
+}
+/**
+ * Ответ GET …/conversations/{id}: диалог, состояние (DialogState), сводка ранней истории и все сообщения по времени. Ход по шагам — журнал GET …/events?conversation_id=…
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ConversationDetail".
+ */
+export interface ConversationDetail {
+  conversation: ConversationSummary;
+  state: {};
+  history_summary: string | null;
+  messages: AdminMessage[];
 }
 /**
  * Ответ GET /v1/admin/tenants/{tenant_id}/events: события в порядке ходов (ts) и внутри хода (seq).
@@ -717,30 +1095,6 @@ export interface FormConfig {
   fields: [FormField, ...FormField[]];
 }
 /**
- * Поле формы. kind=select требует options.
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "FormField".
- */
-export interface FormField {
-  name: string;
-  label: string;
-  /**
-   * text — короткая строка (в т.ч. телефон/телеграм одним полем, см. пилот beauty); phone/email — со встроенной валидацией на клиенте; textarea — многострочный комментарий; select — выбор из options; date — дата.
-   */
-  kind: "text" | "phone" | "email" | "textarea" | "select" | "date";
-  required?: boolean;
-  options?: FormFieldOption[];
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "FormFieldOption".
- */
-export interface FormFieldOption {
-  label: string;
-  value: string;
-}
-/**
  * This interface was referenced by `AgentConfig`'s JSON-Schema
  * via the `definition` "KnowledgeConfig".
  *
@@ -870,172 +1224,6 @@ export interface BrandingTokens {
   [k: string]: unknown;
 }
 /**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "ProductCard".
- */
-export interface ProductCard {
-  type: "product_card";
-  entity_id: string;
-  title: string;
-  subtitle?: string | null;
-  image_url?: string | null;
-  /**
-   * Нет у позиции цены (услуга, «цена по запросу») — null.
-   */
-  price?: Price | null;
-  badges?: string[];
-  url?: string | null;
-  actions?: Action[];
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "Price".
- */
-export interface Price {
-  amount: number;
-  /**
-   * ISO 4217, напр. RUB.
-   */
-  currency: string;
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "Action".
- */
-export interface Action {
-  action_id: string;
-  label: string;
-  style?: "primary" | "secondary" | "link";
-  payload?: {};
-  /**
-   * Если задан — кнопка является ссылкой, клик не отправляет input.type=action.
-   */
-  url?: string | null;
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "ProductCarousel".
- */
-export interface ProductCarousel {
-  type: "product_carousel";
-  title?: string | null;
-  /**
-   * @minItems 1
-   */
-  items: [ProductCard, ...ProductCard[]];
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "InfoCard".
- */
-export interface InfoCard {
-  type: "info_card";
-  title: string;
-  body_markdown: string;
-  image_url?: string | null;
-  url?: string | null;
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "ImageComponent".
- */
-export interface ImageComponent {
-  type: "image";
-  url: string;
-  alt: string;
-  caption?: string | null;
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "LinkList".
- */
-export interface LinkList {
-  type: "link_list";
-  /**
-   * @minItems 1
-   */
-  items: [LinkListItem, ...LinkListItem[]];
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "LinkListItem".
- */
-export interface LinkListItem {
-  title: string;
-  url: string;
-  description?: string | null;
-}
-/**
- * Источники из search_knowledge — объяснимость ответа.
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "Sources".
- */
-export interface Sources {
-  type: "sources";
-  /**
-   * @minItems 1
-   */
-  items: [SourceItem, ...SourceItem[]];
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "SourceItem".
- */
-export interface SourceItem {
-  title: string;
-  url: string;
-  snippet?: string | null;
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "ComparisonTable".
- */
-export interface ComparisonTable {
-  type: "comparison_table";
-  /**
-   * @minItems 2
-   */
-  columns: [string, string, ...string[]];
-  /**
-   * @minItems 1
-   */
-  rows: [ComparisonTableRow, ...ComparisonTableRow[]];
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "ComparisonTableRow".
- */
-export interface ComparisonTableRow {
-  label: string;
-  values: string[];
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "Form".
- */
-export interface Form {
-  type: "form";
-  form_id: string;
-  title: string;
-  /**
-   * @minItems 1
-   */
-  fields: [FormField, ...FormField[]];
-  submit_label?: string;
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "Confirm".
- */
-export interface Confirm {
-  type: "confirm";
-  confirm_id: string;
-  text: string;
-  confirm_action: Action;
-  cancel_action?: Action;
-}
-/**
  * Тело POST /v1/conversations. visitor_id генерирует и хранит клиент.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -1069,44 +1257,6 @@ export interface SendMessageRequest {
   input: UserInput;
 }
 /**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "TextInput".
- */
-export interface TextInput {
-  type: "text";
-  text: string;
-}
-/**
- * Нажатие Action-кнопки компонента (см. components.schema.json).
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "ActionInput".
- */
-export interface ActionInput {
-  type: "action";
-  action_id: string;
-  /**
-   * Что увидел пользователь (подпись кнопки, при необходимости с названием позиции): показывается в истории и передаётся модели. Нет — вместо подписи action_id.
-   */
-  label?: string;
-  payload?: {};
-}
-/**
- * Отправка формы (component.type=form). Ключи values соответствуют FormField.name.
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "FormSubmitInput".
- */
-export interface FormSubmitInput {
-  type: "form_submit";
-  form_id: string;
-  /**
-   * Что увидел пользователь (заголовок формы): показывается в истории вместо form_id. Модели не передаётся — она получает form_id и values.
-   */
-  label?: string;
-  values: {};
-}
-/**
  * Ответ GET /v1/conversations/{id}/messages: сообщения в порядке создания.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -1129,46 +1279,10 @@ export interface HistoryMessage {
   created_at: string;
   input?: UserInput;
   blocks: MessageBlock[];
-  error?: MessageError;
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "TextBlock".
- */
-export interface TextBlock {
-  type: "text";
-  block_id: string;
-  text: string;
-}
-/**
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "ComponentBlock".
- */
-export interface ComponentBlock {
-  type: "component";
-  block_id: string;
-  component: Component;
-}
-/**
- * Только у assistant со status=failed: ошибка хода, как в SSE-событии error. retryable — можно повторить (POST .../messages/{message_id}/retry).
- */
-export interface MessageError {
-  code:
-    | "llm_unavailable"
-    | "turn_timeout"
-    | "step_limit"
-    | "invalid_input"
-    | "conversation_not_found"
-    | "rate_limited"
-    | "internal";
-  message: string;
-  retryable: boolean;
+  error?: MessageError1;
 }
 /**
  * Ошибка хода — данные SSE-события error (events.schema.json ErrorData).
- *
- * This interface was referenced by `Contracts`'s JSON-Schema
- * via the `definition` "MessageError".
  */
 export interface MessageError1 {
   code:

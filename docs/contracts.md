@@ -347,7 +347,7 @@ branding:
 HTTP-ответ с `invalid_input` может нести `details: [{loc, message}]` — ошибки по местам ввода
 (`loc` — путь из ключей и индексов, пустой — весь ввод); пока — только AgentConfig в админке.
 
-## 7. API админки (P7-02, P8-01b, P8-02a, P8-03a, P8-03b; ADR-0028, ADR-0036, ADR-0037)
+## 7. API админки (P7-02, P8-01b, P8-02a, P8-03a, P8-03b, P8-04a; ADR-0028, ADR-0036–0038)
 
 ### Вход и сессия
 
@@ -423,6 +423,33 @@ ADR-0017). `documents` — документы без описаний сущно
 finished_at, stats, error}`: `stats` — null до завершения, иначе счётчики `discovered`, `created`,
 `updated`, `unchanged`, `deleted`, `failed`, `incremental` и `errors` (ошибки элементов, ≤ 20);
 `error` — почему синхронизация не удалась целиком.
+
+### Диалоги — роль `viewer`
+
+```
+GET /v1/admin/tenants/{tenant_id}/conversations?before=…&limit=50&rating=good|bad
+  → 200 ConversationList {conversations: ConversationSummary[], next_before}
+       # admin_conversations.schema.json; от новых к старым, limit ≤ 100
+  → 422 invalid_input — неверный курсор before
+GET /v1/admin/tenants/{tenant_id}/conversations/{id}
+  → 200 ConversationDetail {conversation, state, history_summary, messages: AdminMessage[]}
+PUT    …/conversations/{id}/messages/{message_id}/rating  RateMessageRequest {rating, comment?}
+  → 200 MessageRating {rating, comment, rated_by, updated_at}
+  → 422 invalid_input — сообщение клиента (оценивается только ответ ассистента)
+DELETE …/conversations/{id}/messages/{message_id}/rating  → 204 (и если оценки не было)
+```
+
+`ConversationSummary {id, created_at, last_message_at, channel, language, agent_config_id,
+agent_config_version, messages, preview, ratings {good, bad}}`: `messages` — все сообщения,
+включая заменённые повтором; `preview` — первые 200 символов первого ввода клиента;
+`rating` в запросе списка — диалоги, где есть ответ с такой оценкой; `next_before` — курсор
+следующей страницы (null — последняя). `AdminMessage` — как `HistoryMessage` (§1), плюс
+`replaced_by` (id ответа, заменившего этот при повторе, ADR-0023), `tool_calls`
+(`{tool_call_id, name, arguments, result, error, duration_ms}`) и `rating`; `input` и `error`
+опускаются, когда их нет. Оценка — одна на ответ: повторная заменяет прежнюю и её автора
+(`rated_by` — email на момент оценки), пустой комментарий хранится как null (ADR-0038).
+Диалог или сообщение другого тенанта (или сообщение из другого диалога) — 404 `not_found`.
+Ход по шагам — журнал ниже (`conversation_id`), ход ↔ ответ — `turn_finished.message_id`.
 
 ### Журнал хода — роль `viewer`
 

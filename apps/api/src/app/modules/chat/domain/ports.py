@@ -14,6 +14,13 @@ from app.modules.chat.domain.entities import (
     ToolCallEntry,
     TurnRequest,
 )
+from app.modules.chat.domain.review import (
+    ConversationOverview,
+    ConversationReview,
+    MessageRatingEntry,
+    PageCursor,
+    Rating,
+)
 from app.modules.observability.kernel import AgentEventEntry
 from app.modules.shared.kernel import TenantId
 
@@ -132,3 +139,39 @@ class TurnDirectory(Protocol):
     ) -> bool:
         """Передать отмену процессу хода. False — хода нет, он завершён или чужой."""
         ...
+
+
+class ConversationReviewStore(Protocol):
+    """Диалоги для админки (ADR-0038): все запросы ограничены тенантом."""
+
+    async def list_conversations(
+        self,
+        tenant_id: TenantId,
+        *,
+        before: PageCursor | None,
+        limit: int,
+        rating: Rating | None,
+    ) -> list[ConversationOverview]:
+        """От новых к старым, строго раньше `before`; `rating` — есть ответ с такой оценкой."""
+        ...
+
+    async def review(self, tenant_id: TenantId, conversation_id: UUID) -> ConversationReview | None:
+        """Диалог со всеми сообщениями по времени, их вызовами инструментов и оценками."""
+        ...
+
+    async def find_message(
+        self, tenant_id: TenantId, conversation_id: UUID, message_id: UUID
+    ) -> ChatMessage | None: ...
+
+    async def put_rating(
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        message_id: UUID,
+        rating: Rating,
+        comment: str | None,
+        rated_by: UUID,
+        rated_by_email: str,
+    ) -> MessageRatingEntry: ...
+
+    async def delete_rating(self, tenant_id: TenantId, message_id: UUID) -> bool: ...

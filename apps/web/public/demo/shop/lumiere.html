@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lumière — косметика и парфюмерия</title>
+    <link rel="icon" href="/demo/lumiere.svg" />
+    <link rel="stylesheet" href="/demo/shop/shop.css" />
+  </head>
+  <!-- Демо-витрина demo-beauty (P9-00a). Товары — вручную из data/pilot/demo-beauty/catalog. -->
+  <body class="lumiere">
+    <header class="header">
+      <div class="wrap">
+        <a class="brand" href="/demo/shop/lumiere.html"><img src="/demo/lumiere.svg" alt="" />Lumière</a>
+        <nav class="nav" aria-label="Разделы">
+          <span>Уход за кожей</span><span>Парфюмерия</span><span>Подарки</span><span>Доставка</span>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap">
+          <h1>Уход и ароматы, подобранные под вас</h1>
+          <p>
+            Не знаете, с чего начать? Консультант в правом нижнем углу подберёт уход по типу
+            кожи, найдёт аромат по любимым нотам и соберёт подарок под бюджет.
+          </p>
+          <ul class="hints" aria-label="Примеры вопросов">
+            <li>«Сухая кожа, шелушится зимой — что посоветуете?»</li>
+            <li>«Подарок маме до 5000 ₽»</li>
+            <li>«Свежий аромат для офиса»</li>
+          </ul>
+          <p class="notice" role="alert" hidden data-shop="no-key">
+            Виджет не подключён: откройте страницу с ключом —
+            <code>/demo/shop/lumiere.html?key=wk_…</code>
+          </p>
+        </div>
+      </section>
+
+      <section class="section wrap">
+        <h2>Популярное</h2>
+        <ul class="grid">
+          <li class="card"><div class="thumb">Сыворотки</div><div class="card-body"><span class="card-category">Сыворотки</span><h3 class="card-title">Сыворотка с витамином C 15%</h3><span class="card-brand">Lumière Lab</span><span class="card-price">2 790 ₽</span></div></li>
+          <li class="card"><div class="thumb alt">Кремы</div><div class="card-body"><span class="card-category">Кремы</span><h3 class="card-title">Крем с керамидами для сухой кожи</h3><span class="card-brand">Calmea</span><span class="card-price">1 890 ₽</span></div></li>
+          <li class="card"><div class="thumb">SPF</div><div class="card-body"><span class="card-category">SPF</span><h3 class="card-title">Солнцезащитный флюид SPF 50</h3><span class="card-brand">Lumière Lab</span><span class="card-price">1 790 ₽</span></div></li>
+          <li class="card"><div class="thumb alt">Маски</div><div class="card-body"><span class="card-category">Маски</span><h3 class="card-title">Глиняная маска для пор</h3><span class="card-brand">Nordic Pure</span><span class="card-price">1 190 ₽</span></div></li>
+          <li class="card"><div class="thumb">Парфюмерия</div><div class="card-body"><span class="card-category">Парфюмерия</span><h3 class="card-title">Pivoine Douce</h3><span class="card-brand">Maison Orée</span><span class="card-price">5 790 ₽</span></div></li>
+          <li class="card"><div class="thumb alt">Парфюмерия</div><div class="card-body"><span class="card-category">Парфюмерия</span><h3 class="card-title">Santal Brun</h3><span class="card-brand">Ambre Lune</span><span class="card-price">9 990 ₽</span></div></li>
+          <li class="card"><div class="thumb">Подарки</div><div class="card-body"><span class="card-category">Подарочные наборы</span><h3 class="card-title">Набор миниатюр ароматов «Знакомство»</h3><span class="card-brand">Lumière Lab</span><span class="card-price">2 490 ₽</span></div></li>
+          <li class="card"><div class="thumb alt">Подарки</div><div class="card-body"><span class="card-category">Подарочные наборы</span><h3 class="card-title">Набор «Сияние»: сыворотка с витамином C и SPF</h3><span class="card-brand">Lumière Lab</span><span class="card-price">4 290 ₽</span></div></li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap">
+        <span>© Lumière — демо-магазин платформы AI-консультанта</span>
+        <a href="/demo/shop/index.html">Все витрины</a>
+      </div>
+    </footer>
+
+    <!-- Ключ виджета — из ?key= (секретов в репозитории нет); без ключа — подсказка. -->
+    <script>
+      (function () {
+        var key = new URLSearchParams(location.search).get("key");
+        if (!key) {
+          document.querySelector('[data-shop="no-key"]').hidden = false;
+          return;
+        }
+        var widget = document.createElement("script");
+        widget.src = "/widget.js";
+        widget.async = true;
+        widget.setAttribute("data-key", key);
+        document.body.appendChild(widget);
+      })();
+    </script>
+  </body>
+</html>

@@ -1,5 +1,5 @@
 import { type Page, expect, test } from "@playwright/test";
-import { WEB_URL, WIDGET_KEY } from "./env";
+import { GARDEN_WIDGET_KEY, WEB_URL, WIDGET_KEY } from "./env";
 
 // Виджет на сайте тенанта (ADR-0022): widget.js → iframe `/widget` с CSP frame-ancestors.
 // Демо-страница открывается с WEB_URL — он в allowed_origins демо-тенантов (config/tenants).
@@ -62,6 +62,33 @@ test("мобильный: чат на весь экран, кнопка скры
   await chat.getByRole("button", { name: "Свернуть" }).click();
   await expect(panel).toBeHidden();
   await expect(page.getByRole("button", { name: "Открыть чат" })).toBeVisible();
+});
+
+// Демо-витрины (P9-00a): статические страницы public/demo/shop, ключ виджета — из ?key=.
+for (const shop of [
+  { page: "lumiere.html", key: WIDGET_KEY, brand: "Lumière", greeting: /Помогу подобрать уход/ },
+  {
+    page: "garden.html",
+    key: GARDEN_WIDGET_KEY,
+    brand: "Зелёный угол",
+    greeting: /Подскажу, что посадить/,
+  },
+]) {
+  test(`витрина ${shop.page}: виджет своего тенанта открывается`, async ({ page }) => {
+    await page.goto(`/demo/shop/${shop.page}?key=${shop.key}`);
+    await expect(page.getByRole("link", { name: shop.brand }).first()).toBeVisible();
+    await expect(page.getByRole("alert")).toBeHidden();
+
+    await page.getByRole("button", { name: "Открыть чат" }).click();
+    const chat = page.frameLocator('iframe[title="Чат с консультантом"]');
+    await expect(chat.getByTestId("greeting")).toHaveText(shop.greeting);
+  });
+}
+
+test("витрина без ключа: подсказка вместо виджета", async ({ page }) => {
+  await page.goto("/demo/shop/garden.html");
+  await expect(page.getByRole("alert")).toContainText("?key=");
+  await expect(page.locator('[data-tessera="launcher"]')).toHaveCount(0);
 });
 
 test("чужой сайт: браузер блокирует iframe по frame-ancestors", async ({ page, context }) => {

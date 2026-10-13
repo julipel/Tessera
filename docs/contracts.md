@@ -17,7 +17,7 @@
 | Метод | Путь | Назначение |
 |---|---|---|
 | GET | `/v1/public/config?locale=` | брендинг, приветствие, стартовые подсказки на языке диалога (ADR-0025) |
-| GET | `/v1/public/widget` | `WidgetEmbed {allowed_origins}` — для CSP `frame-ancestors` iframe (ADR-0022) |
+| GET | `/v1/public/widget` | `WidgetEmbed {allowed_origins}` — для CSP `frame-ancestors` iframe: сайты тенанта и свой веб-чат (ADR-0022) |
 | POST | `/v1/conversations` | создать диалог → `{conversation_id}` |
 | GET | `/v1/conversations/{id}/messages` | история (для восстановления) |
 | POST | `/v1/conversations/{id}/messages` | отправить ввод, ответ — SSE-стрим |

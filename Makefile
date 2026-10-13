@@ -6,7 +6,7 @@ HAS_API := $(wildcard $(API)/pyproject.toml)
 HAS_WEB := $(wildcard $(WEB)/package.json)
 
 .PHONY: up down ps install check check-fast test lint-py typecheck-py arch lint-web typecheck-web test-web \
-        contracts contracts-check migrate migration eval eval-diff loadtest seed sync pilot admin-user dev-api dev-web worker
+        contracts contracts-check migrate migration eval eval-diff loadtest demo-public seed sync pilot admin-user dev-api dev-web worker
 
 # --wait: команда завершается, когда все сервисы прошли healthcheck
 up:
@@ -118,3 +118,8 @@ eval-diff:
 loadtest:
 	scripts/loadtest.sh $(if $(n),--dialogs $(n),) $(if $(c),--concurrency $(c),) \
 		$(if $(turns),--turns $(turns),)
+
+# Публичное демо через туннель cloudflared (P9-00b): витрины по временной ссылке, Ctrl+C —
+# остановить. Запуск, сценарии и ограничения — docs/demo.md.
+demo-public:
+	scripts/demo-public.sh

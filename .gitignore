@@ -15,3 +15,5 @@ dist/
 # Файлы источников знаний (KNOWLEDGE_FILES_DIR); демо-данные тенантов (ADR-0019) — в git.
 /data/*
 !/data/pilot/
+# Логи make demo-public (scripts/demo-public.sh).
+.demo/

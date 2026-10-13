@@ -1533,7 +1533,7 @@ export interface ToolDefinition {
  */
 export interface WidgetEmbed {
   /**
-   * Origin сайтов тенанта (`scheme://host[:port]`). Пустой список — встраивание запрещено.
+   * Где разрешено встраивать iframe (`scheme://host[:port]`): сайты тенанта из ключа и origin своего веб-чата (ADR-0022, дополнение P9-00b).
    */
   allowed_origins: string[];
 }

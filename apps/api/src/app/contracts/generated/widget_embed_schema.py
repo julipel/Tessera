@@ -16,5 +16,5 @@ class WidgetEmbed(BaseModel):
     )
     allowed_origins: list[str]
     """
-    Origin сайтов тенанта (`scheme://host[:port]`). Пустой список — встраивание запрещено.
+    Где разрешено встраивать iframe (`scheme://host[:port]`): сайты тенанта из ключа и origin своего веб-чата (ADR-0022, дополнение P9-00b).
     """

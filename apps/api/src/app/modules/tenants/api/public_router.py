@@ -3,12 +3,12 @@
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Request, status
 
 from app.contracts import PublicConfig, WidgetEmbed
 from app.modules.shared.public import ApiError, DbSession
 from app.modules.tenants.api.deps import WidgetAccessDep, WidgetTenant
-from app.modules.tenants.application.public_config import get_public_config
+from app.modules.tenants.application.public_config import embed_origins, get_public_config
 from app.modules.tenants.domain.errors import NoActiveConfigError
 from app.modules.tenants.infrastructure.repositories import AgentConfigRepository
 
@@ -32,7 +32,9 @@ async def public_config(
 
 
 @router.get("/widget")
-async def widget_embed(access: WidgetAccessDep) -> WidgetEmbed:
+async def widget_embed(request: Request, access: WidgetAccessDep) -> WidgetEmbed:
     """Где можно встроить виджет: сервер веб-чата ставит по ответу CSP frame-ancestors
-    на странице iframe (ADR-0022)."""
-    return WidgetEmbed(allowed_origins=list(access.allowed_origins))
+    на странице iframe (ADR-0022). Свой веб-чат (`cors_origins`) — всегда: демо-витрины
+    на его origin, в том числе за туннелем со случайным адресом (P9-00b)."""
+    platform_origins: list[str] = request.app.state.settings.cors_origins
+    return WidgetEmbed(allowed_origins=embed_origins(access, platform_origins))

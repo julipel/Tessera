@@ -170,17 +170,30 @@ async def test_widget_embed_returns_allowed_origins(db_client: AsyncClient, shop
     response = await db_client.get(WIDGET_URL, headers={"X-Widget-Key": "wk_shop"})
 
     assert response.status_code == 200
-    assert WidgetEmbed.model_validate(response.json()).allowed_origins == [SHOP_SITE]
+    # Сайты тенанта, затем свой веб-чат: демо-витрины на его origin (P9-00b).
+    assert WidgetEmbed.model_validate(response.json()).allowed_origins == [SHOP_SITE, CHAT_ORIGIN]
 
 
-async def test_widget_embed_without_origins_is_empty(
+async def test_widget_embed_without_origins_is_own_chat_only(
     db_client: AsyncClient, db_session: AsyncSession
 ) -> None:
     await _tenant(db_session, "closed", "wk_closed", _config("Closed"))
 
     response = await db_client.get(WIDGET_URL, headers={"X-Widget-Key": "wk_closed"})
 
-    assert response.json() == {"allowed_origins": []}
+    assert response.json() == {"allowed_origins": [CHAT_ORIGIN]}
+
+
+async def test_widget_embed_does_not_repeat_own_chat(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await _tenant(
+        db_session, "both", "wk_both", _config("Both"), allowed_origins=[CHAT_ORIGIN, SHOP_SITE]
+    )
+
+    response = await db_client.get(WIDGET_URL, headers={"X-Widget-Key": "wk_both"})
+
+    assert response.json() == {"allowed_origins": [CHAT_ORIGIN, SHOP_SITE]}
 
 
 async def test_widget_embed_unknown_key_is_401(db_client: AsyncClient, shop: TenantId) -> None:

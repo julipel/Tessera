@@ -34,6 +34,12 @@ async def authenticate_widget(
     return access
 
 
+def embed_origins(access: WidgetAccess, platform_origins: Collection[str]) -> list[str]:
+    """Где можно встроить iframe виджета: сайты тенанта и свой веб-чат (ADR-0022, дополнение
+    P9-00b) — порядок сохраняется, без повторов."""
+    return list(dict.fromkeys([*access.allowed_origins, *platform_origins]))
+
+
 async def get_public_config(
     tenant_id: TenantId, configs: AgentConfigStore, locale: str | None = None
 ) -> PublicConfig:

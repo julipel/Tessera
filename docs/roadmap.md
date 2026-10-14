@@ -668,4 +668,19 @@
 - [ ] **P9-01 Деплой.** Docker-образы, окружения, миграции при деплое, секреты.
   DoD из P9-00b: витрины `/demo/shop/*.html?key=…` по боевому адресу открываются с телефона
   из другой сети — ответ стримится, карточки, диалог виден в админке.
+  - [x] **P9-01a Артефакты деплоя (ADR-0040).** Один сервер, docker compose
+    (`deploy/compose.prod.yml`): postgres, redis (AOF), qdrant, `migrate` (alembic до старта
+    api/worker), api, worker, web, caddy. Caddy (`deploy/Caddyfile`) — TLS Let's Encrypt, один
+    домен: `/v1/*` и `/health` → api (без сжатия, SSE не буферизуется), остальное → web.
+    `apps/api/Dockerfile` — один образ на api/worker/migrate, раскладка как в репозитории,
+    `config/` и `data/pilot/` в образе; `apps/web/Dockerfile` — `output: "standalone"`,
+    `NEXT_PUBLIC_API_URL` — build-arg; proxy `/widget` ходит в API по `API_INTERNAL_URL`.
+    Секреты — `deploy/.env` на сервере (шаблон `deploy/.env.example`), `CORS_ORIGINS` и адреса
+    сервисов compose выводит из `DOMAIN`/`POSTGRES_*`. `make deploy-up|seed|sync|admin-user|
+    ps|logs|backup`, `docs/deploy.md` (первый запуск, обновление, бэкап, откат, локальная
+    проверка с `DOMAIN=localhost`). Проверено: `docker compose config`, standalone-сборка web
+    локально (витрины, CSP `/widget`), `make check`. Не проверено: сборка образов и прогон
+    стека в Docker — на машине разработчика нет доступа к Docker Hub/ghcr/PyPI/npm.
+  - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
+    образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
 - [ ] **P9-02 Пилот и разбор.** Реальные диалоги → новые эталоны в evals → итерации P6-03.

@@ -1,0 +1,23 @@
+# Контекст сборки образов (P9-01) — корень репозитория. Секреты и локальные артефакты не берём.
+.env
+.env.*
+**/.env
+**/.env.*
+.git
+.claude
+.demo
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+apps/web/test-results
+apps/web/playwright-report
+apps/web/tsconfig.tsbuildinfo
+evals/reports
+loadtest/reports
+data/knowledge
+deploy
+backups

@@ -17,3 +17,5 @@ dist/
 !/data/pilot/
 # Логи make demo-public (scripts/demo-public.sh).
 .demo/
+# Дампы make deploy-backup.
+/backups/

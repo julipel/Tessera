@@ -4,7 +4,10 @@ import { fetchAllowedOrigins, frameAncestors } from "@/lib/widget/csp";
 // Страница iframe виджета: CSP frame-ancestors по allowed_origins ключа (ADR-0022).
 // Предков фрейма проверяет браузер — подделать их со встраивающей страницы нельзя.
 export async function proxy(request: NextRequest) {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  // API_INTERNAL_URL — адрес API из сети сервера (compose, ADR-0040): запрос не выходит
+  // наружу и не зависит от DNS/TLS публичного домена. NEXT_PUBLIC_* вшит в сборку.
+  const apiUrl =
+    process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   const origins = await fetchAllowedOrigins(apiUrl, request.nextUrl.searchParams.get("key"));
   const response = NextResponse.next();
   response.headers.set("Content-Security-Policy", frameAncestors(origins));

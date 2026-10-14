@@ -1,0 +1,15 @@
+# Вход на сервер (P9-01, ADR-0040): TLS от Let's Encrypt для {$DOMAIN} (localhost —
+# внутренний сертификат Caddy, для проверки стека на машине разработчика).
+{$DOMAIN} {
+	# API: без сжатия — SSE-ход (text/event-stream) уходит посетителю по событию, без буфера.
+	# X-Forwarded-For Caddy ставит сам; uvicorn берёт из него IP для лимитов (ADR-0030).
+	@api path /v1/* /health
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy web:3000
+	}
+}

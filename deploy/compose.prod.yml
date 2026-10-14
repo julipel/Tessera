@@ -1,0 +1,151 @@
+# Боевой стек на одном сервере (P9-01, ADR-0040). Запуск — из корня репозитория через
+# make deploy-* (docs/deploy.md): docker compose -f deploy/compose.prod.yml --env-file deploy/.env
+# Наружу — только Caddy (80/443): /v1/* и /health → api, остальное → web, один домен.
+name: tessera-prod
+
+x-app-env: &app-env
+  APP_ENV: production
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-app}
+  REDIS_URL: redis://redis:6379/0
+  QDRANT_URL: http://qdrant:6333
+  KNOWLEDGE_FILES_DIR: /srv/data/knowledge
+  # Свой веб-чат и витрины — на том же origin (ADR-0022, дополнение P9-00b).
+  CORS_ORIGINS: '["https://${DOMAIN:?}"]'
+
+# Остальные настройки API (ключи LLM, Langfuse, лимиты, SOURCE_SECRET_*) — из env-файла.
+x-app: &app
+  image: tessera-api:${IMAGE_TAG:-latest}
+  build:
+    context: ..
+    dockerfile: apps/api/Dockerfile
+  # DEPLOY_ENV_FILE — другой файл, например для проверки стека локально (docs/deploy.md).
+  env_file: ${DEPLOY_ENV_FILE:-.env}
+  environment: *app-env
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # AOF: очередь синхронизаций (arq) переживает перезапуск.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      # В образе нет curl/wget — проверяем HTTP через bash /dev/tcp.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 && printf \"GET /readyz HTTP/1.0\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Миграции при каждом `up`: api и worker стартуют только после успешного alembic.
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    volumes:
+      - knowledge-files:/srv/data/knowledge
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  worker:
+    <<: *app
+    command: ["arq", "app.worker.WorkerSettings"]
+    volumes:
+      - knowledge-files:/srv/data/knowledge
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  web:
+    image: tessera-web:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://${DOMAIN:?}
+    environment:
+      # CSP страницы /widget (proxy.ts) — запрос к API внутри сети compose.
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/demo/shop/index.html').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  qdrant-data:
+  knowledge-files:
+  caddy-data:
+  caddy-config:

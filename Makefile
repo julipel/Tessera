@@ -6,7 +6,8 @@ HAS_API := $(wildcard $(API)/pyproject.toml)
 HAS_WEB := $(wildcard $(WEB)/package.json)
 
 .PHONY: up down ps install check check-fast test lint-py typecheck-py arch lint-web typecheck-web test-web \
-        contracts contracts-check migrate migration eval eval-diff loadtest demo-public seed sync pilot admin-user dev-api dev-web worker
+        contracts contracts-check migrate migration eval eval-diff loadtest demo-public seed sync pilot admin-user dev-api dev-web worker \
+        deploy-build deploy-up deploy-seed deploy-sync deploy-admin-user deploy-ps deploy-logs deploy-backup
 
 # --wait: команда завершается, когда все сервисы прошли healthcheck
 up:
@@ -123,3 +124,38 @@ loadtest:
 # остановить. Запуск, сценарии и ограничения — docs/demo.md.
 demo-public:
 	scripts/demo-public.sh
+
+# Боевой стек на сервере (P9-01, ADR-0040, docs/deploy.md): настройки — deploy/.env.
+# deploy-up собирает образы и поднимает стек; миграции идут сами (сервис migrate) до api/worker.
+DEPLOY := docker compose -f deploy/compose.prod.yml --env-file deploy/.env
+
+deploy-build:
+	$(DEPLOY) build
+
+deploy-up:
+	$(DEPLOY) up -d --build --wait
+
+# Тенанты из config/tenants, вшитого в образ API (после git pull — deploy-up, затем deploy-seed).
+deploy-seed:
+	$(DEPLOY) run --rm api python -m app.cli seed
+
+# make deploy-sync [t="demo-beauty"] [s="kb"] — как make sync, внутри контейнера.
+deploy-sync:
+	$(DEPLOY) run --rm api python -m app.cli sync $(t) $(if $(s),--source $(s),)
+
+# make deploy-admin-user email=a@b.c [args="--tenant demo-beauty=viewer"] — пароль вводится.
+deploy-admin-user:
+	$(DEPLOY) run --rm api python -m app.cli admin-user $(email) $(args)
+
+deploy-ps:
+	$(DEPLOY) ps
+
+# make deploy-logs [svc=api]
+deploy-logs:
+	$(DEPLOY) logs -f --tail 200 $(svc)
+
+# Дамп Postgres в backups/<время>.sql.gz на хосте (вне git).
+deploy-backup:
+	mkdir -p backups
+	$(DEPLOY) exec -T postgres sh -c 'pg_dump -U "$$POSTGRES_USER" "$$POSTGRES_DB"' \
+		| gzip > backups/$$(date +%Y%m%d-%H%M%S).sql.gz

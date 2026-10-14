@@ -4,7 +4,7 @@ from collections.abc import Collection, Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, delete, func, or_, select, update
+from sqlalchemy import ColumnElement, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules.knowledge.domain.catalog import CatalogEntity, CatalogPage, CatalogQuery
@@ -28,6 +28,10 @@ from app.modules.knowledge.infrastructure.models import (
 from app.modules.shared.public import TenantId, TenantMismatchError, TenantRepository
 
 _ACTIVE = SourceSyncRecord.status.in_([SyncStatus.PENDING, SyncStatus.RUNNING])
+# Предикат частичного индекса для ON CONFLICT — литералом, как в индексе: с параметрами
+# Postgres выводит индекс только в custom-плане, а с 6-го выполнения подготовленного
+# запроса на соединении переходит на общий план, и INSERT падает.
+_ACTIVE_INDEX_WHERE = text(f"status IN ('{SyncStatus.PENDING}', '{SyncStatus.RUNNING}')")
 
 
 class SourceRepository(TenantRepository[SourceRecord]):
@@ -114,7 +118,7 @@ class SourceSyncRepository(TenantRepository[SourceSyncRecord]):
                 insert(SourceSyncRecord)
                 .values(tenant_id=tenant_id, source_id=source_id, status=SyncStatus.PENDING)
                 .on_conflict_do_nothing(
-                    index_elements=[SourceSyncRecord.source_id], index_where=_ACTIVE
+                    index_elements=[SourceSyncRecord.source_id], index_where=_ACTIVE_INDEX_WHERE
                 )
                 .returning(SourceSyncRecord.id)
             )

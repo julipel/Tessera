@@ -97,6 +97,8 @@ docker compose -f compose.prod.yml down      # -v — удалить и данн
 - `lookup registry-1.docker.io: no such host` / таймауты к ghcr.io, PyPI или npm — нет
   доступа к реестрам. В Docker Desktop задайте прокси (Settings → Resources → Proxies) или
   зеркало реестра в daemon.json (`registry-mirrors`).
+- `pnpm install` падает с `fetch failed` — разовый сбой сети при скачивании пакетов;
+  повторите сборку (слои с уже скачанным берутся из кэша).
 - `нужен --build-arg NEXT_PUBLIC_API_URL` — образ web собирают не через compose, или в
   `deploy/.env` не задан `DOMAIN`.
 - Caddy не получает сертификат (в `make deploy-logs svc=caddy` — ошибки ACME): проверьте

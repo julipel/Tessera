@@ -678,9 +678,13 @@
     Секреты — `deploy/.env` на сервере (шаблон `deploy/.env.example`), `CORS_ORIGINS` и адреса
     сервисов compose выводит из `DOMAIN`/`POSTGRES_*`. `make deploy-up|seed|sync|admin-user|
     ps|logs|backup`, `docs/deploy.md` (первый запуск, обновление, бэкап, откат, локальная
-    проверка с `DOMAIN=localhost`). Проверено: `docker compose config`, standalone-сборка web
-    локально (витрины, CSP `/widget`), `make check`. Не проверено: сборка образов и прогон
-    стека в Docker — на машине разработчика нет доступа к Docker Hub/ghcr/PyPI/npm.
+    проверка с `DOMAIN=localhost`). Проверено локально (`DOMAIN=localhost`, Docker Desktop):
+    сборка образов, migrate → api/worker, seed и sync всех 7 источников, через Caddy —
+    витрина, CSP `/widget` с origin домена, SSE-ход с живой моделью (первый байт 0,13 с из
+    17,6 с — без буфера, `product_carousel`), диалог в админке. Найден и исправлен баг:
+    `open_active` (ON CONFLICT по частичному индексу `source_syncs`) падал с 6-го выполнения
+    на соединении — Postgres переходил на общий план, предикат с параметрами не выводил
+    индекс; теперь предикат литералом, регрессионный тест в `test_knowledge_repositories.py`.
   - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
     образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
 - [ ] **P9-02 Пилот и разбор.** Реальные диалоги → новые эталоны в evals → итерации P6-03.

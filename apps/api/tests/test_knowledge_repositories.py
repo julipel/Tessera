@@ -241,3 +241,18 @@ async def test_deleting_entity_removes_its_description_document(db_session: Asyn
     document_repo = DocumentRepository(db_session)
     assert await document_repo.get(rows.tenant_id, rows.document.id) is None
     assert await ChunkRepository(db_session).list(rows.tenant_id) == []
+
+
+async def test_open_active_survives_generic_plan(db_session: AsyncSession) -> None:
+    # Postgres переходит на общий план подготовленного запроса с 6-го выполнения на соединении;
+    # предикат частичного индекса в ON CONFLICT параметрами тогда не выводится (P9-01a:
+    # make sync по 7 источникам падал на 6-м).
+    rows = await _seed(db_session, "tenant-generic-plan")
+    repo = SourceSyncRepository(db_session)
+    for _ in range(8):
+        source = await SourceRepository(db_session).add(
+            rows.tenant_id,
+            SourceRecord(tenant_id=rows.tenant_id, kind=SourceKind.FILE, config={"path": "x"}),
+        )
+        first = await repo.open_active(rows.tenant_id, source.id)
+        assert await repo.open_active(rows.tenant_id, source.id) == first

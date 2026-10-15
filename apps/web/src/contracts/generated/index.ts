@@ -755,7 +755,7 @@ export interface CreateSourceRequest {
   config_yaml: string;
 }
 /**
- * Тело POST …/sources/{source_id}/sync. full — полная синхронизация (удаляет пропавшие элементы); иначе инкрементальная, если у источника есть курсор.
+ * Тело POST …/sources/{source_id}/sync. full — полная синхронизация (удаляет пропавшие элементы без ограничений); иначе инкрементальная, если у источника есть курсор. Без full пустой листинг или пропажа больше половины элементов ничего не удаляет — синхронизация failed.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
  * via the `definition` "StartSyncRequest".

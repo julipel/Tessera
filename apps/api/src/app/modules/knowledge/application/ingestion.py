@@ -9,7 +9,9 @@
 с откатом Postgres: content_hash не сохранён, следующая синхронизация повторит. Точки,
 записанные до отката, заменит следующая запись документа (ключ — external_id, ADR-0014).
 Пропавшие документы удаляются сначала из индекса, затем из Postgres: иначе сбой оставил бы
-в поиске точки без записей.
+в поиске точки без записей. Без явного `full` пустой листинг или пропажа большей части
+элементов не удаляет ничего: так выглядит и сбой источника (`[]` с 200, заглушка сайта),
+синхронизация завершается failed (REVIEW.md: K-6).
 """
 
 import asyncio
@@ -20,7 +22,7 @@ from uuid import UUID
 import structlog
 
 from app.modules.knowledge.domain.entities import SourceKind, SyncStatus
-from app.modules.knowledge.domain.errors import NoConnectorError
+from app.modules.knowledge.domain.errors import MassDeletionBlockedError, NoConnectorError
 from app.modules.knowledge.domain.indexing import IndexedChunk, IndexedDocument
 from app.modules.knowledge.domain.ingestion import (
     DocumentItem,
@@ -44,6 +46,11 @@ from app.modules.shared.kernel import NotFoundError, TenantId
 logger = structlog.get_logger(__name__)
 
 _FINISHED = (SyncStatus.SUCCEEDED, SyncStatus.FAILED)
+
+# Без явного `full` синхронизация не удаляет больше этой доли известных элементов, если
+# известных не меньше MASS_DELETE_MIN_ITEMS: в маленьком источнике пропажа 3 из 5 — обычное дело.
+MAX_DELETE_RATIO = 0.5
+MASS_DELETE_MIN_ITEMS = 10
 
 
 async def run_sync(
@@ -164,6 +171,8 @@ async def _ingest(
         # Элемент, который не удалось получить, не удаляем: его вид (документ/сущность)
         # неизвестен, а сам он в источнике есть.
         stale = [k for k in known if k not in seen and k.external_id not in failed_ids]
+        if stale and not full:
+            _check_mass_deletion(len(stale), len(known), stats.discovered)
         if stale:
             documents = [k.external_id for k in stale if k.kind is ItemKind.DOCUMENT]
             if documents:
@@ -172,6 +181,20 @@ async def _ingest(
             await store.commit()
 
     return listing.cursor if listing.cursor is not None else previous
+
+
+def _check_mass_deletion(stale: int, known: int, discovered: int) -> None:
+    if discovered == 0:
+        reason = "источник вернул пустой листинг"
+    elif stale > known * MAX_DELETE_RATIO and known >= MASS_DELETE_MIN_ITEMS:
+        reason = f"пропало больше {MAX_DELETE_RATIO:.0%} элементов"
+    else:
+        return
+    logger.warning("ingestion.mass_delete_blocked", stale=stale, known=known, discovered=discovered)
+    raise MassDeletionBlockedError(
+        f"удаление {stale} из {known} элементов отменено: {reason}; если так и задумано — "
+        "запустите полную синхронизацию"
+    )
 
 
 @dataclass(frozen=True, slots=True)

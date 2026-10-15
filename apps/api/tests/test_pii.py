@@ -1,5 +1,6 @@
 """Маскирование персональных данных в трейсах Langfuse (P7-07, ADR-0032)."""
 
+import gc
 import json
 import random
 import time
@@ -65,10 +66,18 @@ def test_ordinary_texts_are_unchanged(text: str) -> None:
     "text", ["a" * 20_000, "1." * 10_000, "a@" * 10_000, "1 " * 10_000, "anna" + "." * 20_000]
 )
 def test_masking_time_is_linear(text: str) -> None:
-    """Маскирование синхронно в корутине хода: длинный текст не должен её блокировать."""
-    started = time.perf_counter()
-    mask_pii(text)
-    assert time.perf_counter() - started < 0.2
+    """Маскирование синхронно в корутине хода: длинный текст не должен её блокировать.
+    Сборщик мусора на время замера выключен: в полном прогоне pytest куча большая, и его
+    паузы (сотни мс) — не сложность алгоритма."""
+    gc.collect()
+    gc.disable()
+    try:
+        started = time.perf_counter()
+        mask_pii(text)
+        elapsed = time.perf_counter() - started
+    finally:
+        gc.enable()
+    assert elapsed < 0.2
 
 
 def test_luhn_of_any_substring_matches_direct_check() -> None:

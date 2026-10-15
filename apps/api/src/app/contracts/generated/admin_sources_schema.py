@@ -148,7 +148,7 @@ class CreateSourceRequest(BaseModel):
 
 class StartSyncRequest(BaseModel):
     """
-    Тело POST …/sources/{source_id}/sync. full — полная синхронизация (удаляет пропавшие элементы); иначе инкрементальная, если у источника есть курсор.
+    Тело POST …/sources/{source_id}/sync. full — полная синхронизация (удаляет пропавшие элементы без ограничений); иначе инкрементальная, если у источника есть курсор. Без full пустой листинг или пропажа больше половины элементов ничего не удаляет — синхронизация failed.
     """
 
     model_config = ConfigDict(

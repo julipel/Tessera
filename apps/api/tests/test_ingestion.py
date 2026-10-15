@@ -257,6 +257,64 @@ async def test_full_sync_deletes_items_missing_from_source(env: Env) -> None:
     assert {c.document_id for c in remaining} == {(await env.documents())["faq"].id}
 
 
+async def test_empty_listing_does_not_delete_known_items(env: Env) -> None:
+    env.connector.put(doc("faq"), entity("sku-1"))
+    await env.sync()
+    env.connector.items.clear()  # API ответил [] со статусом 200
+
+    record = await env.sync_record(await env.sync())
+
+    # Пустой листинг похож на сбой источника: каталог не стирается (REVIEW.md: K-6).
+    assert record.status is SyncStatus.FAILED
+    assert record.error == (
+        "MassDeletionBlockedError: удаление 2 из 2 элементов отменено: источник вернул пустой "
+        "листинг; если так и задумано — запустите полную синхронизацию"
+    )
+    assert stats_counts(record)["deleted"] == 0
+    assert set(await env.documents()) == {"faq"}
+    assert set(await env.entities()) == {"sku-1"}
+    assert env.index.external_ids(env.tenant_id) == {"faq"}
+
+
+async def test_losing_most_items_is_blocked_but_new_items_are_saved(env: Env) -> None:
+    env.connector.put(*(entity(f"sku-{i}") for i in range(10)))
+    await env.sync()
+    for i in range(6):
+        del env.connector.items[f"sku-{i}"]
+    env.connector.put(entity("sku-new"))
+
+    record = await env.sync_record(await env.sync())
+
+    assert record.status is SyncStatus.FAILED
+    assert record.error is not None and "удаление 6 из 10" in record.error
+    assert (stats_counts(record)["created"], stats_counts(record)["deleted"]) == (1, 0)
+    assert len(await env.entities()) == 11
+
+
+async def test_explicit_full_sync_deletes_even_most_items(env: Env) -> None:
+    env.connector.put(*(entity(f"sku-{i}") for i in range(10)))
+    await env.sync()
+    env.connector.items.clear()
+
+    record = await env.sync_record(await env.sync(full=True))
+
+    assert record.status is SyncStatus.SUCCEEDED
+    assert stats_counts(record)["deleted"] == 10
+    assert await env.entities() == {}
+
+
+async def test_small_source_may_lose_most_items(env: Env) -> None:
+    env.connector.put(*(doc(f"page-{i}") for i in range(5)))
+    await env.sync()
+    for i in range(3):
+        del env.connector.items[f"page-{i}"]
+
+    record = await env.sync_record(await env.sync())
+
+    assert record.status is SyncStatus.SUCCEEDED
+    assert stats_counts(record)["deleted"] == 3
+
+
 async def test_failed_item_does_not_stop_sync_and_is_not_deleted(env: Env) -> None:
     env.connector.put(doc("faq"), doc("flaky"))
     await env.sync()
@@ -406,7 +464,7 @@ async def test_sync_does_not_touch_other_tenant(db_session: AsyncSession) -> Non
     a.connector.put(doc("faq", text="Текст A."))
     await a.sync()
     a.connector.items.clear()
-    await a.sync()
+    await a.sync(full=True)
 
     assert set(await a.documents()) == set()
     assert set(await b.documents()) == {"faq"}

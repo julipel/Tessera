@@ -179,7 +179,7 @@ async def test_timeout_does_not_break_other_calls() -> None:
 
     assert hung.error is not None
     assert hung.error.code == "timeout"
-    assert hung.error.retryable
+    assert hung.error.retryable  # без побочного эффекта повтор безопасен
     assert quick.ok
 
 
@@ -331,9 +331,11 @@ async def test_agent_recovers_from_validation_error_via_registry() -> None:
 class Recorder:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.confirm_ids: list[str | None] = []
 
     async def __call__(self, arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
         self.calls.append(dict(arguments))
+        self.confirm_ids.append(ctx.confirm_id)
         return ToolResult(content="Забронировано.")
 
 
@@ -400,7 +402,27 @@ async def test_confirmed_call_runs_handler_and_is_still_validated() -> None:
 
     assert result.content == "Забронировано."
     assert handler.calls == [VALID]
+    # confirm_id — ключ идемпотентности побочного эффекта (P9-01g).
+    assert handler.confirm_ids == ["cf_1"]
     assert invalid.error is not None and invalid.error.code == "validation_error"
+
+
+@pytest.mark.parametrize("failure", ["timeout", "exception"])
+async def test_side_effect_failure_is_not_retryable(failure: str) -> None:
+    async def fails(arguments: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
+        if failure == "timeout":
+            await asyncio.Event().wait()
+        raise RuntimeError("commit прошёл, ответ потерян")
+
+    registry = ToolRegistry([booking(fails, timeout_s=0.05)])
+
+    result = await registry.execute_confirmed(inv("cf_1", "book", **VALID), CTX)
+
+    # Действие могло выполниться: повтор модели задвоил бы его (REVIEW.md: TO-2).
+    assert result.error is not None
+    assert result.error.code == ("timeout" if failure == "timeout" else "upstream_error")
+    assert not result.error.retryable
+    assert "не вызывай инструмент повторно" in result.error.message
 
 
 async def test_side_effect_runs_once_only_after_user_confirms() -> None:

@@ -62,11 +62,19 @@ ANNA = {"name": "Анна", "contact": "@anna"}
 class Leads:
     def __init__(self) -> None:
         self.created: list[tuple[TenantId, UUID, str, dict[str, str]]] = []
+        self.keys: list[str] = []
 
     async def create(
-        self, tenant_id: TenantId, conversation_id: UUID, form_key: str, fields: Mapping[str, str]
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        form_key: str,
+        fields: Mapping[str, str],
+        *,
+        idempotency_key: str,
     ) -> UUID:
         self.created.append((tenant_id, conversation_id, form_key, dict(fields)))
+        self.keys.append(idempotency_key)
         return UUID("12345678-0000-0000-0000-000000000000")
 
 
@@ -152,6 +160,19 @@ async def test_confirmed_create_lead_stores_lead_of_context_tenant() -> None:
     assert isinstance(result.content, str)
     assert result.content.startswith("Заявка создана, номер 12345678.")
     assert leads.created == [(CTX.tenant_id, CTX.conversation_id, "consultation", ANNA)]
+    # Ключ идемпотентности — confirm_id подтверждения (id подтверждённого вызова).
+    assert leads.keys == ["c1"]
+
+
+async def test_create_lead_without_confirmation_does_not_store_lead() -> None:
+    leads = Leads()
+    tool = create_lead_tool(FORMS, leads)
+
+    result = await tool.handler(lead("consultation", ANNA).arguments, CTX)
+
+    assert result.error is not None
+    assert result.error.code == "validation_error"
+    assert leads.created == []
 
 
 @pytest.mark.parametrize(

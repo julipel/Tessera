@@ -9,7 +9,7 @@ from typing import Any
 from app.contracts import Form, FormConfig
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition
 from app.modules.tools.domain.ports import LeadStore
-from app.modules.tools.domain.result import ToolResult
+from app.modules.tools.domain.result import ToolError, ToolResult
 
 SHOW_FORM = "show_form"
 CREATE_LEAD = "create_lead"
@@ -62,8 +62,20 @@ def create_lead_tool(forms: Mapping[str, FormConfig], leads: LeadStore) -> ToolD
             )
 
     async def handler(arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
+        if ctx.confirm_id is None:  # реестр исполняет create_lead только после подтверждения
+            return ToolResult(
+                error=ToolError(
+                    code="validation_error",
+                    message=f"{CREATE_LEAD}: заявка создаётся только после подтверждения",
+                    retryable=False,
+                )
+            )
         lead_id = await leads.create(
-            ctx.tenant_id, ctx.conversation_id, arguments["form_key"], arguments["fields"]
+            ctx.tenant_id,
+            ctx.conversation_id,
+            arguments["form_key"],
+            arguments["fields"],
+            idempotency_key=ctx.confirm_id,
         )
         return ToolResult(
             content=f"Заявка создана, номер {str(lead_id)[:8]}. Сообщи номер и что будет "

@@ -248,7 +248,13 @@ class MemoryLeads:
         self.created: list[tuple[TenantId, UUID, str, dict[str, str]]] = []
 
     async def create(
-        self, tenant_id: TenantId, conversation_id: UUID, form_key: str, fields: Mapping[str, str]
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        form_key: str,
+        fields: Mapping[str, str],
+        *,
+        idempotency_key: str,
     ) -> UUID:
         self.created.append((tenant_id, conversation_id, form_key, dict(fields)))
         return uuid4()

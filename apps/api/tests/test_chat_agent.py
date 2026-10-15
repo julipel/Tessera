@@ -229,7 +229,13 @@ class RecordingLeads:
         self.fields: list[dict[str, str]] = []
 
     async def create(
-        self, tenant_id: TenantId, conversation_id: UUID, form_key: str, fields: Mapping[str, str]
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        form_key: str,
+        fields: Mapping[str, str],
+        *,
+        idempotency_key: str,
     ) -> UUID:
         self.fields.append(dict(fields))
         return uuid4()

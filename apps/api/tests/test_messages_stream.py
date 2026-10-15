@@ -1057,9 +1057,18 @@ class SessionLeads:
         self._repo = LeadRepository(session)
 
     async def create(
-        self, tenant_id: TenantId, conversation_id: UUID, form_key: str, fields: Mapping[str, str]
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        form_key: str,
+        fields: Mapping[str, str],
+        *,
+        idempotency_key: str,
     ) -> UUID:
-        return (await self._repo.create(tenant_id, conversation_id, form_key, fields)).id
+        lead = await self._repo.create(
+            tenant_id, conversation_id, form_key, fields, idempotency_key=idempotency_key
+        )
+        return lead.id
 
 
 async def _events(response: Response) -> list[dict[str, Any]]:

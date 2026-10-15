@@ -34,7 +34,9 @@ class Catalog(Protocol):
 
 
 class LeadStore(Protocol):
-    """Заявки тенанта (leads `SqlLeadStore`). Возвращает id созданной заявки."""
+    """Заявки тенанта (leads `SqlLeadStore`). Возвращает id заявки. `idempotency_key` —
+    `confirm_id` подтверждения: повтор с тем же ключом в диалоге заявку не создаёт,
+    а возвращает id уже созданной."""
 
     async def create(
         self,
@@ -42,4 +44,6 @@ class LeadStore(Protocol):
         conversation_id: UUID,
         form_key: str,
         fields: Mapping[str, str],
+        *,
+        idempotency_key: str,
     ) -> UUID: ...

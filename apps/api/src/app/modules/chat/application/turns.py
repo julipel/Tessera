@@ -3,6 +3,7 @@
 import asyncio
 import time
 from collections.abc import AsyncGenerator, Iterator, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -95,6 +96,14 @@ class _AgentFinished:
 type _QueueItem = AgentEvent | _AgentFinished
 
 
+@dataclass(frozen=True, slots=True)
+class KeepAlive:
+    """Пинг стрима хода: агент давно молчит, соединение живо (SSE-комментарий)."""
+
+
+KEEP_ALIVE = KeepAlive()
+
+
 class TurnStream:
     """Один ход: `events()` отдаёт события хода, `save()` записывает ответ ассистента.
 
@@ -159,6 +168,17 @@ class TurnStream:
         self._agent_task: asyncio.Task[None] | None = None
 
     async def events(self) -> AsyncGenerator[Event]:
+        """События хода (contracts.md §2) — без пингов."""
+        async with aclosing(self.items()) as items:
+            async for item in items:
+                if isinstance(item, Event):
+                    yield item
+
+    async def items(self, ping_after_s: float | None = None) -> AsyncGenerator[Event | KeepAlive]:
+        """События хода и `KEEP_ALIVE`, если агент молчит дольше `ping_after_s`: долгий
+        инструмент или ретраи модели не дают прокси оборвать стрим по простою (REVIEW.md: C-6).
+        Ожидание с таймаутом — на очереди событий агента, а не вокруг генератора: отмена
+        по таймауту не задевает ни агента, ни этот генератор."""
         # В реестре только начатые стримы: снимает с реестра close() при закрытии стрима.
         await self.registry.add(self)
         # message_id нет только у turn_started (envelope.schema.json).
@@ -176,7 +196,14 @@ class TurnStream:
             queue: asyncio.Queue[_QueueItem] = asyncio.Queue()
             self._agent_task = asyncio.create_task(self._run_agent(queue))
             self._agent_task.add_done_callback(partial(_report_cancelled, queue))
-            while not isinstance(item := await queue.get(), _AgentFinished):
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), ping_after_s)
+                except TimeoutError:
+                    yield KEEP_ALIVE
+                    continue
+                if isinstance(item, _AgentFinished):
+                    break
                 for event in self._translate(item):
                     yield event
             finished = item

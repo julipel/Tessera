@@ -126,7 +126,9 @@ async def limit_turns(request: Request, tenant_id: WidgetTenant) -> None:
 
 
 async def limit_turn_body(request: Request) -> None:
-    """Слишком большое тело хода — 422 `invalid_input` до разбора и записи."""
+    """Слишком большое тело хода — 422 `invalid_input` до записи ввода. Тело к этому
+    моменту уже прочитано и разобрано FastAPI; до чтения его размер ограничивает
+    `BodySizeLimitMiddleware` (64 КБ, 413)."""
     length = request.headers.get("content-length", "")
     too_long = length.isdigit() and int(length) > MAX_TURN_BODY_BYTES
     if too_long or len(await request.body()) > MAX_TURN_BODY_BYTES:

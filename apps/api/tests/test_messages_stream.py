@@ -356,6 +356,54 @@ async def test_client_disconnect_saves_partial_answer_as_interrupted(
     assert [b.root.model_dump()["text"] for b in assistant.blocks] == ["Подбираю "]
 
 
+class SlowAgent:
+    """Долгий инструмент: между событиями агент молчит дольше интервала пинга."""
+
+    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
+        yield AnswerDelta("Ищу ")
+        await anyio.sleep(0.2)
+        yield AnswerDelta("нашла.")
+        yield TurnCompleted(FinishReason.ANSWERED, Usage(1, 1), steps=1)
+
+
+async def test_silent_agent_gets_keep_alive_pings(
+    db_session: AsyncSession, shop: TenantId, conversation_id: UUID
+) -> None:
+    turn = await start_turn(
+        shop,
+        conversation_id,
+        uuid4(),
+        UserInput.model_validate(TEXT),
+        ConversationRepository(db_session),
+        MessageRepository(db_session),
+        ToolCallRepository(db_session),
+        TenantsAgentConfigs(db_session),
+        SlowAgent(),
+        db_session.commit,
+        TurnRegistry(),
+    )
+
+    chunks = [chunk async for chunk in sse_stream(turn, ping_after_s=0.05)]
+
+    # Прокси не оборвёт стрим по простою (REVIEW.md: C-6); клиенты EventSource пинг игнорируют.
+    events = [c.split(b"\n", 1)[0] for c in chunks if c != b": ping\n\n"]
+    assert b": ping\n\n" in chunks
+    assert events[0] == b"event: turn_started"
+    assert events[-1] == b"event: done"
+    first_ping = chunks.index(b": ping\n\n")
+    assert chunks[first_ping - 1].startswith(b"event: text_delta")
+
+
+async def test_turn_stream_disables_caching_and_proxy_buffering(
+    db_client: AsyncClient, conversation_id: UUID
+) -> None:
+    response = await _send(db_client, conversation_id)
+
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+
+
 @pytest.mark.parametrize("retry", [False, True], ids=["send", "retry"])
 async def test_turn_holds_no_transaction_while_agent_answers(
     db_session: AsyncSession,

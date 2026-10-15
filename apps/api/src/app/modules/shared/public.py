@@ -7,6 +7,7 @@ from app.modules.shared.api.admin import (
     bearer_token,
     require_tenant_role,
 )
+from app.modules.shared.api.body_limit import BodySizeLimitMiddleware
 from app.modules.shared.api.deps import DbSession, StreamDbSession, get_session
 from app.modules.shared.api.errors import ApiError, install_error_handlers
 from app.modules.shared.api.rate_limit import (
@@ -35,6 +36,7 @@ __all__ = [
     "AdminViewer",
     "ApiError",
     "Base",
+    "BodySizeLimitMiddleware",
     "CurrentAdmin",
     "DbSession",
     "DomainError",

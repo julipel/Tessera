@@ -34,6 +34,7 @@ from app.modules.knowledge.public import admin_router as knowledge_admin_router
 from app.modules.leads.public import SqlLeadStore
 from app.modules.observability.public import Tracer, admin_router, build_tracer
 from app.modules.shared.public import (
+    BodySizeLimitMiddleware,
     RedisRateLimiter,
     create_engine,
     create_session_factory,
@@ -136,6 +137,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Сессии админки для зависимостей ролей в любом модуле (ADR-0036).
     app.state.admin_authenticator = SqlAdminAuthenticator(app.state.session_factory)
     install_error_handlers(app)
+    # Размер тела — до чтения и разбора JSON (REVIEW.md: C-3): чат анонимный — 64 КБ (ход
+    # проверяется ещё и на 32 КБ после разбора), файлы источников читаются потоково со своим
+    # лимитом (413), остальное — до 1 МБ (YAML конфига агента).
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        default_bytes=1024 * 1024,
+        rules=[
+            (r"/v1/conversations(/|$)", 64 * 1024),
+            (r"/v1/admin/tenants/[^/]+/sources/[^/]+/files/", None),
+        ],
+    )
     app.add_middleware(TraceIdMiddleware)  # после: снаружи обработчика 500
     # Последним — снаружи всех: preflight отвечается до остальной обработки.
     app.add_middleware(

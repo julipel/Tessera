@@ -104,7 +104,9 @@
 
 ## 2. SSE-протокол
 
-Каждое событие: `event: <type>` и `data: <Envelope JSON>`.
+Каждое событие: `event: <type>` и `data: <Envelope JSON>`. Если агент молчит дольше 15 с,
+сервер шлёт SSE-комментарий `: ping` (без `seq`, клиент его пропускает), чтобы прокси не
+оборвал стрим по простою. Заголовки стрима: `Cache-Control: no-cache`, `X-Accel-Buffering: no`.
 
 ```json
 {

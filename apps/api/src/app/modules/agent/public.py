@@ -41,6 +41,7 @@ from app.modules.agent.domain.turn import (
     ToolExecutor,
     TurnContext,
     TurnLimits,
+    TurnTimeoutError,
 )
 from app.modules.agent.infrastructure.anthropic_llm import AnthropicLLM, create_anthropic_llm
 from app.modules.agent.infrastructure.fake_llm import FakeLLM, FakeLLMExhaustedError, FakeReply
@@ -99,6 +100,7 @@ __all__ = [
     "TurnCompleted",
     "TurnContext",
     "TurnLimits",
+    "TurnTimeoutError",
     "Usage",
     "UserMessage",
     "build_system_prompt",

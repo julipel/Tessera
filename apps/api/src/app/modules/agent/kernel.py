@@ -16,6 +16,7 @@ from app.modules.agent.domain.events import (
     TurnCompleted,
 )
 from app.modules.agent.domain.llm import LLMError, Usage
+from app.modules.agent.domain.turn import TurnTimeoutError
 
 __all__ = [
     "AgentEvent",
@@ -28,5 +29,6 @@ __all__ = [
     "ToolFinished",
     "ToolStarted",
     "TurnCompleted",
+    "TurnTimeoutError",
     "Usage",
 ]

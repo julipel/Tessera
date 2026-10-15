@@ -30,6 +30,7 @@ from app.modules.agent.public import (
     TurnCompleted,
     TurnContext,
     TurnLimits,
+    TurnTimeoutError,
     Usage,
     UserMessage,
 )
@@ -117,6 +118,8 @@ def context(
     *,
     max_steps: int = 6,
     max_tool_retries: int = 2,
+    turn_timeout_s: float = 60,
+    max_tool_calls_per_step: int = 4,
     state: DialogState | None = None,
     confirmation: ConfirmationReply | None = None,
 ) -> TurnContext:
@@ -127,7 +130,12 @@ def context(
         model="fake-model",
         system="Ты — консультант.",
         history=HISTORY,
-        limits=TurnLimits(max_steps=max_steps, max_tool_retries=max_tool_retries),
+        limits=TurnLimits(
+            max_steps=max_steps,
+            max_tool_retries=max_tool_retries,
+            turn_timeout_s=turn_timeout_s,
+            max_tool_calls_per_step=max_tool_calls_per_step,
+        ),
         fallback_message=FALLBACK,
         temperature=0.3,
         state=state or DialogState(),
@@ -612,3 +620,116 @@ async def test_empty_last_step_after_visible_output_is_answer(result: ToolResult
 
     assert completed(events).finish is FinishReason.ANSWERED
     assert llm.remaining == 0
+
+
+async def collect(
+    llm: FakeLLM, tools: ToolExecutor, ctx: TurnContext, events: list[AgentEvent]
+) -> None:
+    async for event in AgentLoop(llm, tools).run_turn(ctx):
+        events.append(event)
+
+
+async def test_turn_timeout_stops_llm_stream_and_keeps_sent_text() -> None:
+    llm = FakeLLM([FakeReply(text="Сейчас подберу варианты для вас", delay_s=0.03)])
+    events: list[AgentEvent] = []
+
+    with pytest.raises(TurnTimeoutError):
+        await collect(llm, FakeTools(), context(turn_timeout_s=0.1), events)
+
+    # Отданное до дедлайна уже у клиента; TurnCompleted не приходит.
+    assert 0 < len(events) < 5
+    assert all(isinstance(e, AnswerDelta) for e in events)
+
+
+async def test_turn_timeout_cancels_tool_execution() -> None:
+    llm = FakeLLM([FakeReply(tool_calls=(call("c1"),))])
+    tools = FakeTools(hang=True)
+    events: list[AgentEvent] = []
+
+    with pytest.raises(TurnTimeoutError):
+        await collect(llm, tools, context(turn_timeout_s=0.05), events)
+
+    assert tools.cancelled is True
+    assert not any(isinstance(e, ToolFinished) for e in events)
+
+
+async def test_turn_deadline_covers_all_steps() -> None:
+    # Каждый шаг короче таймаута, вместе — дольше: дедлайн — на ход, а не на шаг.
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(call("c1"),)),
+            FakeReply(tool_calls=(call("c2"),)),
+            FakeReply(text="Нашла."),
+        ]
+    )
+
+    with pytest.raises(TurnTimeoutError):
+        await run(llm, FakeTools(delay_s=0.06), context(turn_timeout_s=0.1))
+
+
+async def test_turn_within_timeout_completes() -> None:
+    llm = FakeLLM([FakeReply(tool_calls=(call("c1"),)), FakeReply(text="Нашла.", delay_s=0.01)])
+
+    events = await run(llm, FakeTools(delay_s=0.01), context(turn_timeout_s=5))
+
+    assert completed(events).finish is FinishReason.ANSWERED
+
+
+async def test_timeout_error_inside_tools_is_not_turn_timeout() -> None:
+    class RaisingTools(FakeTools):
+        async def execute_many(
+            self, calls: Sequence[ToolCall], ctx: TurnContext
+        ) -> list[ToolResult]:
+            raise TimeoutError("свой таймаут исполнителя")
+
+    llm = FakeLLM([FakeReply(tool_calls=(call("c1"),))])
+
+    with pytest.raises(TimeoutError) as raised:
+        await run(llm, RaisingTools(), context(turn_timeout_s=5))
+
+    assert not isinstance(raised.value, TurnTimeoutError)
+
+
+async def test_turn_timeout_applies_to_confirmed_call() -> None:
+    class HangingConfirm(FakeTools):
+        async def execute_confirmed(self, call: ToolCall, ctx: TurnContext) -> ToolResult:
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    pending = PendingConfirmation(confirm_id="cf_1", tool="create_lead", arguments={})
+    ctx = context(
+        turn_timeout_s=0.05,
+        state=DialogState(pending_confirmation=pending),
+        confirmation=ConfirmationReply("cf_1", approved=True),
+    )
+
+    with pytest.raises(TurnTimeoutError):
+        await run(FakeLLM([]), HangingConfirm(), ctx)
+
+
+async def test_calls_over_step_limit_are_rejected_without_spending_retries() -> None:
+    calls = tuple(call(f"c{i}") for i in range(1, 7))
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=calls),
+            FakeReply(tool_calls=calls[4:]),
+            FakeReply(tool_calls=calls),
+            FakeReply(text="Вот что нашлось."),
+        ]
+    )
+    tools = FakeTools()
+
+    events = await run(llm, tools, context(max_tool_calls_per_step=4, max_tool_retries=0))
+
+    # Исполняются первые 4 по порядку; отказы по лимиту не исчерпали max_tool_retries=0.
+    assert [tuple(c.id for c in batch) for batch in tools.batches] == [
+        ("c1", "c2", "c3", "c4"),
+        ("c5", "c6"),
+        ("c1", "c2", "c3", "c4"),
+    ]
+    assert completed(events).finish is FinishReason.ANSWERED
+    over = tool_results(llm.requests[1])[4:]
+    assert [m.tool_call_id for m in over] == ["c5", "c6"]
+    assert all(m.is_error and "не больше 4 вызовов" in m.content for m in over)
+    finished = [e for e in events if isinstance(e, ToolFinished)]
+    assert [e.ok for e in finished[:6]] == [True] * 4 + [False] * 2

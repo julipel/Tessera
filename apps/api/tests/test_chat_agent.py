@@ -26,7 +26,9 @@ from app.modules.agent.public import (
     RegistryToolExecutor,
     ToolCall,
     ToolFinished,
+    ToolResultMessage,
     ToolStarted,
+    TurnTimeoutError,
     UserMessage,
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, MessageStatus, TurnRequest
@@ -488,6 +490,55 @@ async def test_fallback_message_in_conversation_language() -> None:
     events = [e async for e in builtin_turn_agent(lambda _: llm).run_turn(request)]
 
     assert [e.text for e in events if isinstance(e, AnswerDelta)] == ["Något gick fel."]
+
+
+def limits_request(limits: dict[str, Any]) -> TurnRequest:
+    user_input = {"type": "text", "text": "Привет"}
+    return TurnRequest(
+        tenant_id=TENANT,
+        conversation_id=uuid4(),
+        agent_config_id=uuid4(),
+        turn_id=uuid4(),
+        input=user_input,
+        agent_config={
+            **config({"provider": "openai", "name": "m"}, limits),
+            "tools": {"builtin": ["update_dialog_state"]},
+        },
+        history=(message(MessageRole.USER, "Привет", user_input),),
+    )
+
+
+async def test_turn_timeout_from_config_limits_turn() -> None:
+    llm = FakeLLM([FakeReply(text="Долгий ответ модели", delay_s=0.05)])
+
+    with pytest.raises(TurnTimeoutError):
+        async for _ in builtin_turn_agent(lambda _: llm).run_turn(
+            limits_request({"turn_timeout_s": 0.08})
+        ):
+            pass
+
+
+async def test_max_tool_calls_per_step_from_config() -> None:
+    calls = tuple(
+        ToolCall(
+            id=f"c{i}",
+            name="update_dialog_state",
+            arguments={"facts": [f"факт {i}"]},
+            raw_arguments="{}",
+        )
+        for i in (1, 2)
+    )
+    llm = FakeLLM([FakeReply(tool_calls=calls), FakeReply(text="Готово.")])
+
+    async for _ in builtin_turn_agent(lambda _: llm).run_turn(
+        limits_request({"max_tool_calls_per_step": 1})
+    ):
+        pass
+
+    first, second = [m for m in llm.requests[1].messages if isinstance(m, ToolResultMessage)]
+    assert first.is_error is False
+    assert second.is_error is True
+    assert "не больше 1 вызовов" in second.content
 
 
 @pytest.mark.parametrize(

@@ -23,6 +23,7 @@ from app.modules.agent.kernel import (
     ToolFinished,
     ToolStarted,
     TurnCompleted,
+    TurnTimeoutError,
 )
 from app.modules.chat.application.conversations import require_conversation, user_message
 from app.modules.chat.application.journal import TurnJournal
@@ -267,6 +268,11 @@ class TurnStream:
                 "turn_llm_failed", turn_id=str(self.turn_id), error=str(e), retryable=e.retryable
             )
             error = _TurnError("llm_unavailable", "модель сейчас недоступна", e.retryable)
+            queue.put_nowait(_AgentFinished(MessageStatus.FAILED, error))
+            return
+        except TurnTimeoutError:
+            # Уже показанный текст и компоненты остаются в ответе, как при ошибке модели.
+            error = _TurnError("turn_timeout", "ответ не уложился во время хода", retryable=True)
             queue.put_nowait(_AgentFinished(MessageStatus.FAILED, error))
             return
         except Exception:

@@ -1,8 +1,9 @@
 """Агентный цикл (architecture.md §5); поведение задают tests/test_agent_loop.py."""
 
+import asyncio
 import json
 import time
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Iterator, Sequence
 from dataclasses import dataclass, replace
 
 import structlog
@@ -31,7 +32,7 @@ from app.modules.agent.domain.llm import (
     Usage,
     UserMessage,
 )
-from app.modules.agent.domain.turn import ToolExecutor, TurnContext
+from app.modules.agent.domain.turn import ToolExecutor, TurnContext, TurnTimeoutError
 from app.modules.memory.kernel import DialogState
 from app.modules.tools.public import ToolError, ToolResult
 
@@ -47,7 +48,9 @@ class AgentLoop:
         """Ход агента: шаги модели и инструментов до ответа или мягкого завершения.
 
         Отмена хода (CancelledError) не перехватывается — она прерывает стрим модели
-        или исполнение инструментов."""
+        или исполнение инструментов. Дедлайн `turn_timeout_s` прерывает их так же и
+        поднимает `TurnTimeoutError`; отданные до него события остаются у клиента."""
+        deadline = asyncio.get_running_loop().time() + ctx.limits.turn_timeout_s
         messages: tuple[LLMMessage, ...] = ctx.history
         schemas = self._tools.schemas()
         usage = Usage()
@@ -55,7 +58,7 @@ class AgentLoop:
         visible = False  # клиент уже видит текст или компонент этого хода
         if ctx.confirmation is not None:
             outcome = _Outcome()
-            async for event in self._resolve_confirmation(ctx, outcome):
+            async for event in self._resolve_confirmation(ctx, outcome, deadline):
                 visible = visible or isinstance(event, ComponentEmitted)
                 yield event
             if outcome.state is not None:
@@ -76,7 +79,10 @@ class AgentLoop:
                 temperature=ctx.temperature,
             )
             response: LLMResponse | None = None
-            async for chunk in self._llm.stream(request):
+            stream = self._llm.stream(request)
+            # Дедлайн — на каждое ожидание чанка, а не на блок с yield: таймаут в async-
+            # генераторе не должен охватывать код потребителя.
+            while (chunk := await _before(deadline, anext(stream, None), ctx)) is not None:
                 match chunk:
                     case TextDelta(text=text):
                         visible = visible or bool(text.strip())
@@ -105,8 +111,14 @@ class AgentLoop:
 
             started = time.perf_counter()
             # Состояние шага, а не начала хода: сценарий, сменённый на прошлом шаге, уже
-            # действует для слотов (ADR-0026).
-            results = await self._execute(response.tool_calls, replace(ctx, state=state))
+            # действует для слотов (ADR-0026). Вызовы сверх лимита шага не исполняются.
+            limit = ctx.limits.max_tool_calls_per_step
+            executed = await _before(
+                deadline,
+                self._execute(response.tool_calls[:limit], replace(ctx, state=state)),
+                ctx,
+            )
+            results = [*executed, *(_over_limit(c, limit) for c in response.tool_calls[limit:])]
             batch_ms = round((time.perf_counter() - started) * 1000)
             for call, result in zip(response.tool_calls, results, strict=True):
                 for event in _reported(call, result, batch_ms):
@@ -123,7 +135,8 @@ class AgentLoop:
                 *(_as_message(c, r) for c, r in zip(response.tool_calls, results, strict=True)),
             )
 
-            if any(r.error and r.error.code == "validation_error" for r in results):
+            # Отказ по лимиту вызовов — не ошибка аргументов, ретраи на него не тратятся.
+            if any(r.error and r.error.code == "validation_error" for r in executed):
                 retries += 1
                 if retries > ctx.limits.max_tool_retries:
                     finish = FinishReason.TOOL_RETRIES_EXHAUSTED
@@ -144,7 +157,7 @@ class AgentLoop:
         yield TurnCompleted(finish=finish, usage=usage, steps=steps)
 
     async def _resolve_confirmation(
-        self, ctx: TurnContext, outcome: "_Outcome"
+        self, ctx: TurnContext, outcome: "_Outcome", deadline: float
     ) -> AsyncIterator[AgentEvent]:
         """Ответ на подтверждение — до модели и без неё (ADR-0021): подтверждённый вызов
         исполняется с аргументами из состояния, ожидание снимается. Итог — пометка
@@ -167,7 +180,7 @@ class AgentLoop:
             )
             yield ToolStarted(call.id, call.name, self._tools.display_label(call.name))
             started = time.perf_counter()
-            result = await self._tools.execute_confirmed(call, ctx)
+            result = await _before(deadline, self._tools.execute_confirmed(call, ctx), ctx)
             for event in _reported(call, result, round((time.perf_counter() - started) * 1000)):
                 yield event
             if result.ok and result.state_patch:
@@ -184,6 +197,36 @@ class AgentLoop:
         return [
             next(executed) if call.arguments is not None else _unparseable(call) for call in calls
         ]
+
+
+async def _before[T](deadline: float, awaitable: Awaitable[T], ctx: TurnContext) -> T:
+    """Дождаться `awaitable` до дедлайна хода; не успел — `TurnTimeoutError`. TimeoutError
+    изнутри (таймаут клиента, инструмента) — не дедлайн хода и пробрасывается как есть."""
+    try:
+        async with asyncio.timeout_at(deadline) as timeout:
+            return await awaitable
+    except TimeoutError as e:
+        if not timeout.expired():
+            raise
+        logger.warning(
+            "agent.turn_timeout",
+            tenant_id=str(ctx.tenant_id),
+            conversation_id=str(ctx.conversation_id),
+            turn_id=str(ctx.turn_id),
+            turn_timeout_s=ctx.limits.turn_timeout_s,
+        )
+        raise TurnTimeoutError(f"ход не уложился в {ctx.limits.turn_timeout_s:g} с") from e
+
+
+def _over_limit(call: ToolCall, limit: int) -> ToolResult:
+    return ToolResult(
+        error=ToolError(
+            code="validation_error",
+            message=f"{call.name}: за шаг исполняется не больше {limit} вызовов, этот не "
+            "исполнен; если он нужен, вызови его следующим шагом",
+            retryable=False,
+        )
+    )
 
 
 @dataclass(slots=True)

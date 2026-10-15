@@ -31,6 +31,7 @@ from app.modules.agent.public import (
     ToolFinished,
     ToolStarted,
     TurnCompleted,
+    TurnTimeoutError,
     Usage,
     UserMessage,
 )
@@ -782,6 +783,23 @@ async def test_llm_error_ends_turn_with_llm_unavailable(
         retryable,
     )
     assert events[3]["data"]["status"] == "failed"
+
+
+async def test_turn_timeout_ends_turn_with_retryable_error(
+    db_client: AsyncClient, conversation_id: UUID, use_agent: Any
+) -> None:
+    use_agent(FailingAgent(TurnTimeoutError("ход не уложился в 60 с")))
+
+    events = [e.model_dump() for _, e in _parse_sse((await _send(db_client, conversation_id)).text)]
+
+    assert [e["type"] for e in events] == ["turn_started", "text_delta", "error", "done"]
+    assert (events[2]["data"]["code"], events[2]["data"]["retryable"]) == ("turn_timeout", True)
+    assert events[3]["data"]["status"] == "failed"
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    # Показанный до таймаута текст сохранён вместе с ошибкой.
+    assert assistant.status == "failed"
+    assert [b.model_dump()["text"] for b in assistant.blocks] == ["Сейчас "]
+    assert assistant.error is not None and assistant.error.code == "turn_timeout"
 
 
 async def test_dialog_through_agent_loop_keeps_history(

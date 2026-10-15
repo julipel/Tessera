@@ -104,6 +104,8 @@ class LoopTurnAgent:
                 # None в конфиге невозможен по смыслу; значения — как default в схеме.
                 max_steps=limits.max_steps or 6,
                 max_tool_retries=2 if limits.max_tool_retries is None else limits.max_tool_retries,
+                turn_timeout_s=limits.turn_timeout_s or 60,
+                max_tool_calls_per_step=limits.max_tool_calls_per_step or 4,
             ),
             fallback_message=assistant_texts(config.assistant, language).fallback_message,
             temperature=primary.temperature,  # подсказка: применяет адаптер (ADR-0009)

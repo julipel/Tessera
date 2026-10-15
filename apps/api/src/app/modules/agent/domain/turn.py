@@ -7,16 +7,25 @@ from uuid import UUID
 
 from app.modules.agent.domain.llm import LLMMessage, ToolCall, ToolSchema
 from app.modules.memory.kernel import DialogState
-from app.modules.shared.kernel import TenantId
+from app.modules.shared.kernel import DomainError, TenantId
 from app.modules.tools.kernel import ToolResult
 
 
 @dataclass(frozen=True, slots=True)
 class TurnLimits:
-    """`max_tool_retries` — сколько шагов с ошибкой валидации аргументов допускается за ход."""
+    """`max_tool_retries` — сколько шагов с ошибкой валидации аргументов допускается за ход.
+    `turn_timeout_s` — дедлайн хода от начала цикла (модель и инструменты);
+    `max_tool_calls_per_step` — сколько вызовов шага исполняется, остальные отклоняются.
+    Значения по умолчанию — как в схеме AgentConfig."""
 
     max_steps: int
     max_tool_retries: int
+    turn_timeout_s: float = 60
+    max_tool_calls_per_step: int = 4
+
+
+class TurnTimeoutError(DomainError):
+    """Ход не уложился в `TurnLimits.turn_timeout_s`; повторить ход можно."""
 
 
 @dataclass(frozen=True, slots=True)

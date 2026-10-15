@@ -20,19 +20,19 @@ def client_ip(request: Request) -> str:
 async def enforce_rate_limits(
     limiter: RateLimiter, checks: Sequence[tuple[RateLimit, str]]
 ) -> None:
-    """Учесть запрос во всех правилах; превышено любое — 429 с наибольшим `Retry-After`."""
-    retry_after = 0
-    exceeded: list[str] = []
+    """Учесть запрос в правилах по порядку; первое превышенное — 429 с его `Retry-After`.
+
+    `checks` — от узкого правила к широкому (IP → тенант): после отказа следующие правила
+    не учитывают запрос, иначе отклонённые запросы одного IP исчерпали бы лимит тенанта
+    для всех его посетителей.
+    """
     for rule, subject in checks:
         decision = await limiter.hit(rule, subject)
         if not decision.allowed:
-            exceeded.append(rule.name)
-            retry_after = max(retry_after, decision.retry_after_s)
-    if exceeded:
-        logger.warning("rate_limited", rules=exceeded, retry_after_s=retry_after)
-        raise ApiError(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "rate_limited",
-            "слишком много запросов, повторите позже",
-            headers={"Retry-After": str(retry_after)},
-        )
+            logger.warning("rate_limited", rule=rule.name, retry_after_s=decision.retry_after_s)
+            raise ApiError(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "rate_limited",
+                "слишком много запросов, повторите позже",
+                headers={"Retry-After": str(decision.retry_after_s)},
+            )

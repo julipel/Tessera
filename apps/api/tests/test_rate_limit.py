@@ -15,7 +15,14 @@ from app.contracts import HttpError
 from app.modules.agent.public import AgentEvent, AnswerDelta, LLMError
 from app.modules.chat.api.router import MAX_TURN_BODY_BYTES
 from app.modules.chat.infrastructure.models import MessageRecord
-from app.modules.shared.public import InMemoryRateLimiter, RateLimit, RedisRateLimiter, TenantId
+from app.modules.shared.public import (
+    ApiError,
+    InMemoryRateLimiter,
+    RateLimit,
+    RedisRateLimiter,
+    TenantId,
+    enforce_rate_limits,
+)
 from test_agent_events import ScriptedAgent, _sse, _tenant
 from test_agent_events import use_agent as use_agent
 
@@ -42,6 +49,43 @@ async def test_window_limits_and_resets() -> None:
     assert (await limiter.hit(RULE, "ip-2")).allowed  # другой субъект — свой счётчик
     clock.now += 40
     assert (await limiter.hit(RULE, "ip-1")).allowed  # новое окно
+
+
+async def _allowed(limiter: InMemoryRateLimiter, checks: list[tuple[RateLimit, str]]) -> bool:
+    try:
+        await enforce_rate_limits(limiter, checks)
+    except ApiError as e:
+        assert e.status_code == 429
+        return False
+    return True
+
+
+async def test_requests_rejected_per_ip_do_not_use_up_tenant_limit() -> None:
+    """Один IP, упёршийся в свой лимит, не исчерпывает лимит тенанта для остальных."""
+    limiter = InMemoryRateLimiter()
+    per_ip, per_tenant = RateLimit("ip", 2, 60), RateLimit("tenant", 5, 60)
+
+    def checks(ip: str) -> list[tuple[RateLimit, str]]:
+        return [(per_ip, ip), (per_tenant, "shop")]
+
+    flood = [await _allowed(limiter, checks("ip-a")) for _ in range(10)]
+    others = [await _allowed(limiter, checks(ip)) for ip in ("ip-b", "ip-c", "ip-d")]
+
+    assert flood.count(True) == 2
+    assert others == [True, True, True]  # у тенанта ещё 3 из 5
+    assert not await _allowed(limiter, checks("ip-e"))  # а теперь лимит тенанта исчерпан
+
+
+async def test_first_exceeded_rule_answers_with_its_retry_after() -> None:
+    clock = Clock(1000.0)  # 1000 % 60 = 40: окно минуты кончится через 20 с
+    limiter = InMemoryRateLimiter(now=clock)
+    per_minute, per_hour = RateLimit("minute", 1, 60), RateLimit("hour", 1, 3600)
+    await enforce_rate_limits(limiter, [(per_minute, "ip"), (per_hour, "ip")])
+
+    with pytest.raises(ApiError) as error:
+        await enforce_rate_limits(limiter, [(per_minute, "ip"), (per_hour, "ip")])
+
+    assert error.value.headers == {"Retry-After": "20"}
 
 
 async def test_zero_limit_disables_rule() -> None:

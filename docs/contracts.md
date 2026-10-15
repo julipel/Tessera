@@ -91,7 +91,7 @@
 ```
 Статусы: 401 `unauthorized` (нет/неверный `X-Widget-Key`), 403 `forbidden` (`Origin` не
 разрешён для ключа), 404 `not_found` /
-`conversation_not_found`, 409 `duplicate_message` / `not_retryable`, 405/422 `invalid_input`, 429 `rate_limited`, 500 `internal`
+`conversation_not_found`, 409 `duplicate_message` / `not_retryable` / `turn_in_progress` (в диалоге уже идёт ход, ввод не записан; ADR-0041), 405/422 `invalid_input`, 429 `rate_limited`, 500 `internal`
 (подробности — только в логе с `trace_id`; `X-Trace-Id` есть в любом ответе).
 
 Лимиты (P7-04a, ADR-0030): `POST /v1/conversations` — 30 в час с IP; ходы (`POST …/messages`,
@@ -349,7 +349,7 @@ branding:
 `conversation_not_found`, `rate_limited` (retryable), `internal`.
 
 Только в HTTP-ответах (не в SSE `error`): `unauthorized`, `forbidden`, `not_found`,
-`duplicate_message`, `not_retryable`.
+`duplicate_message`, `not_retryable`, `turn_in_progress` (retryable).
 
 HTTP-ответ с `invalid_input` может нести `details: [{loc, message}]` — ошибки по местам ввода
 (`loc` — путь из ключей и индексов, пустой — весь ввод); пока — только AgentConfig в админке.

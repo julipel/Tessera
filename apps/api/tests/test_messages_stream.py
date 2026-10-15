@@ -12,6 +12,7 @@ import structlog
 from fastapi import FastAPI
 from httpx import AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import ClientDisconnect
 
 from app.contracts import Event, HttpError, MessageHistory, UserInput
 from app.logs import TRACE_ID_HEADER
@@ -34,9 +35,9 @@ from app.modules.agent.public import (
     UserMessage,
 )
 from app.modules.chat.api.router import get_turn_agent
-from app.modules.chat.api.sse import sse_stream
+from app.modules.chat.api.sse import TurnResponse, sse_stream
 from app.modules.chat.application.turns import TurnRegistry, retry_turn, start_turn
-from app.modules.chat.domain.entities import ToolCallEntry, TurnRequest
+from app.modules.chat.domain.entities import Conversation, ToolCallEntry, TurnRequest
 from app.modules.chat.domain.ports import TurnAgent
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent, builtin_turn_agent
 from app.modules.chat.infrastructure.models import MessageRecord
@@ -442,6 +443,107 @@ async def test_cancel_interrupts_running_turn(
     assert assistant.status == "interrupted"
     assert [b.root.model_dump()["text"] for b in assistant.blocks] == ["Подбираю "]
     assert agent.turn_id not in app.state.turn_registry
+
+
+# --- Один ход на диалог (ADR-0041) ---
+
+
+@pytest.mark.parametrize("retry", [False, True], ids=["send", "retry"])
+async def test_second_turn_during_turn_is_409_and_not_saved(
+    db_client: AsyncClient, conversation_id: UUID, use_agent: Any, retry: bool
+) -> None:
+    use_agent(FailingAgent(FLAKY))
+    failed = _parse_sse((await _send(db_client, conversation_id)).text)[-1][1].root
+    agent = GatedAgent()
+    use_agent(agent)
+    stream = asyncio.create_task(_send(db_client, conversation_id))
+    await asyncio.wait_for(agent.first_sent.wait(), WAIT)
+    before = (await _history(db_client, conversation_id)).messages
+
+    second = await (
+        _retry(db_client, conversation_id, str(failed.message_id))
+        if retry
+        else _send(db_client, conversation_id)
+    )
+
+    assert second.status_code == 409
+    assert HttpError.model_validate(second.json()).error.model_dump(
+        include={"code", "retryable"}
+    ) == {
+        "code": "turn_in_progress",
+        "retryable": True,
+    }
+    assert (await _history(db_client, conversation_id)).messages == before
+    assert (await _cancel(db_client, conversation_id, agent.turn_id)).status_code == 204
+    await asyncio.wait_for(stream, WAIT)
+    use_agent(ScriptedAgent())
+    assert (await _send(db_client, conversation_id)).status_code == 200
+
+
+async def test_foreign_tenant_on_busy_conversation_is_404_and_does_not_block_it(
+    db_client: AsyncClient, db_session: AsyncSession, conversation_id: UUID, use_agent: Any
+) -> None:
+    """Занятость диалога — в пределах тенанта: чужой ключ виджета не узнаёт, что в диалоге
+    идёт ход, и не занимает его."""
+    await _tenant(db_session, "other")
+    agent = GatedAgent()
+    use_agent(agent)
+    stream = asyncio.create_task(_send(db_client, conversation_id))
+    await asyncio.wait_for(agent.first_sent.wait(), WAIT)
+
+    foreign = await _send(db_client, conversation_id, slug="other")
+
+    assert (foreign.status_code, _error_code(foreign)) == (404, "conversation_not_found")
+    assert _error_code(await _send(db_client, conversation_id)) == "turn_in_progress"
+    assert (await _cancel(db_client, conversation_id, agent.turn_id)).status_code == 204
+    await asyncio.wait_for(stream, WAIT)
+
+
+async def test_rejected_send_frees_conversation(
+    db_client: AsyncClient, conversation_id: UUID
+) -> None:
+    client_message_id = uuid4()
+    assert (await _send(db_client, conversation_id, client_message_id=client_message_id)).is_success
+
+    repeated = await _send(db_client, conversation_id, client_message_id=client_message_id)
+
+    assert _error_code(repeated) == "duplicate_message"
+    assert (await _send(db_client, conversation_id)).is_success
+
+
+async def test_response_closed_before_stream_frees_conversation(
+    shop: TenantId, conversation_id: UUID, db_session: AsyncSession, db_client: AsyncClient
+) -> None:
+    """Клиент отключился до первого события: Starlette не запускает генератор стрима,
+    ход закрывает сам ответ — диалог свободен, ответ записан как прерванный."""
+    registry = TurnRegistry()
+    turn = await start_turn(
+        shop,
+        conversation_id,
+        uuid4(),
+        UserInput.model_validate(TEXT),
+        ConversationRepository(db_session),
+        MessageRepository(db_session),
+        ToolCallRepository(db_session),
+        TenantsAgentConfigs(db_session),
+        ScriptedAgent(),
+        db_session.commit,
+        registry,
+    )
+
+    async def receive() -> dict[str, Any]:
+        await anyio.sleep_forever()
+        return {}
+
+    async def send(message: Mapping[str, Any]) -> None:
+        raise OSError("клиент отключился")
+
+    with pytest.raises(ClientDisconnect):
+        await TurnResponse(turn)({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+
+    assert await registry.acquire(shop, conversation_id, uuid4())
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    assert assistant.status == "interrupted"
 
 
 async def test_cancel_of_foreign_unknown_or_finished_turn_is_404(
@@ -1011,6 +1113,209 @@ async def test_form_submit_then_confirmed_lead_through_agent_loop(
     assert [e["type"] for e in second][:3] == ["turn_started", "tool_started", "tool_finished"]
     assert second[-1]["data"]["status"] == "completed"
     assert "pending_confirmation" not in await _state(db_session, forms_tenant, form_conversation)
+
+
+class FrozenConversations(ConversationRepository):
+    """Диалог читается таким, каким был до снятия ожидания другим ходом: гонка двух ходов,
+    прочитавших состояние раньше, чем один из них снял ожидание."""
+
+    def __init__(self, session: AsyncSession, snapshot: Conversation) -> None:
+        super().__init__(session)
+        self.snapshot = snapshot
+
+    async def find(self, tenant_id: TenantId, conversation_id: UUID) -> Conversation | None:
+        return self.snapshot
+
+
+@pytest.mark.parametrize("snapshot", [False, True], ids=["after_claim", "read_before_claim"])
+async def test_confirmation_pressed_twice_creates_one_lead(
+    db_session: AsyncSession,
+    db_client: AsyncClient,
+    forms_tenant: TenantId,
+    form_conversation: UUID,
+    use_agent: Any,
+    snapshot: bool,
+) -> None:
+    """M-1, ADR-0041: два хода с одним confirm_id (две вкладки, двойной клик, разные
+    процессы без Redis) — заявка одна, второй ход отвечает, что подтверждение устарело."""
+    create = ToolCall(
+        id="call_1",
+        name="create_lead",
+        arguments={"form_key": "contact", "fields": {"phone": "+7900"}},
+        raw_arguments="{}",
+    )
+    llm = FakeLLM(
+        [
+            FakeReply(text="Проверьте заявку.", tool_calls=(create,)),
+            FakeReply(),
+            FakeReply(text="Заявка отправлена."),
+            FakeReply(text="Заявка уже отправлена."),
+        ]
+    )
+    agent = builtin_turn_agent(lambda _: llm, leads=SessionLeads(db_session))
+    use_agent(agent)
+    submit = {"type": "form_submit", "form_id": "contact", "values": {"phone": "+7900"}}
+    first = await _events(await _send(db_client, form_conversation, submit, slug="forms"))
+    [confirm] = [e["data"]["component"] for e in first if e["type"] == "component"]
+    action = confirm["confirm_action"]
+    press = UserInput.model_validate(
+        {"type": "action", "action_id": action["action_id"], "payload": action["payload"]}
+    )
+    before = await ConversationRepository(db_session).find(forms_tenant, form_conversation)
+    assert before is not None and "pending_confirmation" in before.state
+
+    def stores(
+        conversations: ConversationRepository,
+    ) -> tuple[ConversationRepository, MessageRepository, ToolCallRepository, TenantsAgentConfigs]:
+        return (
+            conversations,
+            MessageRepository(db_session),
+            ToolCallRepository(db_session),
+            TenantsAgentConfigs(db_session),
+        )
+
+    # Два хода подготовлены до того, как первый исполнит действие; реестры разные — как
+    # процессы API, не видящие друг друга (Redis недоступен).
+    turns = [
+        await start_turn(
+            forms_tenant,
+            form_conversation,
+            uuid4(),
+            press,
+            *stores(
+                FrozenConversations(db_session, before)
+                if snapshot and i
+                else ConversationRepository(db_session)
+            ),
+            agent,
+            db_session.commit,
+            TurnRegistry(),
+        )
+        for i in range(2)
+    ]
+    results = [[e.root.type async for e in turn.events()] for turn in turns]
+
+    leads = await LeadRepository(db_session).list_for_conversation(forms_tenant, form_conversation)
+    assert len(leads) == 1
+    assert "tool_started" in results[0]
+    assert "tool_started" not in results[1] and results[1][-1] == "done"
+    assert "устарело" in str(llm.requests[-1].messages[-1])
+    assert "pending_confirmation" not in await _state(db_session, forms_tenant, form_conversation)
+
+
+class StateAgent:
+    """Ход без подтверждения, который меняет только факты — со своим (старым) ожиданием
+    в состоянии, как его прочитал ход."""
+
+    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
+        state = DialogState.from_dict(request.dialog_state).apply({"facts": ["спешит"]})
+        yield DialogStateUpdated(state)
+        yield TurnCompleted(FinishReason.ANSWERED, Usage(1, 1), steps=1)
+
+
+async def test_turn_does_not_restore_confirmation_claimed_by_other_turn(
+    db_session: AsyncSession,
+    db_client: AsyncClient,
+    forms_tenant: TenantId,
+    form_conversation: UUID,
+    use_agent: Any,
+) -> None:
+    """Ход прочитал состояние с ожиданием, другой ход его снял и исполнил: запись
+    состояния первым ходом не возвращает ожидание — повторное нажатие не даст вторую заявку."""
+    pending = {"confirm_id": "c-1", "tool": "create_lead", "arguments": {}}
+    repo = ConversationRepository(db_session)
+    await repo.update_state(forms_tenant, form_conversation, {"pending_confirmation": pending})
+    await db_session.commit()
+    snapshot = await repo.find(forms_tenant, form_conversation)
+    assert snapshot is not None
+    turn = await start_turn(
+        forms_tenant,
+        form_conversation,
+        uuid4(),
+        UserInput.model_validate(TEXT),
+        FrozenConversations(db_session, snapshot),
+        MessageRepository(db_session),
+        ToolCallRepository(db_session),
+        TenantsAgentConfigs(db_session),
+        StateAgent(),
+        db_session.commit,
+        TurnRegistry(),
+    )
+    assert await repo.claim_confirmation(forms_tenant, form_conversation, "c-1")
+    await db_session.commit()
+
+    assert [e.root.type async for e in turn.events()][-1] == "done"
+
+    assert await _state(db_session, forms_tenant, form_conversation) == {"facts": ["спешит"]}
+
+
+async def test_retry_of_confirmation_claims_it_before_execution(
+    db_session: AsyncSession,
+    db_client: AsyncClient,
+    forms_tenant: TenantId,
+    form_conversation: UUID,
+    use_agent: Any,
+) -> None:
+    """Повтор нажатия снимает ожидание тем же условным UPDATE: повтор и новое нажатие той же
+    кнопки (другой процесс) исполняют действие один раз."""
+    create = ToolCall(
+        id="call_1",
+        name="create_lead",
+        arguments={"form_key": "contact", "fields": {"phone": "+7900"}},
+        raw_arguments="{}",
+    )
+    llm = FakeLLM(
+        [
+            FakeReply(text="Проверьте заявку.", tool_calls=(create,)),
+            FakeReply(),
+            FakeReply(text="Заявка отправлена."),
+            FakeReply(text="Заявка уже отправлена."),
+        ]
+    )
+    agent = builtin_turn_agent(lambda _: llm, leads=SessionLeads(db_session))
+    use_agent(agent)
+    submit = {"type": "form_submit", "form_id": "contact", "values": {"phone": "+7900"}}
+    first = await _events(await _send(db_client, form_conversation, submit, slug="forms"))
+    [confirm] = [e["data"]["component"] for e in first if e["type"] == "component"]
+    action = confirm["confirm_action"]
+    press = {"type": "action", "action_id": action["action_id"], "payload": action["payload"]}
+    state = await _state(db_session, forms_tenant, form_conversation)
+    # Нажатие упало до исполнения; ожидание снова в состоянии (диалог до ADR-0041).
+    use_agent(FailingAgent(FLAKY))
+    failed = (await _events(await _send(db_client, form_conversation, press, slug="forms")))[-1]
+    await ConversationRepository(db_session).update_state(forms_tenant, form_conversation, state)
+    await db_session.commit()
+    stores = (
+        ConversationRepository(db_session),
+        MessageRepository(db_session),
+        ToolCallRepository(db_session),
+        TenantsAgentConfigs(db_session),
+    )
+
+    retried = await retry_turn(
+        forms_tenant,
+        form_conversation,
+        UUID(failed["message_id"]),
+        *stores,
+        agent,
+        db_session.commit,
+        TurnRegistry(),
+    )
+    pressed = await start_turn(
+        forms_tenant,
+        form_conversation,
+        uuid4(),
+        UserInput.model_validate(press),
+        *stores,
+        agent,
+        db_session.commit,
+        TurnRegistry(),
+    )
+    results = [[e.root.type async for e in turn.events()] for turn in (retried, pressed)]
+
+    leads = await LeadRepository(db_session).list_for_conversation(forms_tenant, form_conversation)
+    assert len(leads) == 1
+    assert "tool_started" in results[0] and "tool_started" not in results[1]
 
 
 # --- Повтор неудачного ответа (P5-08a, ADR-0023) ---

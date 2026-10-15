@@ -1,6 +1,7 @@
 """Ход ассистента: события агента → SSE-протокол (docs/contracts.md §2) и запись ответа."""
 
 import asyncio
+import time
 from collections.abc import AsyncGenerator, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -8,6 +9,7 @@ from functools import partial
 from typing import Any
 from uuid import UUID, uuid4
 
+import anyio
 import structlog
 
 from app.contracts import AgentConfig, Event, FormSubmitInput, UserInput
@@ -44,8 +46,10 @@ from app.modules.chat.domain.errors import (
     InvalidInputError,
     MessageNotFoundError,
     RetryNotAllowedError,
+    TurnInProgressError,
 )
 from app.modules.chat.domain.ports import (
+    TURN_TTL_S,
     AgentConfigSource,
     AgentEventStore,
     Commit,
@@ -56,7 +60,7 @@ from app.modules.chat.domain.ports import (
     TurnDirectory,
 )
 from app.modules.shared.kernel import TenantId
-from app.modules.tools.public import form_values_problem
+from app.modules.tools.public import form_values_problem, pressed_confirmation
 
 PROTOCOL_VERSION = "1"
 
@@ -318,8 +322,16 @@ class TurnStream:
                 self.conversation.tenant_id, self.message_id, self._finished_calls
             )
         if self._dialog_state is not None:
+            # Ожидание, которое ход не менял, остаётся таким, как в БД: его мог снять или
+            # заменить другой ход, пока этот шёл (ADR-0041).
+            pending_unchanged = self._dialog_state.get(
+                "pending_confirmation"
+            ) == self.request.dialog_state.get("pending_confirmation")
             await self.conversations.update_state(
-                self.conversation.tenant_id, self.conversation.id, self._dialog_state
+                self.conversation.tenant_id,
+                self.conversation.id,
+                self._dialog_state,
+                keep_pending_confirmation=pending_unchanged,
             )
         if self.agent_events is not None:
             await self._save_journal(status, error)
@@ -384,35 +396,46 @@ async def start_turn(
 
     Отправка формы, которой нет в конфиге, или с неподходящими значениями —
     InvalidInputError. Повтор client_message_id — DuplicateMessageError: ход по этому вводу
-    уже запускался, а ответ на него клиент берёт из истории."""
-    conversation, config = await _conversation_with_config(
-        tenant_id, conversation_id, conversations, configs
-    )
-    if isinstance(user_input.root, FormSubmitInput):
-        _check_form_submit(config, user_input.root)
-    message, created = await messages.add_once(
-        tenant_id, user_message(conversation_id, client_message_id, user_input)
-    )
-    if not created:
-        raise DuplicateMessageError(f"сообщение {client_message_id} уже отправлено")
-    history = await messages.list_for(tenant_id, conversation_id)
-    # Последнее обращение к БД до стрима: commit отпускает соединение на время ответа модели
-    # (ADR-0034).
-    await commit()
-    request = _turn_request(conversation, config, message, history, trace_id)
-    return TurnStream(
-        conversation,
-        request,
-        agent,
-        conversations,
-        messages,
-        tool_calls,
-        commit,
-        registry,
-        summaries=summaries,
-        agent_events=agent_events,
-        trace_id=trace_id,
-    )
+    уже запускался, а ответ на него клиент берёт из истории.
+
+    Диалог занимается ходом до чтения состояния: в диалоге уже идёт ход —
+    TurnInProgressError (ADR-0041). Нажатие кнопки подтверждения снимает ожидание в БД
+    до стрима: если его уже снял другой ход, агент получает состояние без ожидания
+    и действие не исполняет."""
+    turn_id = await _acquire(registry, tenant_id, conversation_id)
+    try:
+        conversation, config = await _conversation_with_config(
+            tenant_id, conversation_id, conversations, configs
+        )
+        if isinstance(user_input.root, FormSubmitInput):
+            _check_form_submit(config, user_input.root)
+        message, created = await messages.add_once(
+            tenant_id, user_message(conversation_id, client_message_id, user_input)
+        )
+        if not created:
+            raise DuplicateMessageError(f"сообщение {client_message_id} уже отправлено")
+        state = await _claimed_state(conversation, message, conversations)
+        history = await messages.list_for(tenant_id, conversation_id)
+        # Последнее обращение к БД до стрима: commit отпускает соединение на время ответа
+        # модели (ADR-0034).
+        await commit()
+        request = _turn_request(conversation, config, message, history, trace_id, turn_id, state)
+        return TurnStream(
+            conversation,
+            request,
+            agent,
+            conversations,
+            messages,
+            tool_calls,
+            commit,
+            registry,
+            summaries=summaries,
+            agent_events=agent_events,
+            trace_id=trace_id,
+        )
+    except BaseException:
+        await _release_shielded(registry, tenant_id, conversation_id, turn_id)
+        raise
 
 
 async def retry_turn(
@@ -436,41 +459,87 @@ async def retry_turn(
     Ответ помечается заменённым новым ответом (и пометка фиксируется до начала стрима):
     в истории клиента и контексте модели остаётся один ввод и новый ответ. Повторить можно
     только последний ответ диалога с повторяемой ошибкой — иначе RetryNotAllowedError;
-    ответа нет в диалоге (или он уже заменён) — MessageNotFoundError."""
-    conversation, config = await _conversation_with_config(
-        tenant_id, conversation_id, conversations, configs
-    )
-    history = list(await messages.list_for(tenant_id, conversation_id))
-    failed = next((m for m in history if m.id == message_id), None)
-    if failed is None:
-        raise MessageNotFoundError(f"сообщения {message_id} в диалоге нет")
-    if not _retryable(failed) or failed is not history[-1]:
-        raise RetryNotAllowedError(f"ответ {message_id} нельзя повторить")
-    history.pop()
-    question = next((m for m in reversed(history) if m.role is MessageRole.USER), None)
-    if question is None:
-        raise RetryNotAllowedError(f"у ответа {message_id} нет ввода пользователя")
-    new_message_id = uuid4()
-    if not await messages.mark_replaced(tenant_id, message_id, new_message_id):
-        raise RetryNotAllowedError(f"ответ {message_id} уже повторён")
-    await commit()
-    logger.info("turn_retry", replaced_message_id=str(message_id))
-    request = _turn_request(conversation, config, question, history, trace_id)
-    return TurnStream(
-        conversation,
-        request,
-        agent,
-        conversations,
-        messages,
-        tool_calls,
-        commit,
-        registry,
-        message_id=new_message_id,
-        summaries=summaries,
-        agent_events=agent_events,
-        trace_id=trace_id,
-        retry_of=message_id,
-    )
+    ответа нет в диалоге (или он уже заменён) — MessageNotFoundError; в диалоге идёт
+    другой ход — TurnInProgressError (ADR-0041)."""
+    turn_id = await _acquire(registry, tenant_id, conversation_id)
+    try:
+        conversation, config = await _conversation_with_config(
+            tenant_id, conversation_id, conversations, configs
+        )
+        history = list(await messages.list_for(tenant_id, conversation_id))
+        failed = next((m for m in history if m.id == message_id), None)
+        if failed is None:
+            raise MessageNotFoundError(f"сообщения {message_id} в диалоге нет")
+        if not _retryable(failed) or failed is not history[-1]:
+            raise RetryNotAllowedError(f"ответ {message_id} нельзя повторить")
+        history.pop()
+        question = next((m for m in reversed(history) if m.role is MessageRole.USER), None)
+        if question is None:
+            raise RetryNotAllowedError(f"у ответа {message_id} нет ввода пользователя")
+        new_message_id = uuid4()
+        if not await messages.mark_replaced(tenant_id, message_id, new_message_id):
+            raise RetryNotAllowedError(f"ответ {message_id} уже повторён")
+        # Обычно ожидание уже сняла первая попытка, и повтор ответит «устарело»; снимаем
+        # условно и здесь — подтверждение не исполнится без условного UPDATE.
+        state = await _claimed_state(conversation, question, conversations)
+        await commit()
+        logger.info("turn_retry", replaced_message_id=str(message_id))
+        request = _turn_request(conversation, config, question, history, trace_id, turn_id, state)
+        return TurnStream(
+            conversation,
+            request,
+            agent,
+            conversations,
+            messages,
+            tool_calls,
+            commit,
+            registry,
+            message_id=new_message_id,
+            summaries=summaries,
+            agent_events=agent_events,
+            trace_id=trace_id,
+            retry_of=message_id,
+        )
+    except BaseException:
+        await _release_shielded(registry, tenant_id, conversation_id, turn_id)
+        raise
+
+
+async def _acquire(registry: "TurnRegistry", tenant_id: TenantId, conversation_id: UUID) -> UUID:
+    """Занять диалог новым ходом; id хода — для запроса агенту."""
+    turn_id = uuid4()
+    if not await registry.acquire(tenant_id, conversation_id, turn_id):
+        logger.info("turn_rejected_in_progress")
+        raise TurnInProgressError(f"в диалоге {conversation_id} уже идёт ход")
+    return turn_id
+
+
+async def _release_shielded(
+    registry: "TurnRegistry", tenant_id: TenantId, conversation_id: UUID, turn_id: UUID
+) -> None:
+    # Под щитом, как close() в sse_stream: повторная отмена anyio не прервёт снятие ключа.
+    with anyio.CancelScope(shield=True):
+        await registry.release(tenant_id, conversation_id, turn_id)
+
+
+async def _claimed_state(
+    conversation: Conversation, message: ChatMessage, conversations: ConversationStore
+) -> dict[str, Any]:
+    """Состояние диалога для агента. Нажатие кнопки confirm/cancel снимает ожидание в БД
+    (ADR-0041); если его уже снял другой ход, ожидание убирается и из прочитанного
+    состояния — цикл агента ответит, что подтверждение устарело."""
+    state = conversation.state
+    pressed = pressed_confirmation(message.input or {})
+    if pressed is None:
+        return state
+    confirm_id, _ = pressed
+    if await conversations.claim_confirmation(conversation.tenant_id, conversation.id, confirm_id):
+        return state
+    pending = state.get("pending_confirmation")
+    if isinstance(pending, dict) and pending.get("confirm_id") == confirm_id:
+        logger.info("turn_confirmation_already_claimed")
+        return {k: v for k, v in state.items() if k != "pending_confirmation"}
+    return state
 
 
 def _retryable(message: ChatMessage) -> bool:
@@ -500,6 +569,8 @@ def _turn_request(
     question: ChatMessage,
     history: Sequence[ChatMessage],
     trace_id: str,
+    turn_id: UUID,
+    dialog_state: dict[str, Any],
 ) -> TurnRequest:
     # Свёрнутые в сводку сообщения модель видит только через сводку (architecture.md §7).
     summary, recent = after_summary(conversation, history)
@@ -507,11 +578,11 @@ def _turn_request(
         tenant_id=conversation.tenant_id,
         conversation_id=conversation.id,
         agent_config_id=conversation.agent_config_id,
-        turn_id=uuid4(),
+        turn_id=turn_id,
         input=question.input or {},
         agent_config=config,
         history=tuple(recent),
-        dialog_state=conversation.state,
+        dialog_state=dialog_state,
         history_summary=summary,
         language=conversation.language,
         trace_id=trace_id,
@@ -557,9 +628,14 @@ class TurnRegistry:
     (ADR-0035). Без `directory` отмена срабатывает только в процессе со стримом.
     """
 
-    def __init__(self, directory: TurnDirectory | None = None) -> None:
+    def __init__(
+        self, directory: TurnDirectory | None = None, busy_ttl_s: float = TURN_TTL_S
+    ) -> None:
         self._turns: dict[UUID, TurnStream] = {}
+        # (тенант, диалог) → (ход, срок занятости)
+        self._busy: dict[tuple[TenantId, UUID], tuple[UUID, float]] = {}
         self._directory = directory
+        self._busy_ttl_s = busy_ttl_s
 
     def __contains__(self, turn_id: object) -> bool:
         return turn_id in self._turns
@@ -572,8 +648,41 @@ class TurnRegistry:
             )
 
     async def remove(self, turn: TurnStream) -> None:
+        """Снять ход с реестра и освободить его диалог."""
         if self._turns.pop(turn.turn_id, None) is not None and self._directory is not None:
             await self._directory.unregister(turn.turn_id)
+        await self.release(turn.conversation.tenant_id, turn.conversation.id, turn.turn_id)
+
+    async def acquire(self, tenant_id: TenantId, conversation_id: UUID, turn_id: UUID) -> bool:
+        """Занять диалог ходом (ADR-0041). False — в диалоге идёт другой ход: в этом
+        процессе или, с `directory`, в другом. Диалог — в пределах тенанта: запрос чужого
+        тенанта не видит и не занимает чужой ход. Срок занятости — на случай, если ход
+        не освободит диалог (стрим так и не начался)."""
+        key = (tenant_id, conversation_id)
+        now = time.monotonic()
+        busy = self._busy.get(key)
+        if busy is not None and busy[0] != turn_id and busy[1] > now:
+            return False
+        # Занять в процессе до запроса к каталогу: пока он ждёт (недоступный Redis — до
+        # таймаута), одновременный ход того же диалога уже видит занятость.
+        self._busy[key] = (turn_id, now + self._busy_ttl_s)
+        if self._directory is not None and not await self._directory.acquire_conversation(
+            tenant_id, conversation_id, turn_id
+        ):
+            if self._busy.get(key, (None,))[0] == turn_id:
+                del self._busy[key]
+            return False
+        return True
+
+    async def release(self, tenant_id: TenantId, conversation_id: UUID, turn_id: UUID) -> None:
+        """Освободить диалог, если его занимает ход `turn_id`."""
+        key = (tenant_id, conversation_id)
+        busy = self._busy.get(key)
+        if busy is None or busy[0] != turn_id:
+            return
+        del self._busy[key]
+        if self._directory is not None:
+            await self._directory.release_conversation(tenant_id, conversation_id, turn_id)
 
     async def cancel(self, tenant_id: TenantId, conversation_id: UUID, turn_id: UUID) -> bool:
         """False — хода нет, он завершён или чужой (тенант/диалог): для клиента это одно и то же."""

@@ -1408,7 +1408,7 @@ export interface HttpError {
  */
 export interface HttpErrorBody {
   /**
-   * Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), forbidden (403), not_found (404), duplicate_message (409), not_retryable (409).
+   * Коды SSE-ошибок (events.schema.json ErrorData) плюс только HTTP: unauthorized (401), forbidden (403), not_found (404), duplicate_message (409), not_retryable (409), turn_in_progress (409, retryable).
    */
   code:
     | "llm_unavailable"
@@ -1422,7 +1422,8 @@ export interface HttpErrorBody {
     | "forbidden"
     | "not_found"
     | "duplicate_message"
-    | "not_retryable";
+    | "not_retryable"
+    | "turn_in_progress";
   message: string;
   retryable: boolean;
   /**

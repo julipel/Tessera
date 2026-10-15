@@ -40,8 +40,6 @@ from app.modules.tenants.kernel import (
     resolve_language,
 )
 from app.modules.tools.public import (
-    CANCEL_ACTION_ID,
-    CONFIRM_ACTION_ID,
     Catalog,
     ConfirmLabels,
     KnowledgeSearcher,
@@ -49,6 +47,7 @@ from app.modules.tools.public import (
     ToolRegistry,
     builtin_tools,
     confirm_labels,
+    pressed_confirmation,
 )
 
 type LLMForProvider = Callable[[Provider], LLMClient]
@@ -178,13 +177,10 @@ def builtin_turn_agent(
 
 def confirmation_reply(user_input: dict[str, Any]) -> ConfirmationReply | None:
     """Нажатие кнопки компонента confirm (ADR-0021); иначе None."""
-    if user_input.get("type") != "action":
+    if (pressed := pressed_confirmation(user_input)) is None:
         return None
-    action_id = user_input.get("action_id")
-    confirm_id = (user_input.get("payload") or {}).get("confirm_id")
-    if action_id not in (CONFIRM_ACTION_ID, CANCEL_ACTION_ID) or not isinstance(confirm_id, str):
-        return None
-    return ConfirmationReply(confirm_id=confirm_id, approved=action_id == CONFIRM_ACTION_ID)
+    confirm_id, approved = pressed
+    return ConfirmationReply(confirm_id=confirm_id, approved=approved)
 
 
 def _confirm_labels(config: AgentConfig, language: Language) -> ConfirmLabels:

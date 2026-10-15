@@ -84,3 +84,17 @@ class InvalidToolDefinitionError(DomainError):
 CONFIRM_ACTION_ID = "confirm"
 CANCEL_ACTION_ID = "cancel"
 """`action_id` кнопок confirm; `payload: {confirm_id}` связывает нажатие с ожидающим вызовом."""
+
+
+def pressed_confirmation(user_input: Mapping[str, Any]) -> tuple[str, bool] | None:
+    """Нажатие кнопки компонента confirm (ADR-0021): `(confirm_id, подтверждено)`; иначе None.
+
+    Один разбор и для снятия ожидания до хода (chat, ADR-0041), и для цикла агента: если
+    они разойдутся, агент исполнит подтверждение, которое chat не снял."""
+    if user_input.get("type") != "action":
+        return None
+    action_id = user_input.get("action_id")
+    confirm_id = (user_input.get("payload") or {}).get("confirm_id")
+    if action_id not in (CONFIRM_ACTION_ID, CANCEL_ACTION_ID) or not isinstance(confirm_id, str):
+        return None
+    return confirm_id, action_id == CONFIRM_ACTION_ID

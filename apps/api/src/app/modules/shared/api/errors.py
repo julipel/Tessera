@@ -29,10 +29,13 @@ type ErrorCode = Literal[
     "not_found",
     "duplicate_message",
     "not_retryable",
+    "turn_in_progress",
 ]
 ERROR_CODES: tuple[str, ...] = get_args(ErrorCode.__value__)
 
-RETRYABLE: frozenset[ErrorCode] = frozenset({"llm_unavailable", "turn_timeout", "rate_limited"})
+RETRYABLE: frozenset[ErrorCode] = frozenset(
+    {"llm_unavailable", "turn_timeout", "rate_limited", "turn_in_progress"}
+)
 
 # Для HTTPException фреймворка (неизвестный маршрут, неверный метод и т.п.).
 _CODE_BY_STATUS: dict[int, ErrorCode] = {

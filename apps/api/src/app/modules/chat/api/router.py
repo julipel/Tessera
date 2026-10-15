@@ -14,7 +14,7 @@ from app.contracts import (
     SendMessageRequest,
 )
 from app.modules.agent.public import LLMClients
-from app.modules.chat.api.sse import sse_stream
+from app.modules.chat.api.sse import TurnResponse
 from app.modules.chat.application.conversations import get_history, start_conversation
 from app.modules.chat.application.summaries import SummaryScheduler
 from app.modules.chat.application.turns import TurnRegistry, retry_turn, start_turn
@@ -25,6 +25,7 @@ from app.modules.chat.domain.errors import (
     MessageNotFoundError,
     NoActiveConfigError,
     RetryNotAllowedError,
+    TurnInProgressError,
 )
 from app.modules.chat.domain.ports import TurnAgent
 from app.modules.chat.infrastructure.loop_agent import builtin_turn_agent
@@ -184,7 +185,10 @@ async def conversation_messages(
     # ошибки ввода и доступа должны уйти обычным HTTP-ответом до начала стрима.
     responses={
         200: {"description": "SSE-стрим хода", "content": {"text/event-stream": {}}},
-        409: {"description": "client_message_id уже отправлен (duplicate_message)"},
+        409: {
+            "description": "client_message_id уже отправлен (duplicate_message) "
+            "или в диалоге идёт ход (turn_in_progress)"
+        },
         429: {"description": "лимит частоты (rate_limited), заголовок Retry-After"},
     },
     dependencies=[Depends(limit_turn_body), Depends(limit_turns)],
@@ -221,11 +225,13 @@ async def send_message(
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e
     except DuplicateMessageError as e:
         raise ApiError(status.HTTP_409_CONFLICT, "duplicate_message", str(e)) from e
+    except TurnInProgressError as e:
+        raise ApiError(status.HTTP_409_CONFLICT, "turn_in_progress", str(e)) from e
     except InvalidInputError as e:
         raise ApiError(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_input", str(e)) from e
     structlog.contextvars.bind_contextvars(turn_id=str(turn.turn_id))
     logger.info("turn_started")
-    return EventSourceResponse(sse_stream(turn))
+    return TurnResponse(turn)
 
 
 @router.post(
@@ -233,7 +239,10 @@ async def send_message(
     responses={
         200: {"description": "SSE-стрим нового хода", "content": {"text/event-stream": {}}},
         404: {"description": "диалога (conversation_not_found) или ответа (not_found) нет"},
-        409: {"description": "ответ нельзя повторить (not_retryable)"},
+        409: {
+            "description": "ответ нельзя повторить (not_retryable) "
+            "или в диалоге идёт ход (turn_in_progress)"
+        },
         429: {"description": "лимит частоты (rate_limited), заголовок Retry-After"},
     },
     dependencies=[Depends(limit_turns)],
@@ -273,9 +282,11 @@ async def retry_message(
         raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", str(e)) from e
     except RetryNotAllowedError as e:
         raise ApiError(status.HTTP_409_CONFLICT, "not_retryable", str(e)) from e
+    except TurnInProgressError as e:
+        raise ApiError(status.HTTP_409_CONFLICT, "turn_in_progress", str(e)) from e
     structlog.contextvars.bind_contextvars(turn_id=str(turn.turn_id))
     logger.info("turn_started", retry_of=str(message_id))
-    return EventSourceResponse(sse_stream(turn))
+    return TurnResponse(turn)
 
 
 @router.post("/{conversation_id}/turns/{turn_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)

@@ -15,6 +15,10 @@ class DuplicateMessageError(DomainError):
     """Сообщение с таким client_message_id в диалоге уже есть — новый ход не запускается."""
 
 
+class TurnInProgressError(DomainError):
+    """В диалоге уже идёт ход — новый не запускается, ввод не записан (ADR-0041)."""
+
+
 class AgentConfigMissingError(DomainError):
     """Версии AgentConfig, с которой начат диалог, нет. Нарушение инварианта: FK с RESTRICT."""
 

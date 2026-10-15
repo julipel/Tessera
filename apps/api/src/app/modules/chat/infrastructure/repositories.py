@@ -4,8 +4,8 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Text, case, func, literal, update
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.chat.domain.entities import (
@@ -57,6 +57,9 @@ def message_entity(record: MessageRecord) -> ChatMessage:
     )
 
 
+PENDING_CONFIRMATION = "pending_confirmation"
+
+
 class ConversationRepository(TenantRepository[ConversationRecord]):
     model = ConversationRecord
 
@@ -84,17 +87,52 @@ class ConversationRepository(TenantRepository[ConversationRecord]):
         return conversation_entity(record) if record else None
 
     async def update_state(
-        self, tenant_id: TenantId, conversation_id: UUID, state: dict[str, Any]
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        state: dict[str, Any],
+        *,
+        keep_pending_confirmation: bool = False,
     ) -> None:
+        value: Any = state
+        if keep_pending_confirmation:
+            current = ConversationRecord.state
+            kept = case(
+                (
+                    current.has_key(PENDING_CONFIRMATION),
+                    func.jsonb_build_object(PENDING_CONFIRMATION, current[PENDING_CONFIRMATION]),
+                ),
+                else_=literal({}, JSONB),
+            )
+            rest = {k: v for k, v in state.items() if k != PENDING_CONFIRMATION}
+            value = literal(rest, JSONB).op("||", return_type=JSONB)(kept)
         stmt = (
             update(ConversationRecord)
             .where(
                 ConversationRecord.tenant_id == tenant_id,
                 ConversationRecord.id == conversation_id,
             )
-            .values(state=state)
+            .values(state=value)
         )
         await self.session.execute(stmt)
+
+    async def claim_confirmation(
+        self, tenant_id: TenantId, conversation_id: UUID, confirm_id: str
+    ) -> bool:
+        # Условный UPDATE, как update_summary: из двух ходов с одним confirm_id ожидание снимет
+        # и действие исполнит только один (ADR-0041).
+        state = ConversationRecord.state
+        stmt = (
+            update(ConversationRecord)
+            .where(
+                ConversationRecord.tenant_id == tenant_id,
+                ConversationRecord.id == conversation_id,
+                state[(PENDING_CONFIRMATION, "confirm_id")].astext == confirm_id,
+            )
+            .values(state=state.op("-", return_type=JSONB)(literal(PENDING_CONFIRMATION, Text)))
+            .returning(ConversationRecord.id)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none() is not None
 
     async def update_summary(
         self,

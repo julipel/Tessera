@@ -113,6 +113,80 @@ async def test_without_directory_cancel_stays_in_process() -> None:
     assert await _cancel(owner, turn)
 
 
+# --- Один ход на диалог (ADR-0041) ---
+
+
+async def test_conversation_is_busy_for_other_turns_in_any_process() -> None:
+    directory = InMemoryTurnDirectory()
+    owner, other = TurnRegistry(directory), TurnRegistry(directory)
+    turn = _turn()
+    tenant_id, conversation_id = turn.conversation.tenant_id, turn.conversation.id
+
+    assert await owner.acquire(tenant_id, conversation_id, turn.turn_id)
+    assert not await owner.acquire(tenant_id, conversation_id, uuid4())
+    assert not await other.acquire(tenant_id, conversation_id, uuid4())
+    assert await other.acquire(tenant_id, uuid4(), uuid4())  # другой диалог свободен
+
+    await other.release(tenant_id, conversation_id, uuid4())  # чужой ход не освобождает
+    assert not await other.acquire(tenant_id, conversation_id, uuid4())
+    await owner.remove(_stream(turn))
+    assert await other.acquire(tenant_id, conversation_id, uuid4())
+
+
+async def test_foreign_tenant_neither_sees_nor_takes_busy_conversation() -> None:
+    directory = InMemoryTurnDirectory()
+    owner, other = TurnRegistry(directory), TurnRegistry(directory)
+    turn = _turn()
+    tenant_id, conversation_id = turn.conversation.tenant_id, turn.conversation.id
+    foreign, foreign_turn = TenantId(uuid4()), uuid4()
+
+    assert await owner.acquire(tenant_id, conversation_id, turn.turn_id)
+    assert await owner.acquire(foreign, conversation_id, foreign_turn)
+    assert not await other.acquire(foreign, conversation_id, uuid4())  # занят ходом foreign
+    await owner.release(foreign, conversation_id, foreign_turn)
+    assert not await other.acquire(tenant_id, conversation_id, uuid4())
+
+
+async def test_without_directory_conversation_is_busy_in_process() -> None:
+    registry = TurnRegistry()
+    tenant_id, conversation_id, turn_id = TenantId(uuid4()), uuid4(), uuid4()
+
+    assert await registry.acquire(tenant_id, conversation_id, turn_id)
+    assert not await registry.acquire(tenant_id, conversation_id, uuid4())
+    await registry.release(tenant_id, conversation_id, turn_id)
+    assert await registry.acquire(tenant_id, conversation_id, uuid4())
+
+
+async def test_busy_conversation_is_freed_after_ttl() -> None:
+    # Стрим так и не начался — ход не освободит диалог сам.
+    registry = TurnRegistry(busy_ttl_s=0)
+    tenant_id, conversation_id = TenantId(uuid4()), uuid4()
+
+    assert await registry.acquire(tenant_id, conversation_id, uuid4())
+    assert await registry.acquire(tenant_id, conversation_id, uuid4())
+
+
+class SlowUnavailableDirectory(InMemoryTurnDirectory):
+    """Каталог, ждущий таймаута недоступного Redis и пропускающий ход (fail-open)."""
+
+    async def acquire_conversation(
+        self, tenant_id: TenantId, conversation_id: UUID, turn_id: UUID
+    ) -> bool:
+        await asyncio.sleep(0.05)
+        return True
+
+
+async def test_simultaneous_turns_are_serialized_in_process_while_redis_times_out() -> None:
+    registry = TurnRegistry(SlowUnavailableDirectory())
+    tenant_id, conversation_id = TenantId(uuid4()), uuid4()
+
+    results = await asyncio.gather(
+        *(registry.acquire(tenant_id, conversation_id, uuid4()) for _ in range(2))
+    )
+
+    assert sorted(results) == [False, True]
+
+
 # --- Redis ---
 
 
@@ -175,6 +249,39 @@ async def test_cancel_through_redis_reaches_turn_in_other_process(
         await subscriber.aclose()
 
 
+async def test_conversation_is_busy_through_redis(redis: Redis) -> None:
+    owner, other = (
+        TurnRegistry(RedisTurnDirectory(redis, redis)),
+        TurnRegistry(RedisTurnDirectory(redis, redis)),
+    )
+    turn = _turn()
+    tenant_id, conversation_id = turn.conversation.tenant_id, turn.conversation.id
+    key = f"conversation_turn:{tenant_id}:{conversation_id}"
+
+    assert await owner.acquire(tenant_id, conversation_id, turn.turn_id)
+    assert await redis.get(key) == str(turn.turn_id).encode()
+    assert await redis.ttl(key) > 0
+    assert not await other.acquire(tenant_id, conversation_id, uuid4())
+    # Диалог — в пределах тенанта: запрос чужого тенанта не видит занятость.
+    foreign, foreign_turn = TenantId(uuid4()), uuid4()
+    assert await other.acquire(foreign, conversation_id, foreign_turn)
+    await other.release(foreign, conversation_id, foreign_turn)
+
+    # Ключ истёк, и диалог занял другой ход: старый ход его ключ не снимает.
+    newer = uuid4()
+    await redis.set(key, str(newer))
+    await RedisTurnDirectory(redis, redis).release_conversation(
+        tenant_id, conversation_id, turn.turn_id
+    )
+    assert await redis.get(key) == str(newer).encode()
+
+    await redis.set(key, str(turn.turn_id))
+    await owner.remove(_stream(turn))
+    assert not await redis.exists(key)
+    assert await other.acquire(tenant_id, conversation_id, uuid4())
+    await redis.delete(key)
+
+
 async def test_unavailable_redis_keeps_turns_and_local_cancel() -> None:
     # Порт без сервера: соединение отклоняется сразу.
     redis = Redis.from_url("redis://127.0.0.2:1/0", socket_connect_timeout=0.2)
@@ -182,11 +289,17 @@ async def test_unavailable_redis_keeps_turns_and_local_cancel() -> None:
     owner, other = TurnRegistry(directory), TurnRegistry(directory)
     turn = _turn()
     try:
+        # Диалог занимается без проверки других процессов, в процессе — по-прежнему один ход.
+        tenant_id, conversation_id = turn.conversation.tenant_id, turn.conversation.id
+        assert await owner.acquire(tenant_id, conversation_id, turn.turn_id)
+        assert await other.acquire(tenant_id, conversation_id, uuid4())
+        assert not await owner.acquire(tenant_id, conversation_id, uuid4())
         await owner.add(_stream(turn))
 
         assert not await _cancel(other, turn)
         assert await _cancel(owner, turn)
         await owner.remove(_stream(turn))
+        assert await owner.acquire(tenant_id, conversation_id, uuid4())
     finally:
         await redis.aclose()
 

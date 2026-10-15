@@ -40,8 +40,17 @@ class ConversationStore(Protocol):
     async def find(self, tenant_id: TenantId, conversation_id: UUID) -> Conversation | None: ...
 
     async def update_state(
-        self, tenant_id: TenantId, conversation_id: UUID, state: dict[str, Any]
-    ) -> None: ...
+        self,
+        tenant_id: TenantId,
+        conversation_id: UUID,
+        state: dict[str, Any],
+        *,
+        keep_pending_confirmation: bool = False,
+    ) -> None:
+        """Записать состояние. С `keep_pending_confirmation` ожидающее подтверждение берётся
+        из БД, а не из `state`: ход, который его не менял, не вернёт ожидание, уже снятое
+        другим ходом, и не затрёт новое (ADR-0041)."""
+        ...
 
     async def update_summary(
         self,
@@ -54,6 +63,13 @@ class ConversationStore(Protocol):
         """Записать сводку по сообщение `through_message_id`, если граница сводки всё ещё
         `expected_through`. False — сводку уже обновили (или диалога нет): из двух
         одновременных сводок записывается только одна."""
+        ...
+
+    async def claim_confirmation(
+        self, tenant_id: TenantId, conversation_id: UUID, confirm_id: str
+    ) -> bool:
+        """Снять ожидающее подтверждение `confirm_id` (ADR-0041). False — его уже снял другой
+        ход, заменило новое ожидание или диалога нет: исполнять действие нельзя."""
         ...
 
 
@@ -120,11 +136,29 @@ class TurnAgent(Protocol):
     def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]: ...
 
 
-class TurnDirectory(Protocol):
-    """Ходы всех процессов API — для отмены хода из любого процесса (ADR-0035).
+# Ключи хода и занятости диалога живут, пока ход идёт; срок — на случай падения процесса
+# или хода, не освободившего диалог (ADR-0035, ADR-0041).
+TURN_TTL_S = 15 * 60
 
-    Недоступность хранилища не ломает ход: реализация логирует сбой, а отмена работает
-    только в процессе со стримом."""
+
+class TurnDirectory(Protocol):
+    """Ходы всех процессов API — для отмены хода из любого процесса (ADR-0035) и одного хода
+    на диалог (ADR-0041).
+
+    Недоступность хранилища не ломает ход: реализация логирует сбой, отмена работает
+    только в процессе со стримом, а диалог занимается без проверки других процессов."""
+
+    async def acquire_conversation(
+        self, tenant_id: TenantId, conversation_id: UUID, turn_id: UUID
+    ) -> bool:
+        """Занять диалог тенанта ходом. False — в диалоге идёт другой ход."""
+        ...
+
+    async def release_conversation(
+        self, tenant_id: TenantId, conversation_id: UUID, turn_id: UUID
+    ) -> None:
+        """Освободить диалог, если его занимает ход `turn_id`."""
+        ...
 
     async def register(self, turn_id: UUID, tenant_id: TenantId, conversation_id: UUID) -> None:
         """Ход начался в этом процессе."""

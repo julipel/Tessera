@@ -32,6 +32,7 @@ from app.modules.tools.domain.definition import (
     ToolDefinition,
     ToolHandler,
     ToolInvocation,
+    pressed_confirmation,
 )
 from app.modules.tools.domain.ports import Catalog, KnowledgeSearcher, LeadStore
 from app.modules.tools.domain.result import ToolError, ToolErrorCode, ToolResult
@@ -65,6 +66,7 @@ __all__ = [
     "create_lead_tool",
     "form_values_problem",
     "get_entity_tool",
+    "pressed_confirmation",
     "search_catalog_tool",
     "search_knowledge_tool",
     "show_entities_tool",

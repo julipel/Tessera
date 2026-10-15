@@ -282,3 +282,56 @@ async def test_replaced_message_is_hidden_and_marked_once(
 
     assert (foreign, first, second) == (False, True, False)
     assert [m.id for m in await messages.list_for(tenant_id, conversation.id)] == [question.id]
+
+
+async def test_confirmation_is_claimed_once_and_only_by_its_tenant(
+    db_session: AsyncSession, conversations: ConversationRepository
+) -> None:
+    """ADR-0041: ожидание снимается условным UPDATE — из двух ходов с одним confirm_id
+    действие исполнит один."""
+    a, config_a = await _tenant_with_config(db_session, "tenant-a")
+    b, _ = await _tenant_with_config(db_session, "tenant-b")
+    conversation = await conversations.create(a, config_a, Channel.WEB, "v")
+    pending = {"confirm_id": "c-1", "tool": "create_lead", "arguments": {}}
+    await conversations.update_state(
+        a, conversation.id, {"slots": {"budget": 3000}, "pending_confirmation": pending}
+    )
+
+    assert not await conversations.claim_confirmation(b, conversation.id, "c-1")
+    assert not await conversations.claim_confirmation(a, conversation.id, "c-2")
+    assert await conversations.claim_confirmation(a, conversation.id, "c-1")
+    assert not await conversations.claim_confirmation(a, conversation.id, "c-1")
+
+    found = await conversations.find(a, conversation.id)
+    assert found is not None and found.state == {"slots": {"budget": 3000}}
+
+
+async def test_state_update_keeps_pending_confirmation_from_db(
+    db_session: AsyncSession, conversations: ConversationRepository
+) -> None:
+    """ADR-0041: ход, который не менял ожидание, не возвращает снятое другим ходом
+    и не затирает новое."""
+    a, config_a = await _tenant_with_config(db_session, "tenant-a")
+    conversation = await conversations.create(a, config_a, Channel.WEB, "v")
+    pending = {"confirm_id": "c-2", "tool": "create_lead", "arguments": {"note": None}}
+    stale = {"confirm_id": "c-1", "tool": "create_lead", "arguments": {}}
+
+    await conversations.update_state(
+        a,
+        conversation.id,
+        {"facts": ["a"], "pending_confirmation": stale},
+        keep_pending_confirmation=True,
+    )
+    found = await conversations.find(a, conversation.id)
+    assert found is not None and found.state == {"facts": ["a"]}
+
+    await conversations.update_state(a, conversation.id, {"pending_confirmation": pending})
+    await conversations.update_state(
+        a,
+        conversation.id,
+        {"facts": ["b"], "pending_confirmation": stale},
+        keep_pending_confirmation=True,
+    )
+    found = await conversations.find(a, conversation.id)
+    assert found is not None
+    assert found.state == {"facts": ["b"], "pending_confirmation": pending}

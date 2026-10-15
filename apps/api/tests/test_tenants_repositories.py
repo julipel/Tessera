@@ -1,10 +1,13 @@
 """Репозитории tenants: изоляция тенантов (ADR-0006), версии AgentConfig, единственный active."""
 
+import asyncio
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import (
@@ -13,6 +16,7 @@ from app.modules.tenants.public import (
     AgentConfigRepository,
     AgentConfigStatus,
     SqlTenantDirectory,
+    TenantRecord,
     WidgetKeyRepository,
 )
 
@@ -142,3 +146,80 @@ async def test_get_version_returns_archived_and_respects_tenant(
     assert (archived.version, archived.status) == (1, AgentConfigStatus.ARCHIVED)
     assert await configs.get_version(b, v1.id) is None
     assert await configs.get_version(a, uuid4()) is None
+
+
+# --- Параллельные операции с версиями (T-2, T-3): две транзакции с настоящим commit ---
+
+
+@pytest.fixture
+async def engine(db_url: str) -> AsyncIterator[AsyncEngine]:
+    engine = create_async_engine(db_url)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+async def committed_tenant(engine: AsyncEngine) -> AsyncIterator[TenantId]:
+    """Тенант вне транзакции теста, его видят две сессии; удаляется вместе с версиями."""
+    async with AsyncSession(engine) as session:
+        tenant = await SqlTenantDirectory(session).create(f"race-{uuid4().hex[:8]}", "Race")
+        await session.commit()
+    yield tenant.id
+    async with AsyncSession(engine) as session:
+        await session.execute(delete(TenantRecord).where(TenantRecord.id == tenant.id))
+        await session.commit()
+
+
+async def _blocked(task: asyncio.Task[object]) -> bool:
+    await asyncio.sleep(0.2)
+    return not task.done()
+
+
+async def test_parallel_drafts_wait_for_each_other(
+    engine: AsyncEngine, committed_tenant: TenantId
+) -> None:
+    async with AsyncSession(engine) as first, AsyncSession(engine) as second:
+        draft_1 = await AgentConfigRepository(first).create_draft(committed_tenant, CONFIG)
+
+        async def save_second() -> int:
+            draft = await AgentConfigRepository(second).create_draft(committed_tenant, CONFIG)
+            await second.commit()
+            return draft.version
+
+        task = asyncio.create_task(save_second())
+        assert await _blocked(task)  # ждёт блокировку тенанта, а не падает на уникальном индексе
+        await first.commit()
+
+        assert (draft_1.version, await task) == (1, 2)
+
+
+async def test_parallel_activations_leave_single_active(
+    engine: AsyncEngine, committed_tenant: TenantId
+) -> None:
+    async with AsyncSession(engine) as session:
+        configs = AgentConfigRepository(session)
+        v1 = await configs.create_draft(committed_tenant, CONFIG)
+        await configs.activate(committed_tenant, v1.id)
+        v2 = await configs.create_draft(committed_tenant, CONFIG)
+        v3 = await configs.create_draft(committed_tenant, CONFIG)
+        await session.commit()
+
+    async with AsyncSession(engine) as first, AsyncSession(engine) as second:
+        await AgentConfigRepository(first).activate(committed_tenant, v2.id)
+
+        async def activate_second() -> None:
+            await AgentConfigRepository(second).activate(committed_tenant, v3.id)
+            await second.commit()
+
+        task = asyncio.create_task(activate_second())
+        assert await _blocked(task)
+        await first.commit()
+        await task
+
+    async with AsyncSession(engine) as session:
+        versions = await AgentConfigRepository(session).list_versions(committed_tenant)
+    assert [(v.version, v.status) for v in versions] == [
+        (1, AgentConfigStatus.ARCHIVED),
+        (2, AgentConfigStatus.ARCHIVED),
+        (3, AgentConfigStatus.ACTIVE),
+    ]

@@ -239,3 +239,43 @@ async def test_other_tenant_version_not_found(
         activate = await db_client.post(_url(shop, f"/{config_id}/activate"), headers=editor)
         assert (get.status_code, activate.status_code) == (404, 404)
     assert (await AgentConfigRepository(db_session).get_active(other)) == foreign
+
+
+# --- Версия, устаревшая по схеме (T-1) ---
+
+
+async def _outdated_version(session: AsyncSession, tenant_id: TenantId) -> Any:
+    """Версия с полем, которого нет в схеме: так выглядит конфиг после смены схемы."""
+    stale = {**_config(), "legacy_field": {"enabled": True}}
+    return await AgentConfigRepository(session).create_draft(tenant_id, stale)
+
+
+async def test_outdated_version_opens_in_editor_as_is(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    editor: dict[str, str],
+) -> None:
+    version = await _outdated_version(db_session, shop)
+
+    response = await db_client.get(_url(shop, f"/{version.id}"), headers=editor)
+
+    assert response.status_code == 200, response.text
+    detail = AgentConfigVersionDetail.model_validate(response.json())
+    assert yaml.safe_load(detail.yaml)["legacy_field"] == {"enabled": True}
+
+
+async def test_outdated_version_is_not_activated(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    editor: dict[str, str],
+) -> None:
+    version = await _outdated_version(db_session, shop)
+
+    response = await db_client.post(_url(shop, f"/{version.id}/activate"), headers=editor)
+
+    assert response.status_code == 422
+    error = HttpError.model_validate(response.json()).error
+    assert error.details is not None
+    assert [d.loc for d in error.details] == [["legacy_field"]]

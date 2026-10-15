@@ -65,8 +65,12 @@ def parse_agent_config_yaml(source: str) -> dict[str, Any]:
 
 
 def agent_config_yaml(config: dict[str, Any]) -> str:
-    """YAML для редактора. Порядок ключей — как у полей AgentConfig: JSONB его не хранит."""
-    ordered = AgentConfig.model_validate(config).model_dump(mode="json", exclude_unset=True)
+    """YAML для редактора. Порядок ключей — как у полей AgentConfig: JSONB его не хранит.
+    Версия, устаревшая по схеме, отдаётся как есть: её открывают, чтобы исправить."""
+    try:
+        ordered = AgentConfig.model_validate(config).model_dump(mode="json", exclude_unset=True)
+    except ValidationError:
+        ordered = config
     return yaml.safe_dump(ordered, allow_unicode=True, sort_keys=False, width=100)
 
 

@@ -2,11 +2,15 @@
 
 from collections.abc import Collection
 
+import structlog
+from pydantic import ValidationError
+
 from app.contracts import AgentConfig, PublicAssistant, PublicConfig
 from app.contracts.generated.agent_config_schema import BrandingConfig
 from app.modules.shared.kernel import TenantId
 from app.modules.tenants.domain.entities import WidgetAccess
 from app.modules.tenants.domain.errors import (
+    ActiveConfigInvalidError,
     InvalidWidgetKeyError,
     NoActiveConfigError,
     OriginNotAllowedError,
@@ -14,6 +18,8 @@ from app.modules.tenants.domain.errors import (
 from app.modules.tenants.domain.language import assistant_texts, resolve_language
 from app.modules.tenants.domain.ports import AgentConfigStore, WidgetKeyResolver
 from app.modules.tenants.domain.widget_keys import hash_widget_key, origin_allowed
+
+logger = structlog.get_logger(__name__)
 
 
 async def authenticate_widget(
@@ -47,7 +53,19 @@ async def get_public_config(
     active = await configs.get_active(tenant_id)
     if active is None:
         raise NoActiveConfigError(f"у тенанта {tenant_id} нет активного AgentConfig")
-    config = AgentConfig.model_validate(active.config)
+    try:
+        config = AgentConfig.model_validate(active.config)
+    except ValidationError as e:
+        logger.error(
+            "agent_config_invalid",
+            tenant_id=str(tenant_id),
+            config_id=str(active.id),
+            version=active.version,
+            problems=[".".join(map(str, err["loc"])) for err in e.errors()],
+        )
+        raise ActiveConfigInvalidError(
+            f"активная версия {active.version} конфига не проходит схему"
+        ) from e
     assistant = config.assistant
     language = resolve_language(assistant, locale)
     texts = assistant_texts(assistant, language)

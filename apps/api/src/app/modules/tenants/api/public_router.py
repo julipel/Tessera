@@ -9,7 +9,7 @@ from app.contracts import PublicConfig, WidgetEmbed
 from app.modules.shared.public import ApiError, DbSession
 from app.modules.tenants.api.deps import WidgetAccessDep, WidgetTenant
 from app.modules.tenants.application.public_config import embed_origins, get_public_config
-from app.modules.tenants.domain.errors import NoActiveConfigError
+from app.modules.tenants.domain.errors import ActiveConfigInvalidError, NoActiveConfigError
 from app.modules.tenants.infrastructure.repositories import AgentConfigRepository
 
 router = APIRouter(prefix="/v1/public", tags=["public"])
@@ -27,6 +27,10 @@ async def public_config(
         config = await get_public_config(tenant_id, AgentConfigRepository(session), locale)
     except NoActiveConfigError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", str(e)) from e
+    except ActiveConfigInvalidError as e:  # причина — в логе agent_config_invalid
+        raise ApiError(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "internal", "конфигурация ассистента неисправна"
+        ) from e
     logger.info("public_config_served", language=config.assistant.language)
     return config
 

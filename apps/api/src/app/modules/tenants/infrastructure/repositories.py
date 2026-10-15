@@ -66,7 +66,16 @@ class SqlTenantDirectory:
 
 
 class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
+    """`create_draft` и `activate` блокируют строку тенанта до конца транзакции: операции
+    с версиями одного тенанта идут по очереди (REVIEW.md: T-2, T-3). В READ COMMITTED запрос
+    после блокировки видит закоммиченное другой операцией — номер версии и прежняя активная
+    версия берутся актуальные, уникальные индексы не срабатывают."""
+
     model = AgentConfigRecord
+
+    async def _lock_tenant(self, tenant_id: TenantId) -> None:
+        stmt = select(TenantRecord.id).where(TenantRecord.id == tenant_id).with_for_update()
+        await self.session.execute(stmt)
 
     async def get_active(self, tenant_id: TenantId) -> AgentConfigVersion | None:
         stmt = self._scoped(tenant_id).where(AgentConfigRecord.status == AgentConfigStatus.ACTIVE)
@@ -84,6 +93,7 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
         return [_config(r) for r in (await self.session.execute(stmt)).scalars()]
 
     async def create_draft(self, tenant_id: TenantId, config: dict[str, Any]) -> AgentConfigVersion:
+        await self._lock_tenant(tenant_id)
         latest = select(func.coalesce(func.max(AgentConfigRecord.version), 0)).where(
             AgentConfigRecord.tenant_id == tenant_id
         )
@@ -96,7 +106,14 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
         return _config(record)
 
     async def activate(self, tenant_id: TenantId, config_id: UUID) -> AgentConfigVersion:
-        record = await self.get(tenant_id, config_id)
+        await self._lock_tenant(tenant_id)
+        # populate_existing: статус версии мог смениться, пока ждали блокировку.
+        stmt = (
+            self._scoped(tenant_id)
+            .where(AgentConfigRecord.id == config_id)
+            .execution_options(populate_existing=True)
+        )
+        record = (await self.session.execute(stmt)).scalar_one_or_none()
         if record is None:
             raise AgentConfigNotFoundError(f"AgentConfig {config_id} not found")
         if record.status != AgentConfigStatus.ACTIVE:

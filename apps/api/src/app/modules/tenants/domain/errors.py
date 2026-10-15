@@ -26,6 +26,11 @@ class NoActiveConfigError(NotFoundError):
     """Нет активной версии AgentConfig."""
 
 
+class ActiveConfigInvalidError(DomainError):
+    """Активная версия AgentConfig не проходит текущую схему (устарела после её изменения):
+    виджет тенанта не работает, пока версию не исправят в админке."""
+
+
 @dataclass(frozen=True, slots=True)
 class ConfigProblem:
     """Ошибка в одном месте AgentConfig: `loc` — путь (ключи и индексы), пустой — весь конфиг."""

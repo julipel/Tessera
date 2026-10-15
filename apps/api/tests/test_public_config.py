@@ -140,6 +140,26 @@ async def test_tenant_without_active_config_is_404(
     assert HttpError.model_validate(response.json()).error.code == "not_found"
 
 
+async def test_outdated_active_config_is_internal_error_with_log(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    tenant_id = await _tenant(
+        db_session, "stale", "wk_stale", {**_config("Stale"), "legacy_field": True}
+    )
+
+    with structlog.testing.capture_logs() as logs:
+        response = await db_client.get(URL, headers={"X-Widget-Key": "wk_stale"})
+
+    assert response.status_code == 500
+    error = HttpError.model_validate(response.json()).error
+    assert (error.code, error.retryable) == ("internal", False)
+    assert "СЕКРЕТНЫЙ ПРОМПТ" not in response.text
+    [entry] = [e for e in logs if e["event"] == "agent_config_invalid"]
+    assert entry["tenant_id"] == str(tenant_id)
+    assert entry["problems"] == ["legacy_field"]
+    assert entry["config_id"]
+
+
 async def test_key_selects_its_own_tenant(
     db_client: AsyncClient, db_session: AsyncSession, shop: TenantId
 ) -> None:

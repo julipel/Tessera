@@ -9,7 +9,11 @@ from app.modules.shared.api.admin import (
 )
 from app.modules.shared.api.deps import DbSession, StreamDbSession, get_session
 from app.modules.shared.api.errors import ApiError, install_error_handlers
-from app.modules.shared.api.rate_limit import client_ip, enforce_rate_limits
+from app.modules.shared.api.rate_limit import (
+    client_ip,
+    enforce_rate_limits,
+    ensure_not_limited,
+)
 from app.modules.shared.domain.admin import AdminAuthenticator, AdminPrincipal, AdminRole
 from app.modules.shared.domain.errors import DomainError, NotFoundError, TenantMismatchError
 from app.modules.shared.domain.ids import TenantId
@@ -49,6 +53,7 @@ __all__ = [
     "create_engine",
     "create_session_factory",
     "enforce_rate_limits",
+    "ensure_not_limited",
     "get_session",
     "install_error_handlers",
     "require_tenant_role",

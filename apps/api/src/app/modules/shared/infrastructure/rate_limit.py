@@ -52,6 +52,24 @@ class RedisRateLimiter:
             return RateDecision(allowed=False, retry_after_s=retry_after)
         return ALLOWED
 
+    async def check(self, rule: RateLimit, subject: str) -> RateDecision:
+        if rule.limit <= 0:
+            return ALLOWED
+        index, retry_after = _window(rule, self._now())
+        try:
+            count = await self._redis.get(f"rl:{rule.name}:{subject}:{index}")
+        except (RedisError, OSError) as e:
+            logger.warning(
+                "rate_limit_unavailable",
+                rule=rule.name,
+                error=str(e),
+                local_fallback=rule.local_fallback,
+            )
+            return await self._fallback.check(rule, subject) if rule.local_fallback else ALLOWED
+        if count is not None and int(count) >= rule.limit:
+            return RateDecision(allowed=False, retry_after_s=retry_after)
+        return ALLOWED
+
 
 class InMemoryRateLimiter:
     """Те же окна в памяти процесса — для тестов и как запасной счётчик `RedisRateLimiter`
@@ -74,6 +92,15 @@ class InMemoryRateLimiter:
         count = self._counts.get(key, (0, 0.0))[0] + 1
         self._counts[key] = (count, (index + 1) * rule.window_s)
         if count > rule.limit:
+            return RateDecision(allowed=False, retry_after_s=retry_after)
+        return ALLOWED
+
+    async def check(self, rule: RateLimit, subject: str) -> RateDecision:
+        if rule.limit <= 0:
+            return ALLOWED
+        index, retry_after = _window(rule, self._now())
+        count = self._counts.get(f"{rule.name}:{subject}:{index}", (0, 0.0))[0]
+        if count >= rule.limit:
             return RateDecision(allowed=False, retry_after_s=retry_after)
         return ALLOWED
 

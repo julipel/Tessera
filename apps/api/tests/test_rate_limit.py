@@ -51,6 +51,17 @@ async def test_window_limits_and_resets() -> None:
     assert (await limiter.hit(RULE, "ip-1")).allowed  # новое окно
 
 
+async def test_check_does_not_count_request() -> None:
+    limiter = InMemoryRateLimiter(Clock(1_000_040.0))
+
+    assert all([(await limiter.check(RULE, "anna")).allowed for _ in range(5)])
+    await limiter.hit(RULE, "anna")
+    assert (await limiter.check(RULE, "anna")).allowed
+    await limiter.hit(RULE, "anna")
+    blocked = await limiter.check(RULE, "anna")  # следующий hit превысил бы лимит
+    assert (blocked.allowed, blocked.retry_after_s) == (False, 40)
+
+
 async def _allowed(limiter: InMemoryRateLimiter, checks: list[tuple[RateLimit, str]]) -> bool:
     try:
         await enforce_rate_limits(limiter, checks)
@@ -140,6 +151,38 @@ async def test_unavailable_redis_counts_local_fallback_rules_in_memory() -> None
     assert [d.allowed for d in login_decisions] == [True, True, False]
     assert login_decisions[2].retry_after_s == 40
     assert [d.allowed for d in chat_decisions] == [True, True, True]
+
+
+async def test_redis_check_reads_counter_without_incrementing(settings: Any) -> None:
+    redis = Redis.from_url(settings.redis_url)
+    rule = RateLimit(f"check-{uuid4().hex}", limit=2, window_s=60)
+    limiter = RedisRateLimiter(redis, Clock(1_000_040.0))
+    try:
+        before = [await limiter.check(rule, "anna") for _ in range(3)]
+        await limiter.hit(rule, "anna")
+        await limiter.hit(rule, "anna")
+        after = await limiter.check(rule, "anna")
+    finally:
+        await redis.delete(*await redis.keys(f"rl:{rule.name}:*"))
+        await redis.aclose()
+
+    assert all(d.allowed for d in before)
+    assert not after.allowed
+
+
+async def test_unavailable_redis_check_uses_local_fallback() -> None:
+    redis = Redis.from_url("redis://127.0.0.2:1/0", socket_connect_timeout=0.2)
+    limiter = RedisRateLimiter(redis, Clock(1_000_040.0))
+    login = RateLimit("login", limit=1, window_s=60, local_fallback=True)
+    try:
+        await limiter.hit(login, "anna")  # неудачный вход учтён в памяти процесса
+        login_check = await limiter.check(login, "anna")
+        chat_check = await limiter.check(RateLimit("chat", limit=1, window_s=60), "ip-1")
+    finally:
+        await redis.aclose()
+
+    assert not login_check.allowed
+    assert chat_check.allowed
 
 
 async def test_memory_limiter_drops_counters_of_past_windows() -> None:

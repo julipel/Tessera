@@ -30,9 +30,21 @@ async def enforce_rate_limits(
         decision = await limiter.hit(rule, subject)
         if not decision.allowed:
             logger.warning("rate_limited", rule=rule.name, retry_after_s=decision.retry_after_s)
-            raise ApiError(
-                status.HTTP_429_TOO_MANY_REQUESTS,
-                "rate_limited",
-                "слишком много запросов, повторите позже",
-                headers={"Retry-After": str(decision.retry_after_s)},
-            )
+            raise _rate_limited(decision.retry_after_s)
+
+
+async def ensure_not_limited(limiter: RateLimiter, rule: RateLimit, subject: str) -> None:
+    """429, если лимит субъекта уже исчерпан; запрос не учитывается (`RateLimiter.check`)."""
+    decision = await limiter.check(rule, subject)
+    if not decision.allowed:
+        logger.warning("rate_limited", rule=rule.name, retry_after_s=decision.retry_after_s)
+        raise _rate_limited(decision.retry_after_s)
+
+
+def _rate_limited(retry_after_s: int) -> ApiError:
+    return ApiError(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        "rate_limited",
+        "слишком много запросов, повторите позже",
+        headers={"Retry-After": str(retry_after_s)},
+    )

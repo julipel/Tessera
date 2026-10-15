@@ -23,6 +23,7 @@ from app.modules.shared.public import (
     bearer_token,
     client_ip,
     enforce_rate_limits,
+    ensure_not_limited,
 )
 from app.modules.tenants.public import SqlTenantDirectory
 
@@ -33,34 +34,24 @@ router = APIRouter(prefix="/v1/admin", tags=["admin"])
 async def admin_login(
     body: AdminLoginRequest, request: Request, session: DbSession
 ) -> AdminLoginResponse:
-    """Сессия по email и паролю; 401 без уточнения, что не так. Лимит — по IP и по email:
-    перебор пароля одного пользователя с разных адресов тоже упирается в лимит. Redis
-    недоступен — лимит считается в памяти процесса, а не снимается (ADR-0030)."""
+    """Сессия по email и паролю; 401 без уточнения, что не так. Лимит по IP считает все
+    попытки, по email — только неудачные (REVIEW.md: AC-3): перебор пароля одного
+    пользователя с разных адресов упирается в лимит, а входы владельца его не тратят. Redis
+    недоступен — лимиты считаются в памяти процесса, а не снимаются (ADR-0030)."""
     settings = request.app.state.settings
     limiter: RateLimiter = request.app.state.rate_limiter
-    await enforce_rate_limits(
-        limiter,
-        [
-            (
-                RateLimit(
-                    "admin_login_ip",
-                    settings.rate_admin_login_per_ip_per_min,
-                    60,
-                    local_fallback=True,
-                ),
-                client_ip(request),
-            ),
-            (
-                RateLimit(
-                    "admin_login_email",
-                    settings.rate_admin_login_per_email_per_hour,
-                    3600,
-                    local_fallback=True,
-                ),
-                body.email.strip().lower(),
-            ),
-        ],
+    ip_rule = RateLimit(
+        "admin_login_ip", settings.rate_admin_login_per_ip_per_min, 60, local_fallback=True
     )
+    email_rule = RateLimit(
+        "admin_login_email",
+        settings.rate_admin_login_per_email_per_hour,
+        3600,
+        local_fallback=True,
+    )
+    email = body.email.strip().lower()
+    await enforce_rate_limits(limiter, [(ip_rule, client_ip(request))])
+    await ensure_not_limited(limiter, email_rule, email)
     try:
         result = await login(
             body.email,
@@ -71,6 +62,7 @@ async def admin_login(
             now=datetime.now(UTC),
         )
     except InvalidCredentialsError as e:
+        await limiter.hit(email_rule, email)
         raise ApiError(status.HTTP_401_UNAUTHORIZED, "unauthorized", str(e)) from e
     return AdminLoginResponse(
         token=result.token,

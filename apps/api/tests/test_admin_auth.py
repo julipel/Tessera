@@ -266,7 +266,8 @@ async def test_login_is_rate_limited_by_email_and_ip(
     wrong = {"email": "anna@example.com", "password": "wrong password!"}
 
     assert [(await db_client.post(LOGIN, json=wrong)).status_code for _ in range(2)] == [401, 401]
-    # Регистр и пробелы в email не обходят лимит; верный пароль тоже не пускает.
+    # Две неудачные попытки исчерпали лимит email: регистр и пробелы его не обходят, верный
+    # пароль до конца окна тоже не пускает.
     limited = await db_client.post(LOGIN, json={"email": " ANNA@example.com", "password": PASSWORD})
     assert limited.status_code == 429
     assert limited.json()["error"]["code"] == "rate_limited"
@@ -276,3 +277,22 @@ async def test_login_is_rate_limited_by_email_and_ip(
     other = {"email": "bob@example.com", "password": "wrong password!"}
     assert (await db_client.post(LOGIN, json=other)).status_code == 401
     assert (await db_client.post(LOGIN, json=other)).status_code == 429
+
+
+async def test_successful_logins_do_not_use_up_email_limit(
+    app: FastAPI, db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    app.state.settings = app.state.settings.model_copy(
+        update={"rate_admin_login_per_email_per_hour": 2, "rate_admin_login_per_ip_per_min": 100}
+    )
+    app.state.rate_limiter = InMemoryRateLimiter(now=lambda: 1_800_030.0)
+    await _user(db_session, "anna@example.com", password=PASSWORD)
+    right = {"email": "anna@example.com", "password": PASSWORD}
+    wrong = {"email": "anna@example.com", "password": "wrong password!"}
+
+    # Владелец входит сколько угодно раз: по email считаются только неудачи (REVIEW.md: AC-3).
+    assert [(await db_client.post(LOGIN, json=right)).status_code for _ in range(3)] == [200] * 3
+    assert (await db_client.post(LOGIN, json=wrong)).status_code == 401
+    assert (await db_client.post(LOGIN, json=right)).status_code == 200
+    assert (await db_client.post(LOGIN, json=wrong)).status_code == 401
+    assert (await db_client.post(LOGIN, json=right)).status_code == 429

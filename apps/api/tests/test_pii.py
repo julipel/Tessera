@@ -1,13 +1,15 @@
 """Маскирование персональных данных в трейсах Langfuse (P7-07, ADR-0032)."""
 
 import json
+import random
+import time
 from typing import Any
 from uuid import uuid4
 
 import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from app.modules.observability.domain.pii import HIDDEN, has_contact, mask_pii
+from app.modules.observability.domain.pii import HIDDEN, _LuhnPrefix, has_contact, mask_pii
 from app.modules.observability.kernel import GenerationInfo, TurnTraceInfo
 from app.modules.observability.public import LangfuseTracer
 
@@ -24,6 +26,15 @@ from app.modules.observability.public import LangfuseTracer
         ("Telegram: @anna_k", "Telegram: [handle]"),
         ("карта 4111 1111 1111 1111", "карта [card]"),
         ("4111-1111-1111-1111", "[card]"),
+        # Соседнее число не прячет телефон.
+        (
+            "Мой номер 89991112233 15.10.2026 перезвоните",
+            "Мой номер [phone] 15.10.2026 перезвоните",
+        ),
+        ("8 999 111 22 33 8 999 444 55 66", "[phone] [phone]"),
+        ("4111 1111 1111 1111 89991112233", "[card] [phone]"),
+        # Похоже на карту, но сумма Луна не сходится: намеренно частично (докстринг pii.py).
+        ("1234 5678 9012 3456", "[phone] 3456"),
     ],
 )
 def test_contacts_are_masked(text: str, masked: str) -> None:
@@ -41,11 +52,42 @@ def test_contacts_are_masked(text: str, masked: str) -> None:
         "Заказ хранится 7 дней, интервалы 10:00\u201314:00, 14:00\u201318:00",
         "Почта России: 5\u201314 дней",
         "скидка 15% на второй товар",
+        "Доставка 15.10.2026 10.11.2026",
+        "8 999 123 45 67x",
     ],
 )
 def test_ordinary_texts_are_unchanged(text: str) -> None:
     assert mask_pii(text) == text
     assert not has_contact(text)
+
+
+@pytest.mark.parametrize(
+    "text", ["a" * 20_000, "1." * 10_000, "a@" * 10_000, "1 " * 10_000, "anna" + "." * 20_000]
+)
+def test_masking_time_is_linear(text: str) -> None:
+    """Маскирование синхронно в корутине хода: длинный текст не должен её блокировать."""
+    started = time.perf_counter()
+    mask_pii(text)
+    assert time.perf_counter() - started < 0.2
+
+
+def test_luhn_of_any_substring_matches_direct_check() -> None:
+    rng = random.Random(7)
+    for _ in range(5000):
+        digits = "".join(rng.choice("0123456789") for _ in range(rng.randint(1, 40)))
+        start = rng.randrange(len(digits))
+        end = rng.randint(start + 1, len(digits))
+        assert _LuhnPrefix(digits).valid(start, end) is _luhn_direct(digits[start:end])
+
+
+def _luhn_direct(digits: str) -> bool:
+    total = 0
+    for i, char in enumerate(reversed(digits)):
+        d = int(char)
+        if i % 2:
+            d = d * 2 - 9 if d > 4 else d * 2
+        total += d
+    return total % 10 == 0
 
 
 def test_form_values_and_lead_fields_are_hidden_entirely() -> None:
@@ -150,7 +192,8 @@ def test_langfuse_export_contains_no_contacts() -> None:
         ensure_ascii=False,
     )
     assert len(exporter.get_finished_spans()) == 3
-    for secret in (phone, email, "Анна", "999"):
+    # Не просто "999": такая подстрока бывает в случайных UUID трейса.
+    for secret in (phone, email, "Анна", "999 123"):
         assert secret not in exported
     assert "[phone]" in exported and HIDDEN in exported
     tracer.shutdown()

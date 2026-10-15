@@ -52,6 +52,7 @@ from app.modules.leads.public import LeadRepository
 from app.modules.memory.public import DialogState
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import (
+    AgentConfigRecord,
     AgentConfigRepository,
     SqlTenantDirectory,
     WidgetKeyRepository,
@@ -1521,3 +1522,80 @@ async def test_unavailable_primary_falls_back_to_backup_model(
         texts = "".join(e["data"]["delta"] for e in events if e["type"] == "text_delta")
         assert texts == ANSWER
         assert events[-1]["data"]["status"] == "completed"
+
+
+# --- Версия AgentConfig, устаревшая по схеме (REVIEW.md: T-1b) ---
+
+
+async def _make_outdated(session: AsyncSession, config_id: UUID) -> None:
+    """Поле, которого нет в схеме: так выглядит версия после смены схемы."""
+    record = await session.get(AgentConfigRecord, config_id)
+    assert record is not None
+    record.config = {**record.config, "legacy_field": True}
+    await session.flush()
+
+
+def _config_outdated(response: Response) -> None:
+    assert response.status_code == 500, response.text
+    error = HttpError.model_validate(response.json()).error
+    assert (error.code, error.retryable) == ("internal", False)
+    assert error.message == "конфигурация ассистента неисправна"
+
+
+async def test_outdated_active_config_does_not_start_conversation(
+    db_client: AsyncClient, db_session: AsyncSession, shop: TenantId
+) -> None:
+    active = await AgentConfigRepository(db_session).get_active(shop)
+    assert active is not None
+    await _make_outdated(db_session, active.id)
+
+    with structlog.testing.capture_logs() as logs:
+        response = await db_client.post(URL, json={"visitor_id": "v-1"}, headers=_key("shop"))
+
+    _config_outdated(response)
+    [entry] = [e for e in logs if e["event"] == "agent_config_invalid"]
+    assert (entry["tenant_id"], entry["config_id"]) == (str(shop), str(active.id))
+    assert entry["problems"] == ["legacy_field"]
+
+
+async def test_outdated_conversation_config_rejects_turn_without_writing_input(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
+) -> None:
+    agent = ScriptedAgent()
+    use_agent(agent)
+    conversation = await ConversationRepository(db_session).find(shop, conversation_id)
+    assert conversation is not None
+    await _make_outdated(db_session, conversation.agent_config_id)
+
+    first = await _send(db_client, conversation_id)
+    second = await _send(db_client, conversation_id)
+
+    _config_outdated(first)
+    _config_outdated(second)  # диалог освобождён: не 409 turn_in_progress
+    assert agent.requests == []
+    assert (await _history(db_client, conversation_id)).messages == []
+
+
+async def test_outdated_conversation_config_rejects_retry(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    use_agent: Any,
+) -> None:
+    use_agent(FailingAgent(FLAKY))
+    failed = _parse_sse((await _send(db_client, conversation_id)).text)[-1][1].root.message_id
+    conversation = await ConversationRepository(db_session).find(shop, conversation_id)
+    assert conversation is not None
+    await _make_outdated(db_session, conversation.agent_config_id)
+
+    response = await _retry(db_client, conversation_id, str(failed))
+
+    _config_outdated(response)
+    # Неудачный ответ не помечен заменённым — его можно повторить, когда конфиг исправят.
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    assert str(assistant.message_id) == str(failed)

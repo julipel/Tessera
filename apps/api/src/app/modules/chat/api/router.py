@@ -19,6 +19,7 @@ from app.modules.chat.application.conversations import get_history, start_conver
 from app.modules.chat.application.summaries import SummaryScheduler
 from app.modules.chat.application.turns import TurnRegistry, retry_turn, start_turn
 from app.modules.chat.domain.errors import (
+    AgentConfigOutdatedError,
     ConversationNotFoundError,
     DuplicateMessageError,
     InvalidInputError,
@@ -155,6 +156,8 @@ async def create_conversation(
         )
     except NoActiveConfigError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", str(e)) from e
+    except AgentConfigOutdatedError as e:
+        raise _config_outdated() from e
     structlog.contextvars.bind_contextvars(conversation_id=str(conversation.id))
     logger.info(
         "conversation_created",
@@ -229,6 +232,8 @@ async def send_message(
         raise ApiError(status.HTTP_409_CONFLICT, "turn_in_progress", str(e)) from e
     except InvalidInputError as e:
         raise ApiError(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_input", str(e)) from e
+    except AgentConfigOutdatedError as e:
+        raise _config_outdated() from e
     structlog.contextvars.bind_contextvars(turn_id=str(turn.turn_id))
     logger.info("turn_started")
     return TurnResponse(turn)
@@ -284,6 +289,8 @@ async def retry_message(
         raise ApiError(status.HTTP_409_CONFLICT, "not_retryable", str(e)) from e
     except TurnInProgressError as e:
         raise ApiError(status.HTTP_409_CONFLICT, "turn_in_progress", str(e)) from e
+    except AgentConfigOutdatedError as e:
+        raise _config_outdated() from e
     structlog.contextvars.bind_contextvars(turn_id=str(turn.turn_id))
     logger.info("turn_started", retry_of=str(message_id))
     return TurnResponse(turn)
@@ -298,3 +305,10 @@ async def cancel_turn(
     if not await registry.cancel(tenant_id, conversation_id, turn_id):
         raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", f"ход {turn_id} не выполняется")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _config_outdated() -> ApiError:
+    """Причина — в логе agent_config_invalid (config_id, места ошибок)."""
+    return ApiError(
+        status.HTTP_500_INTERNAL_SERVER_ERROR, "internal", "конфигурация ассистента неисправна"
+    )

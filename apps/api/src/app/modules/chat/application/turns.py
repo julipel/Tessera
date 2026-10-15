@@ -25,7 +25,11 @@ from app.modules.agent.kernel import (
     TurnCompleted,
     TurnTimeoutError,
 )
-from app.modules.chat.application.conversations import require_conversation, user_message
+from app.modules.chat.application.conversations import (
+    agent_config,
+    require_conversation,
+    user_message,
+)
 from app.modules.chat.application.journal import TurnJournal
 from app.modules.chat.application.summaries import (
     SummaryScheduler,
@@ -566,6 +570,7 @@ async def _conversation_with_config(
     config = await configs.config(tenant_id, conversation.agent_config_id)
     if config is None:
         raise AgentConfigMissingError(f"нет AgentConfig {conversation.agent_config_id}")
+    agent_config(tenant_id, conversation.agent_config_id, config)  # устаревшая — до записи ввода
     return conversation, config
 
 

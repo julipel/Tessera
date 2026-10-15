@@ -1,6 +1,10 @@
 """Use cases диалога: начало, история, идемпотентная запись ввода пользователя."""
 
+from typing import Any
 from uuid import UUID
+
+import structlog
+from pydantic import ValidationError
 
 from app.contracts import AgentConfig, HistoryMessage, MessageHistory, TextInput, UserInput
 from app.modules.chat.domain.entities import (
@@ -11,10 +15,32 @@ from app.modules.chat.domain.entities import (
     MessageStatus,
     NewMessage,
 )
-from app.modules.chat.domain.errors import ConversationNotFoundError, NoActiveConfigError
+from app.modules.chat.domain.errors import (
+    AgentConfigOutdatedError,
+    ConversationNotFoundError,
+    NoActiveConfigError,
+)
 from app.modules.chat.domain.ports import ActiveConfigLookup, ConversationStore, MessageStore
 from app.modules.shared.kernel import TenantId
 from app.modules.tenants.kernel import resolve_language
+
+logger = structlog.get_logger(__name__)
+
+
+def agent_config(tenant_id: TenantId, config_id: UUID, data: dict[str, Any]) -> AgentConfig:
+    """Конфиг версии `config_id`, проверенный по текущей схеме. Проверка — на входе в chat
+    (начало диалога, ход, сводка): дальше конфиг разбирается без ошибок. Устаревшая версия —
+    лог `agent_config_invalid` и AgentConfigOutdatedError."""
+    try:
+        return AgentConfig.model_validate(data)
+    except ValidationError as e:
+        logger.error(
+            "agent_config_invalid",
+            tenant_id=str(tenant_id),
+            config_id=str(config_id),
+            problems=[".".join(map(str, err["loc"])) for err in e.errors()],
+        )
+        raise AgentConfigOutdatedError(f"AgentConfig {config_id} не проходит схему") from e
 
 
 async def start_conversation(
@@ -28,7 +54,8 @@ async def start_conversation(
     active = await configs.active_config(tenant_id)
     if active is None:
         raise NoActiveConfigError(f"у тенанта {tenant_id} нет активного AgentConfig")
-    language = resolve_language(AgentConfig.model_validate(active.config).assistant, locale)
+    config = agent_config(tenant_id, active.id, active.config)
+    language = resolve_language(config.assistant, locale)
     return await conversations.create(tenant_id, active.id, Channel.WEB, visitor_id, language)
 
 

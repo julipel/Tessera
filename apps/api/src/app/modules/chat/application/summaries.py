@@ -9,7 +9,7 @@ from uuid import UUID
 import structlog
 
 from app.contracts import AgentConfig, MemoryConfig
-from app.modules.chat.application.conversations import require_conversation
+from app.modules.chat.application.conversations import agent_config, require_conversation
 from app.modules.chat.domain.entities import ChatMessage, Conversation, MessageRole
 from app.modules.chat.domain.errors import AgentConfigMissingError
 from app.modules.chat.domain.ports import (
@@ -84,7 +84,7 @@ async def summarize_conversation(
     previous, pending = after_summary(
         conversation, await messages.list_for(tenant_id, conversation_id)
     )
-    point = summary_fold(AgentConfig.model_validate(config), pending)
+    point = summary_fold(agent_config(tenant_id, conversation.agent_config_id, config), pending)
     if point is None:
         return False
     folded = pending[:point]

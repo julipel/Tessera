@@ -7,7 +7,11 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from app.modules.knowledge.infrastructure.web_client import WebClient, WebFetchError
+from app.modules.knowledge.infrastructure.web_client import (
+    WebClient,
+    WebFetchError,
+    WebRejectedError,
+)
 
 HTML = {"text/html"}
 
@@ -183,3 +187,19 @@ async def test_extra_headers_sent_on_every_redirect_hop() -> None:
     )
     assert [r.headers["X-Api-Key"] for r in seen] == ["k", "k"]
     assert seen[0].headers["User-Agent"] == "TesseraBot/0.1"
+
+
+async def test_redirect_to_http_rejected_only_with_extra_headers() -> None:
+    routes = {
+        "https://example.ru/a": httpx.Response(301, headers={"Location": "http://example.ru/a"}),
+        "http://example.ru/a": httpx.Response(200, content=b"ok"),
+    }
+    client, seen = _client(_routes(routes))
+
+    # Заголовки — секрет источника: по http они не уходят (REVIEW.md: K-4).
+    with pytest.raises(WebRejectedError, match="с https на http"):
+        await client.get("https://example.ru/a", max_bytes=10, headers={"X-Api-Key": "k"})
+    assert [str(r.url) for r in seen] == ["https://example.ru/a"]
+    # Без заголовков (краулер сайта) редирект на http по-прежнему проходит.
+    response = await client.get("https://example.ru/a", max_bytes=10)
+    assert response.body == b"ok"

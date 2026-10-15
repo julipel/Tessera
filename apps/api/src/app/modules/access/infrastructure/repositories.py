@@ -164,3 +164,11 @@ class SqlAdminSessionStore:
             .returning(AdminSessionRecord.id)
         )
         return len((await self.session.execute(stmt)).scalars().all())
+
+    async def delete_all(self, user_id: UUID) -> int:
+        stmt = (
+            delete(AdminSessionRecord)
+            .where(AdminSessionRecord.user_id == user_id)
+            .returning(AdminSessionRecord.id)
+        )
+        return len((await self.session.execute(stmt)).scalars().all())

@@ -34,18 +34,29 @@ async def admin_login(
     body: AdminLoginRequest, request: Request, session: DbSession
 ) -> AdminLoginResponse:
     """Сессия по email и паролю; 401 без уточнения, что не так. Лимит — по IP и по email:
-    перебор пароля одного пользователя с разных адресов тоже упирается в лимит."""
+    перебор пароля одного пользователя с разных адресов тоже упирается в лимит. Redis
+    недоступен — лимит считается в памяти процесса, а не снимается (ADR-0030)."""
     settings = request.app.state.settings
     limiter: RateLimiter = request.app.state.rate_limiter
     await enforce_rate_limits(
         limiter,
         [
             (
-                RateLimit("admin_login_ip", settings.rate_admin_login_per_ip_per_min, 60),
+                RateLimit(
+                    "admin_login_ip",
+                    settings.rate_admin_login_per_ip_per_min,
+                    60,
+                    local_fallback=True,
+                ),
                 client_ip(request),
             ),
             (
-                RateLimit("admin_login_email", settings.rate_admin_login_per_email_per_hour, 3600),
+                RateLimit(
+                    "admin_login_email",
+                    settings.rate_admin_login_per_email_per_hour,
+                    3600,
+                    local_fallback=True,
+                ),
                 body.email.strip().lower(),
             ),
         ],

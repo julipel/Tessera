@@ -6,11 +6,14 @@ from typing import Protocol
 
 @dataclass(frozen=True, slots=True)
 class RateLimit:
-    """Не больше `limit` запросов субъекта за окно `window_s`; `limit` 0 — правило выключено."""
+    """Не больше `limit` запросов субъекта за окно `window_s`; `limit` 0 — правило выключено.
+    `local_fallback` — если общее хранилище недоступно, считать в памяти процесса, а не пропускать
+    (защита от перебора пароля, ADR-0030)."""
 
     name: str
     limit: int
     window_s: int
+    local_fallback: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,5 +27,6 @@ ALLOWED = RateDecision(allowed=True)
 
 class RateLimiter(Protocol):
     async def hit(self, rule: RateLimit, subject: str) -> RateDecision:
-        """Учесть запрос субъекта и решить, пропустить ли его. Сбой хранилища — пропустить."""
+        """Учесть запрос субъекта и решить, пропустить ли его. Сбой хранилища — пропустить
+        (правило с `local_fallback` — считать в памяти процесса)."""
         ...

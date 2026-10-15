@@ -22,11 +22,13 @@ def _window(rule: RateLimit, now: float) -> tuple[int, int]:
 class RedisRateLimiter:
     """Фиксированное окно: `INCR` счётчика `rl:<правило>:<субъект>:<окно>` и `EXPIRE` на окно.
     Redis недоступен — запрос пропускается с предупреждением в лог: лимит не должен ронять
-    чат (ADR-0030)."""
+    чат (ADR-0030). Правила с `local_fallback` (вход в админку) тогда считаются в памяти
+    процесса: перебор пароля упирается в лимит и без Redis, вход не закрывается совсем."""
 
     def __init__(self, redis: Redis, now: Callable[[], float] = time.time) -> None:
         self._redis = redis
         self._now = now
+        self._fallback = InMemoryRateLimiter(now)
 
     async def hit(self, rule: RateLimit, subject: str) -> RateDecision:
         if rule.limit <= 0:
@@ -39,26 +41,41 @@ class RedisRateLimiter:
                 pipe.expire(key, rule.window_s + 1)
                 count, _ = await pipe.execute()
         except (RedisError, OSError) as e:
-            logger.warning("rate_limit_unavailable", rule=rule.name, error=str(e))
-            return ALLOWED
+            logger.warning(
+                "rate_limit_unavailable",
+                rule=rule.name,
+                error=str(e),
+                local_fallback=rule.local_fallback,
+            )
+            return await self._fallback.hit(rule, subject) if rule.local_fallback else ALLOWED
         if int(count) > rule.limit:
             return RateDecision(allowed=False, retry_after_s=retry_after)
         return ALLOWED
 
 
 class InMemoryRateLimiter:
-    """Те же окна в памяти процесса — для тестов (между процессами не работает)."""
+    """Те же окна в памяти процесса — для тестов и как запасной счётчик `RedisRateLimiter`
+    (между процессами не работает). Счётчики прошедших окон удаляются, когда их больше
+    `max_keys`: память не растёт с числом субъектов."""
 
-    def __init__(self, now: Callable[[], float] = time.time) -> None:
+    def __init__(self, now: Callable[[], float] = time.time, *, max_keys: int = 10_000) -> None:
         self._now = now
-        self._counts: dict[str, int] = {}
+        self._max_keys = max_keys
+        self._counts: dict[str, tuple[int, float]] = {}  # ключ → (счётчик, конец окна)
 
     async def hit(self, rule: RateLimit, subject: str) -> RateDecision:
         if rule.limit <= 0:
             return ALLOWED
-        index, retry_after = _window(rule, self._now())
+        now = self._now()
+        index, retry_after = _window(rule, now)
         key = f"{rule.name}:{subject}:{index}"
-        self._counts[key] = self._counts.get(key, 0) + 1
-        if self._counts[key] > rule.limit:
+        if key not in self._counts and len(self._counts) >= self._max_keys:
+            self._counts = {k: v for k, v in self._counts.items() if v[1] > now}
+        count = self._counts.get(key, (0, 0.0))[0] + 1
+        self._counts[key] = (count, (index + 1) * rule.window_s)
+        if count > rule.limit:
             return RateDecision(allowed=False, retry_after_s=retry_after)
         return ALLOWED
+
+    def __len__(self) -> int:
+        return len(self._counts)

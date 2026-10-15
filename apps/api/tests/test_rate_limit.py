@@ -126,6 +126,36 @@ async def test_unavailable_redis_lets_requests_through() -> None:
     assert [e["event"] for e in logs] == ["rate_limit_unavailable"]
 
 
+async def test_unavailable_redis_counts_local_fallback_rules_in_memory() -> None:
+    redis = Redis.from_url("redis://127.0.0.2:1/0", socket_connect_timeout=0.2)
+    limiter = RedisRateLimiter(redis, Clock(1_000_040.0))
+    login = RateLimit("login", limit=2, window_s=60, local_fallback=True)
+    try:
+        login_decisions = [await limiter.hit(login, "anna") for _ in range(3)]
+        chat_decisions = [await limiter.hit(RULE, "ip-1") for _ in range(3)]
+    finally:
+        await redis.aclose()
+
+    # Вход в админку без Redis не теряет защиту от перебора (REVIEW.md: AC-2), чат — пропускается.
+    assert [d.allowed for d in login_decisions] == [True, True, False]
+    assert login_decisions[2].retry_after_s == 40
+    assert [d.allowed for d in chat_decisions] == [True, True, True]
+
+
+async def test_memory_limiter_drops_counters_of_past_windows() -> None:
+    clock = Clock(1_000_040.0)
+    limiter = InMemoryRateLimiter(clock, max_keys=3)
+    for subject in ("a", "b", "c"):
+        await limiter.hit(RULE, subject)
+    clock.now += 60  # окно прошло
+
+    await limiter.hit(RULE, "d")
+
+    assert len(limiter) == 1
+    assert (await limiter.hit(RULE, "d")).allowed  # счётчик текущего окна не потерян
+    assert not (await limiter.hit(RULE, "d")).allowed
+
+
 # --- HTTP ---
 
 

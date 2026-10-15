@@ -18,6 +18,7 @@ from app.modules.access.domain.sessions import hash_session_token
 from app.modules.access.public import (
     AdminMembershipRepository,
     AdminSessionRecord,
+    SqlAdminSessionStore,
     SqlAdminUserDirectory,
     upsert_admin_user,
 )
@@ -43,6 +44,7 @@ async def _user(session: AsyncSession, email: str, **changes: Any) -> UUID:
         email,
         users=SqlAdminUserDirectory(session),
         memberships=AdminMembershipRepository(session),
+        sessions=SqlAdminSessionStore(session),
         **changes,
     )
     return result.user.id
@@ -208,6 +210,45 @@ async def test_disabling_user_or_revoking_role_applies_to_open_session(
 
     await _user(db_session, "anna@example.com", is_active=False)
     assert (await db_client.get(ME, headers=headers)).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"password": "another long secret"}, {"is_active": False}],
+    ids=["password", "disabled"],
+)
+async def test_password_change_or_disabling_closes_open_sessions(
+    db_client: AsyncClient, db_session: AsyncSession, admin_login: AdminLogin, change: Any
+) -> None:
+    anna = await admin_login("anna@example.com")
+    bob = await admin_login("bob@example.com")
+
+    await _user(db_session, "anna@example.com", **change)
+
+    # Украденный токен не живёт до конца срока сессии (REVIEW.md: AC-1).
+    assert (await db_client.get(ME, headers=anna)).status_code == 401
+    assert (await db_client.get(ME, headers=bob)).status_code == 200
+    user_id = await _user(db_session, "anna@example.com", is_active=True)
+    sessions = select(AdminSessionRecord).where(AdminSessionRecord.user_id == user_id)
+    assert (await db_session.execute(sessions)).scalars().all() == []
+
+
+async def test_role_change_keeps_open_sessions(
+    db_client: AsyncClient, db_session: AsyncSession, admin_login: AdminLogin
+) -> None:
+    shop = await _tenant(db_session, "shop")
+    headers = await admin_login("anna@example.com")
+
+    result = await upsert_admin_user(
+        "anna@example.com",
+        users=SqlAdminUserDirectory(db_session),
+        memberships=AdminMembershipRepository(db_session),
+        sessions=SqlAdminSessionStore(db_session),
+        grants={shop: AdminRole.VIEWER},
+    )
+
+    assert result.closed_sessions == 0
+    assert (await db_client.get(ME, headers=headers)).status_code == 200
 
 
 # --- Лимит частоты ---

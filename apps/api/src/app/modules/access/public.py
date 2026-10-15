@@ -17,6 +17,7 @@ from app.modules.access.infrastructure.models import (
 )
 from app.modules.access.infrastructure.repositories import (
     AdminMembershipRepository,
+    SqlAdminSessionStore,
     SqlAdminUserDirectory,
 )
 
@@ -32,6 +33,7 @@ __all__ = [
     "InvalidEmailError",
     "PasswordRequiredError",
     "SqlAdminAuthenticator",
+    "SqlAdminSessionStore",
     "SqlAdminUserDirectory",
     "TenantMembership",
     "WeakPasswordError",

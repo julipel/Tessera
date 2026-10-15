@@ -357,6 +357,33 @@ async def test_auth_not_sent_on_redirect_to_other_host() -> None:
     assert [r.url.host for r in api.requests] == ["api.example.ru"]
 
 
+async def test_auth_not_sent_on_redirect_to_http() -> None:
+    def handler(request: httpx.Request) -> Any:
+        if request.url.scheme == "https":
+            return httpx.Response(301, headers={"Location": "http://api.example.ru/v1"})
+        return 200, []
+
+    api = Api(handler, env={"SOURCE_SECRET_ACME": "tok"})
+    auth = {"type": "bearer", "secret_env": "SOURCE_SECRET_ACME"}
+
+    with pytest.raises(HttpApiSourceError, match="с https на http"):
+        await api.connector().discover(spec(auth=auth))
+    assert [r.url.scheme for r in api.requests] == ["https"]
+
+
+async def test_auth_not_sent_to_http_next_url() -> None:
+    def handler(request: httpx.Request) -> Any:
+        return 200, {"items": [product("1")], "next": "http://api.example.ru/v1/products?p=2"}
+
+    api = Api(handler, env={"SOURCE_SECRET_ACME": "tok"})
+    pagination = {"type": "next_url", "next_url_path": "next"}
+    auth = {"type": "bearer", "secret_env": "SOURCE_SECRET_ACME"}
+
+    with pytest.raises(HttpApiSourceError, match="только по https"):
+        await api.connector().discover(spec(records="items", pagination=pagination, auth=auth))
+    assert len(api.requests) == 1
+
+
 @pytest.mark.parametrize(
     ("handler", "message"),
     [
@@ -380,6 +407,8 @@ async def test_bad_response_is_source_error(handler: Any, message: str) -> None:
         {"pagination": {"type": "offset"}},
         {"pagination": {"type": "cursor"}},
         {"url": "ftp://api.example.ru/"},
+        # Секрет по http уходит открытым текстом (REVIEW.md: K-4).
+        {"url": "http://api.example.ru/v1", "auth": {"type": "bearer", "secret_env": "S"}},
     ],
 )
 async def test_bad_config_is_source_error(config: dict[str, Any]) -> None:

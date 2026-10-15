@@ -11,15 +11,22 @@ from app.modules.access.domain.passwords import (
     hash_password,
     normalize_email,
 )
-from app.modules.access.domain.ports import AdminMembershipStore, AdminUserDirectory
+from app.modules.access.domain.ports import (
+    AdminMembershipStore,
+    AdminSessionStore,
+    AdminUserDirectory,
+)
 from app.modules.shared.kernel import TenantId
 
 
 @dataclass(frozen=True, slots=True)
 class AdminUserResult:
+    """`closed_sessions` — сколько открытых сессий закрыто сменой пароля или отключением."""
+
     user: AdminUser
     created: bool
     memberships: Sequence[TenantMembership]
+    closed_sessions: int = 0
 
 
 async def upsert_admin_user(
@@ -27,6 +34,7 @@ async def upsert_admin_user(
     *,
     users: AdminUserDirectory,
     memberships: AdminMembershipStore,
+    sessions: AdminSessionStore,
     password: str | None = None,
     is_superadmin: bool | None = None,
     is_active: bool | None = None,
@@ -37,6 +45,8 @@ async def upsert_admin_user(
 
     Новому пользователю нужен пароль; `None` в остальных параметрах — не менять. `grants`
     задаёт роль в тенанте (одна на тенант, прежняя заменяется), `revokes` снимает её.
+    Смена пароля и отключение закрывают все сессии пользователя: украденный токен не живёт
+    до конца срока (REVIEW.md: AC-1).
     """
     email = normalize_email(email)
     password_hash: str | None = None
@@ -46,6 +56,7 @@ async def upsert_admin_user(
 
     user = await users.get_by_email(email)
     created = user is None
+    closed = 0
     if user is None:
         if password_hash is None:
             raise PasswordRequiredError(f"{email}: новому пользователю нужен пароль")
@@ -59,9 +70,16 @@ async def upsert_admin_user(
             is_superadmin=is_superadmin,
             is_active=is_active,
         )
+        if password_hash is not None or is_active is False:
+            closed = await sessions.delete_all(user.id)
 
     for tenant_id, role in (grants or {}).items():
         await memberships.set_role(tenant_id, user.id, role)
     for tenant_id in revokes:
         await memberships.revoke(tenant_id, user.id)
-    return AdminUserResult(user=user, created=created, memberships=await users.memberships(user.id))
+    return AdminUserResult(
+        user=user,
+        created=created,
+        memberships=await users.memberships(user.id),
+        closed_sessions=closed,
+    )

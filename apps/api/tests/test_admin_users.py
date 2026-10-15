@@ -22,6 +22,7 @@ from app.modules.access.public import (
     AdminUserRecord,
     InvalidEmailError,
     PasswordRequiredError,
+    SqlAdminSessionStore,
     SqlAdminUserDirectory,
     TenantMembership,
     WeakPasswordError,
@@ -107,6 +108,11 @@ def memberships(db_session: AsyncSession) -> AdminMembershipRepository:
     return AdminMembershipRepository(db_session)
 
 
+@pytest.fixture
+def sessions(db_session: AsyncSession) -> SqlAdminSessionStore:
+    return SqlAdminSessionStore(db_session)
+
+
 async def test_email_is_unique(users: SqlAdminUserDirectory) -> None:
     await users.create("a@example.com", "h", is_superadmin=False)
 
@@ -183,10 +189,14 @@ async def test_tenant_deletion_removes_its_memberships(
 
 
 async def test_new_user_needs_password(
-    users: SqlAdminUserDirectory, memberships: AdminMembershipRepository
+    users: SqlAdminUserDirectory,
+    memberships: AdminMembershipRepository,
+    sessions: SqlAdminSessionStore,
 ) -> None:
     with pytest.raises(PasswordRequiredError):
-        await upsert_admin_user("a@example.com", users=users, memberships=memberships)
+        await upsert_admin_user(
+            "a@example.com", users=users, memberships=memberships, sessions=sessions
+        )
     assert await users.get_by_email("a@example.com") is None
 
 
@@ -194,6 +204,7 @@ async def test_upsert_creates_user_with_roles(
     db_session: AsyncSession,
     users: SqlAdminUserDirectory,
     memberships: AdminMembershipRepository,
+    sessions: SqlAdminSessionStore,
     tenants: tuple[TenantId, TenantId],
 ) -> None:
     a, _ = tenants
@@ -202,6 +213,7 @@ async def test_upsert_creates_user_with_roles(
         " Ops@Example.com ",
         users=users,
         memberships=memberships,
+        sessions=sessions,
         password=PASSWORD,
         grants={a: AdminRole.VIEWER},
     )
@@ -222,6 +234,7 @@ async def test_upsert_changes_only_given_fields(
     db_session: AsyncSession,
     users: SqlAdminUserDirectory,
     memberships: AdminMembershipRepository,
+    sessions: SqlAdminSessionStore,
     tenants: tuple[TenantId, TenantId],
 ) -> None:
     a, b = tenants
@@ -229,6 +242,7 @@ async def test_upsert_changes_only_given_fields(
         "ops@example.com",
         users=users,
         memberships=memberships,
+        sessions=sessions,
         password=PASSWORD,
         is_superadmin=True,
         grants={a: AdminRole.VIEWER, b: AdminRole.VIEWER},
@@ -241,6 +255,7 @@ async def test_upsert_changes_only_given_fields(
         "OPS@example.com",
         users=users,
         memberships=memberships,
+        sessions=sessions,
         is_active=False,
         grants={a: AdminRole.EDITOR},
         revokes=[b],
@@ -254,14 +269,25 @@ async def test_upsert_changes_only_given_fields(
 
 
 async def test_upsert_resets_password(
-    db_session: AsyncSession, users: SqlAdminUserDirectory, memberships: AdminMembershipRepository
+    db_session: AsyncSession,
+    users: SqlAdminUserDirectory,
+    memberships: AdminMembershipRepository,
+    sessions: SqlAdminSessionStore,
 ) -> None:
     created = await upsert_admin_user(
-        "ops@example.com", users=users, memberships=memberships, password=PASSWORD
+        "ops@example.com",
+        users=users,
+        memberships=memberships,
+        sessions=sessions,
+        password=PASSWORD,
     )
 
     await upsert_admin_user(
-        "ops@example.com", users=users, memberships=memberships, password="another long secret"
+        "ops@example.com",
+        users=users,
+        memberships=memberships,
+        sessions=sessions,
+        password="another long secret",
     )
 
     record = await db_session.get(AdminUserRecord, created.user.id)
@@ -271,11 +297,17 @@ async def test_upsert_resets_password(
 
 
 async def test_weak_password_changes_nothing(
-    users: SqlAdminUserDirectory, memberships: AdminMembershipRepository
+    users: SqlAdminUserDirectory,
+    memberships: AdminMembershipRepository,
+    sessions: SqlAdminSessionStore,
 ) -> None:
     with pytest.raises(WeakPasswordError):
         await upsert_admin_user(
-            "ops@example.com", users=users, memberships=memberships, password="short"
+            "ops@example.com",
+            users=users,
+            memberships=memberships,
+            sessions=sessions,
+            password="short",
         )
     assert await users.get_by_email("ops@example.com") is None
 

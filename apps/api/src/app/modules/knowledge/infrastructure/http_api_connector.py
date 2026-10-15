@@ -161,6 +161,8 @@ class HttpApiSourceConfig(_Config):
         reserved = [h for h in self.headers if h.lower() in _RESERVED_HEADERS]
         if reserved:
             raise ValueError(f"заголовки {reserved} нельзя задавать (секреты — через auth)")
+        if self.auth is not None and urlsplit(self.url.strip()).scheme.lower() != "https":
+            raise ValueError("с auth нужен https-адрес: секрет не уходит открытым текстом")
         return self
 
     def mapping(self) -> ItemMapping:
@@ -215,12 +217,16 @@ class HttpApiConnector:
         if start is None:
             raise HttpApiSourceError(f"url: не http(s)-URL: {config.url!r}")
         host = urlsplit(start).hostname or ""
-        headers = {**config.headers, **self._auth_headers(config.auth)}
+        secret = self._auth_headers(config.auth)
+        headers = {**config.headers, **secret}
         pages = _Pages(config.pagination, host)
         url: str | None = pages.first(_with_params(start, config.params))
         records: list[Any] = []
         for page in range(config.pagination.max_pages):
             assert url is not None
+            if secret and urlsplit(url).scheme != "https":
+                # next_url на http того же хоста: секрет открытым текстом не отправляем (K-4).
+                raise HttpApiSourceError(f"{url}: с auth запросы только по https")
             response_url, body = await self._get_json(url, headers, host)
             batch = _lookup(body, config.records)
             if not isinstance(batch, list):

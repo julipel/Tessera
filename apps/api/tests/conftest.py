@@ -29,6 +29,7 @@ from app.main import create_app
 from app.modules.access.public import (
     AdminMembershipRepository,
     SqlAdminAuthenticator,
+    SqlAdminSessionStore,
     SqlAdminUserDirectory,
     upsert_admin_user,
 )
@@ -154,6 +155,7 @@ def admin_login(db_client: AsyncClient, db_session: AsyncSession) -> AdminLogin:
             email,
             users=SqlAdminUserDirectory(db_session),
             memberships=AdminMembershipRepository(db_session),
+            sessions=SqlAdminSessionStore(db_session),
             password=ADMIN_PASSWORD,
             is_superadmin=superadmin,
             grants=roles,

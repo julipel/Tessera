@@ -111,7 +111,11 @@ class WebClient:
                     target = normalize_url(location, current)
                     if target is None:
                         raise WebRejectedError(f"{current}: редирект на {location!r}")
-                    current = _checked_url(target)
+                    target = _checked_url(target)
+                    if extra_headers and _downgrade(current, target):
+                        # Заголовки (секрет источника) повторяются на каждом шаге (K-4).
+                        raise WebRejectedError(f"{url}: редирект с https на http: {target}")
+                    current = target
                     if (
                         allowed_hosts is not None
                         and urlsplit(current).hostname not in allowed_hosts
@@ -128,6 +132,10 @@ def build_web_client(*, user_agent: str, timeout_s: float = DEFAULT_TIMEOUT_S) -
     """Клиент с SSRF-защитой для рабочего окружения; закрывать через `client.http.aclose()`."""
     http = httpx.AsyncClient(transport=GuardedTransport(), timeout=timeout_s, trust_env=False)
     return WebClient(http, user_agent=user_agent, timeout_s=timeout_s)
+
+
+def _downgrade(current: str, target: str) -> bool:
+    return urlsplit(current).scheme == "https" and urlsplit(target).scheme == "http"
 
 
 def _checked_url(url: str) -> str:

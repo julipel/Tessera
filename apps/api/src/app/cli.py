@@ -19,6 +19,7 @@ from app.modules.access.public import (
     AdminRole,
     InvalidEmailError,
     PasswordRequiredError,
+    SqlAdminSessionStore,
     SqlAdminUserDirectory,
     WeakPasswordError,
     normalize_email,
@@ -149,6 +150,7 @@ async def admin_user(
                 email,
                 users=SqlAdminUserDirectory(session),
                 memberships=AdminMembershipRepository(session),
+                sessions=SqlAdminSessionStore(session),
                 password=password,
                 is_superadmin=is_superadmin,
                 is_active=is_active,
@@ -164,6 +166,7 @@ async def admin_user(
             "создан" if result.created else "обновлён",
             *(["суперадмин"] if user.is_superadmin else []),
             *([] if user.is_active else ["отключён"]),
+            *([f"закрыто сессий: {result.closed_sessions}"] if result.closed_sessions else []),
         ]
         print(f"{user.email}: {', '.join(flags)}; роли: {', '.join(roles) or 'нет'}")
         return True

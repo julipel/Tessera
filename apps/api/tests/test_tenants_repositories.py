@@ -62,11 +62,13 @@ async def test_activate_archives_previous_active(
 ) -> None:
     a, _ = tenants
     v1 = await configs.create_draft(a, CONFIG)
-    await configs.activate(a, v1.id)
+    first = await configs.activate(a, v1.id)
     v2 = await configs.create_draft(a, {"assistant": {"name": "B"}})
     activated = await configs.activate(a, v2.id)
 
-    assert activated.status == AgentConfigStatus.ACTIVE
+    assert first.previous_version is None  # активной версии ещё не было
+    assert activated.config.status == AgentConfigStatus.ACTIVE
+    assert activated.previous_version == 1
     active = await configs.get_active(a)
     assert active is not None
     assert active.id == v2.id
@@ -81,7 +83,8 @@ async def test_activate_is_idempotent(
     v1 = await configs.create_draft(a, CONFIG)
     await configs.activate(a, v1.id)
     again = await configs.activate(a, v1.id)
-    assert again.status == AgentConfigStatus.ACTIVE
+    assert again.config.status == AgentConfigStatus.ACTIVE
+    assert again.previous_version == 1
 
 
 async def test_database_allows_single_active_config(

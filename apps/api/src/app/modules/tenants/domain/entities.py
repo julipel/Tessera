@@ -43,6 +43,15 @@ class AgentConfigVersion:
 
 
 @dataclass(frozen=True, slots=True)
+class Activation:
+    """Итог активации: активная версия и номер прежней активной (None — активной не было;
+    равен `config.version` — версия уже была активной)."""
+
+    config: AgentConfigVersion
+    previous_version: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class WidgetAccess:
     """Результат проверки ключа виджета: тенант и сайты, с которых ключ разрешён."""
 

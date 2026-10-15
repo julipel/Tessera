@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.shared.public import TenantId, TenantRepository
 from app.modules.tenants.domain.entities import (
+    Activation,
     AgentConfigStatus,
     AgentConfigVersion,
     Tenant,
@@ -105,7 +106,7 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
         await self.session.refresh(record)  # created_at — значение БД
         return _config(record)
 
-    async def activate(self, tenant_id: TenantId, config_id: UUID) -> AgentConfigVersion:
+    async def activate(self, tenant_id: TenantId, config_id: UUID) -> Activation:
         await self._lock_tenant(tenant_id)
         # populate_existing: статус версии мог смениться, пока ждали блокировку.
         stmt = (
@@ -116,19 +117,22 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
         record = (await self.session.execute(stmt)).scalar_one_or_none()
         if record is None:
             raise AgentConfigNotFoundError(f"AgentConfig {config_id} not found")
-        if record.status != AgentConfigStatus.ACTIVE:
-            # Сначала архивируем прежнюю активную: частичный уникальный индекс проверяется сразу.
-            await self.session.execute(
-                update(AgentConfigRecord)
-                .where(
-                    AgentConfigRecord.tenant_id == tenant_id,
-                    AgentConfigRecord.status == AgentConfigStatus.ACTIVE,
-                )
-                .values(status=AgentConfigStatus.ARCHIVED)
+        if record.status == AgentConfigStatus.ACTIVE:
+            return Activation(_config(record), previous_version=record.version)
+        # Сначала архивируем прежнюю активную: частичный уникальный индекс проверяется сразу.
+        archived = await self.session.execute(
+            update(AgentConfigRecord)
+            .where(
+                AgentConfigRecord.tenant_id == tenant_id,
+                AgentConfigRecord.status == AgentConfigStatus.ACTIVE,
             )
-            record.status = AgentConfigStatus.ACTIVE
-            await self.session.flush()
-        return _config(record)
+            .values(status=AgentConfigStatus.ARCHIVED)
+            .returning(AgentConfigRecord.version)
+        )
+        previous = archived.scalar_one_or_none()
+        record.status = AgentConfigStatus.ACTIVE
+        await self.session.flush()
+        return Activation(_config(record), previous_version=previous)
 
 
 class WidgetKeyRepository(TenantRepository[WidgetKeyRecord]):

@@ -42,7 +42,7 @@ async def seed_tenant(
     active = await configs.get_active(tenant.id)
     if active is None or active.config != config:
         draft = await configs.create_draft(tenant.id, config)
-        active = await configs.activate(tenant.id, draft.id)
+        active = (await configs.activate(tenant.id, draft.id)).config
         changed = True
     else:
         changed = False

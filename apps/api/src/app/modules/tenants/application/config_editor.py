@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
+import structlog
 import yaml
 from pydantic import ValidationError
 
@@ -21,6 +22,9 @@ from app.modules.tenants.domain.errors import (
     InvalidAgentConfigError,
 )
 from app.modules.tenants.domain.ports import AgentConfigStore
+
+# Журнал действий админки (REVIEW.md: T-4): admin_user_id — в контексте лога от AdminEditor.
+logger = structlog.get_logger(__name__)
 
 
 def scenario_key_problems(config: AgentConfig) -> list[ConfigProblem]:
@@ -94,7 +98,14 @@ async def get_config_version(
 async def save_config_draft(
     tenant_id: TenantId, source: str, configs: AgentConfigStore
 ) -> AgentConfigVersion:
-    return await configs.create_draft(tenant_id, parse_agent_config_yaml(source))
+    draft = await configs.create_draft(tenant_id, parse_agent_config_yaml(source))
+    logger.info(
+        "agent_config_draft_saved",
+        tenant_id=str(tenant_id),
+        config_id=str(draft.id),
+        version=draft.version,
+    )
+    return draft
 
 
 async def activate_config_version(
@@ -104,4 +115,14 @@ async def activate_config_version(
     Конфиг проверяется заново: схема могла измениться после сохранения версии."""
     version = await get_config_version(tenant_id, config_id, configs)
     validate_agent_config(version.config)
-    return await configs.activate(tenant_id, config_id)
+    activation = await configs.activate(tenant_id, config_id)
+    active = activation.config
+    logger.info(
+        "agent_config_activated",
+        tenant_id=str(tenant_id),
+        config_id=str(active.id),
+        version=active.version,
+        previous_version=activation.previous_version,
+        changed=activation.previous_version != active.version,
+    )
+    return active

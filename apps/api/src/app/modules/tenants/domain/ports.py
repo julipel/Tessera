@@ -5,7 +5,12 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from app.modules.shared.kernel import TenantId
-from app.modules.tenants.domain.entities import AgentConfigVersion, Tenant, WidgetAccess
+from app.modules.tenants.domain.entities import (
+    Activation,
+    AgentConfigVersion,
+    Tenant,
+    WidgetAccess,
+)
 
 
 class TenantDirectory(Protocol):
@@ -33,7 +38,7 @@ class AgentConfigStore(Protocol):
         self, tenant_id: TenantId, config: dict[str, Any]
     ) -> AgentConfigVersion: ...
 
-    async def activate(self, tenant_id: TenantId, config_id: UUID) -> AgentConfigVersion: ...
+    async def activate(self, tenant_id: TenantId, config_id: UUID) -> Activation: ...
 
 
 class WidgetKeyStore(Protocol):

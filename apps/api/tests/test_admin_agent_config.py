@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+import structlog
 import yaml
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -279,3 +280,32 @@ async def test_outdated_version_is_not_activated(
     error = HttpError.model_validate(response.json()).error
     assert error.details is not None
     assert [d.loc for d in error.details] == [["legacy_field"]]
+
+
+# --- Журнал действий с версиями (T-4) ---
+
+
+async def test_draft_and_activation_are_logged_with_admin(
+    db_client: AsyncClient, shop: TenantId, editor: dict[str, str]
+) -> None:
+    me = (await db_client.get("/v1/admin/me", headers=editor)).json()
+
+    with structlog.testing.capture_logs(
+        processors=[structlog.contextvars.merge_contextvars]
+    ) as logs:
+        created = await db_client.post(
+            _url(shop), json={"yaml": _yaml(_config("Здравствуйте!"))}, headers=editor
+        )
+        draft = AgentConfigVersionDetail.model_validate(created.json())
+        await db_client.post(_url(shop, f"/{draft.id}/activate"), headers=editor)
+        await db_client.post(_url(shop, f"/{draft.id}/activate"), headers=editor)
+
+    saved = [e for e in logs if e["event"] == "agent_config_draft_saved"]
+    activated = [e for e in logs if e["event"] == "agent_config_activated"]
+    assert [(e["config_id"], e["version"]) for e in saved] == [(str(draft.id), 2)]
+    assert [(e["version"], e["previous_version"], e["changed"]) for e in activated] == [
+        (2, 1, True),
+        (2, 2, False),  # повторная активация активной версии ничего не меняет
+    ]
+    for entry in [*saved, *activated]:
+        assert (entry["tenant_id"], entry["admin_user_id"]) == (str(shop), me["id"])

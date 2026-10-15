@@ -42,6 +42,9 @@ from app.settings import Settings, source_secrets_env
 
 logger = structlog.get_logger(__name__)
 
+# На запись failed после дедлайна синхронизации, до того как задачу оборвёт arq.
+SYNC_FINISH_MARGIN_S = 120
+
 
 def build_connectors(
     settings: Settings, web_client: WebClient
@@ -103,6 +106,7 @@ async def sync_source(ctx: dict[str, Any], tenant_id: str, sync_id: str, full: b
                 embedder=embedder,
                 index=index,
                 full=full,
+                timeout_s=cast(float, ctx["sync_timeout_s"]),
             )
 
 
@@ -111,6 +115,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     configure_logging(settings)
     engine = create_engine(settings.database_url, echo=settings.database_echo)
     ctx["engine"] = engine
+    ctx["sync_timeout_s"] = settings.sync_timeout_s
     ctx["session_factory"] = create_session_factory(engine)
     web_client = build_web_client(
         user_agent=settings.crawler_user_agent, timeout_s=settings.crawler_timeout_s
@@ -141,4 +146,7 @@ class WorkerSettings:
     functions: ClassVar[list[Callable[..., Awaitable[None]]]] = [sync_source]
     on_startup = startup
     on_shutdown = shutdown
-    redis_settings = RedisSettings.from_dsn(Settings().redis_url)
+    _settings = Settings()
+    redis_settings = RedisSettings.from_dsn(_settings.redis_url)
+    # Таймаут arq по умолчанию (300 с) обрывал бы длинные синхронизации, оставляя их в running.
+    job_timeout = _settings.sync_timeout_s + SYNC_FINISH_MARGIN_S

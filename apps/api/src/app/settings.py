@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # Краулер источников `website` (ADR-0013).
     crawler_user_agent: str = "TesseraBot/0.1"
     crawler_timeout_s: float = 15.0
+    # Дедлайн одной синхронизации источника в воркере: обход сайта (`max_duration_s` ≤ 6 ч)
+    # плюс запас на эмбеддинги и запись. По нему синхронизация завершается failed;
+    # таймаут задачи arq — с запасом сверху (worker.py).
+    sync_timeout_s: float = 7 * 3600
     # Приватные подсети, к которым можно подключать источники `database` (ADR-0018), JSON-список
     # CIDR. Публичные адреса разрешены всегда; локально — ["127.0.0.0/8"].
     source_db_allowed_networks: list[str] = []

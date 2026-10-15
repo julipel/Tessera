@@ -30,7 +30,7 @@ class RobotsUnavailableError(Exception):
 @dataclass(frozen=True, slots=True)
 class _Rule:
     allow: bool
-    pattern: re.Pattern[str]
+    pattern: "_Pattern"
     length: int
 
 
@@ -47,7 +47,7 @@ class RobotsRules:
             return True
         best: _Rule | None = None
         for rule in self.rules:
-            if rule.pattern.match(path) and (
+            if rule.pattern.matches(path) and (
                 best is None or (rule.length, rule.allow) > (best.length, best.allow)
             ):
                 best = rule
@@ -127,8 +127,39 @@ def _canonical_path(path: str) -> str:
     return quote(unquote(path), safe="/?=&*$%:@!,;+~-._")
 
 
-def _compile(pattern: str) -> re.Pattern[str]:
+@dataclass(frozen=True, slots=True)
+class _Pattern:
+    """Путь правила: литеральные куски между `*` и `$` в конце.
+
+    Не regex: `.*` подряд дают полиномиальный бэктрекинг, и правило вида `/*a*a*a*ab` из
+    robots.txt чужого сайта вешало бы воркер. Для шаблонов только со `*` жадный поиск
+    самого левого вхождения каждого куска точен, время — O(длина пути * число кусков).
+    """
+
+    parts: tuple[str, ...]
+    anchored: bool
+
+    def matches(self, path: str) -> bool:
+        first, *middle = self.parts
+        if not path.startswith(first):
+            return False
+        if not middle:
+            return not self.anchored or path == first
+        last = middle.pop() if self.anchored else ""
+        pos = len(first)
+        for part in middle:
+            found = path.find(part, pos)
+            if found < 0:
+                return False
+            pos = found + len(part)
+        return not self.anchored or (path.endswith(last) and len(path) - len(last) >= pos)
+
+
+def _compile(pattern: str) -> _Pattern:
     anchored = pattern.endswith("$")
     body = pattern[:-1] if anchored else pattern
-    regex = ".*".join(re.escape(part) for part in body.split("*"))
-    return re.compile(regex + ("$" if anchored else ""))
+    return _Pattern(tuple(body.split("*")), anchored)
+
+
+# robots.txt недоступен у origin, который не проверялся до обхода (RFC 9309: 5xx — запрет всего).
+DISALLOW_ALL = RobotsRules((_Rule(allow=False, pattern=_compile("/"), length=1),))

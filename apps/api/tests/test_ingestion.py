@@ -1,6 +1,7 @@
 """Ingestion-пайплайн на фейковом коннекторе: статусы, дедупликация, удаления, изоляция,
 индексация чанков (фейковые эмбеддер и индекс)."""
 
+import asyncio
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Any
@@ -52,10 +53,15 @@ class FakeConnector:
     changes: list[str] = field(default_factory=list)
     broken: set[str] = field(default_factory=set)
     discover_error: Exception | None = None
+    discover_delay_s: float = 0.0
+    discover_started: asyncio.Event = field(default_factory=asyncio.Event)
     calls: list[tuple[str, Any]] = field(default_factory=list)
 
     async def discover(self, source: SourceSpec) -> Listing:
         self.calls.append(("discover", source.config))
+        self.discover_started.set()
+        if self.discover_delay_s:
+            await asyncio.sleep(self.discover_delay_s)
         if self.discover_error is not None:
             raise self.discover_error
         return Listing([RawItemRef(ext) for ext in self.items], self.cursor)
@@ -114,6 +120,7 @@ class Env:
         *,
         tenant_id: TenantId | None = None,
         full: bool = False,
+        timeout_s: float | None = None,
     ) -> None:
         await run_sync(
             tenant_id or self.tenant_id,
@@ -124,7 +131,14 @@ class Env:
             embedder=self.embedder,
             index=self.index,
             full=full,
+            timeout_s=timeout_s,
         )
+
+    async def new_sync(self) -> UUID:
+        sync = await SourceSyncRepository(self.session).add(
+            self.tenant_id, SourceSyncRecord(tenant_id=self.tenant_id, source_id=self.source_id)
+        )
+        return sync.id
 
     async def sync_record(self, sync_id: UUID) -> SourceSyncRecord:
         record = await SourceSyncRepository(self.session).get_or_raise(self.tenant_id, sync_id)
@@ -268,6 +282,38 @@ async def test_discover_error_marks_sync_failed(env: Env) -> None:
     assert record.error == "RuntimeError: sitemap недоступен"
     assert record.finished_at is not None
     assert record.cursor is None
+
+
+async def test_sync_deadline_marks_sync_failed(env: Env) -> None:
+    env.connector.put(doc("faq"))
+    env.connector.discover_delay_s = 5
+    sync_id = await env.new_sync()
+
+    await env.run(sync_id, {SourceKind.FILE: env.connector}, timeout_s=0.05)
+
+    record = await env.sync_record(sync_id)
+    assert record.status is SyncStatus.FAILED
+    assert record.error == "TimeoutError: синхронизация не уложилась в 0.05 с"
+    assert record.finished_at is not None
+
+
+async def test_cancelled_sync_stays_running_and_is_rerun(env: Env) -> None:
+    """Отмена задачи (остановка воркера): arq поставит её снова, синхронизация доработает."""
+    env.connector.put(doc("faq"))
+    env.connector.discover_delay_s = 5
+    sync_id = await env.new_sync()
+
+    task = asyncio.create_task(env.run(sync_id, {SourceKind.FILE: env.connector}))
+    await env.connector.discover_started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (await env.sync_record(sync_id)).status is SyncStatus.RUNNING
+
+    env.connector.discover_delay_s = 0
+    await env.run(sync_id, {SourceKind.FILE: env.connector})
+    assert (await env.sync_record(sync_id)).status is SyncStatus.SUCCEEDED
+    assert set(await env.documents()) == {"faq"}
 
 
 async def test_unknown_source_kind_marks_sync_failed(env: Env) -> None:

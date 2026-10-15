@@ -12,6 +12,7 @@
 в поиске точки без записей.
 """
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
@@ -55,13 +56,16 @@ async def run_sync(
     embedder: Embedder,
     index: ChunkIndex,
     full: bool = False,
+    timeout_s: float | None = None,
 ) -> None:
     """Выполнить синхронизацию `sync_id`. Без `full` при наличии курсора последней успешной
     синхронизации — инкрементально (changed_since), иначе полный discover с удалением
     пропавших элементов.
 
     Повторный запуск завершённой синхронизации ничего не делает; зависшую в running
-    (воркер упал) — выполняет заново: запись идемпотентна.
+    (воркер упал или остановлен — отмена задачи) — выполняет заново: запись идемпотентна.
+    `timeout_s` — дедлайн всей синхронизации: по нему она завершается failed, а не
+    обрывается снаружи (таймаут задачи arq) и не остаётся навсегда в running.
     """
     job = await store.load_job(tenant_id, sync_id)
     if job is None:
@@ -76,15 +80,26 @@ async def run_sync(
     log.info("ingestion.sync_started", kind=job.kind)
 
     stats = SyncStats()
+    deadline = asyncio.timeout(timeout_s)
     try:
-        cursor = await _ingest(
-            tenant_id, job, store, connectors, _Indexing(chunker, embedder, index), stats, full=full
-        )
+        async with deadline:
+            cursor = await _ingest(
+                tenant_id,
+                job,
+                store,
+                connectors,
+                _Indexing(chunker, embedder, index),
+                stats,
+                full=full,
+            )
     except Exception as e:
         await store.rollback()
-        await store.finish(
-            tenant_id, sync_id, SyncStatus.FAILED, stats.as_dict(), None, f"{type(e).__name__}: {e}"
+        error = (
+            f"TimeoutError: синхронизация не уложилась в {timeout_s:g} с"
+            if deadline.expired()
+            else f"{type(e).__name__}: {e}"
         )
+        await store.finish(tenant_id, sync_id, SyncStatus.FAILED, stats.as_dict(), None, error)
         await store.commit()
         log.exception("ingestion.sync_failed", **stats.as_dict())
         return

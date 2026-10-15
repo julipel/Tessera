@@ -10,8 +10,12 @@
   сайта, запрет robots — страницы нет (документ удалится);
 - остальные ошибки (5xx, 429, сеть) временные: URL остаётся в листинге без кэша, `fetch`
   повторит запрос и при неудаче даст ошибку элемента — такие элементы не удаляются;
-- недоступны robots.txt, стартовая страница или явный sitemap, вышло `max_duration_s` —
-  ошибка синхронизации. `max_pages` обрывает обход; порядок детерминирован.
+- недоступны robots.txt стартовых URL, стартовая страница или явный sitemap, вышло
+  `max_duration_s` — ошибка синхронизации. `max_pages` обрывает обход; порядок детерминирован.
+
+robots.txt у каждого origin свой (RFC 9309: схема, хост, порт): для стартовых URL он читается
+до обхода, для остальных origin хостов источника (http↔https после редиректа, ссылки с другой
+схемой) — при первом обращении. Недоступный robots такого origin запрещает его страницы.
 
 Разобранные при обходе страницы кэшируются для `fetch`. Курсора нет: каждая синхронизация —
 полный обход, неизменённые страницы отсекает `content_hash`.
@@ -25,6 +29,7 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
+import structlog
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.modules.knowledge.domain.entities import SourceKind
@@ -37,6 +42,7 @@ from app.modules.knowledge.domain.ingestion import (
 )
 from app.modules.knowledge.infrastructure.html_extract import decode_html, extract_page
 from app.modules.knowledge.infrastructure.robots import (
+    DISALLOW_ALL,
     RobotsRules,
     RobotsUnavailableError,
     load_robots,
@@ -53,6 +59,8 @@ from app.modules.knowledge.infrastructure.web_client import (
 )
 from app.modules.knowledge.infrastructure.web_urls import normalize_url
 from app.modules.shared.kernel import TenantId
+
+logger = structlog.get_logger(__name__)
 
 MAX_PAGES_CAP = 5000
 MAX_ROBOTS_DELAY_S = 10.0
@@ -111,8 +119,10 @@ class _Site:
             and not any(path.startswith(p) for p in self.config.exclude)
         )
 
-    def allowed(self, url: str) -> bool:
-        return self.in_scope(url) and self.robots[_origin(url)].allowed(url)
+    def use_robots(self, origin: str, rules: RobotsRules) -> None:
+        self.robots[origin] = rules
+        if rules.crawl_delay is not None:
+            self.delay_s = max(self.delay_s, min(rules.crawl_delay, MAX_ROBOTS_DELAY_S))
 
 
 class WebsiteConnector:
@@ -155,7 +165,7 @@ class WebsiteConnector:
         if ref.external_id in cached:
             return cached[ref.external_id]
         site = await self._open(source)
-        if not site.allowed(ref.external_id):
+        if not await self._allowed(site, ref.external_id):
             raise WebsiteSourceError(f"{ref.external_id}: вне источника или запрещено robots.txt")
         try:
             return await self._page(site, ref.external_id)
@@ -179,10 +189,23 @@ class WebsiteConnector:
                 rules = await load_robots(self.client, origin, self.client.user_agent)
             except RobotsUnavailableError as e:
                 raise WebsiteSourceError(f"robots.txt недоступен: {e}") from e
-            site.robots[origin] = rules
-            if rules.crawl_delay is not None:
-                site.delay_s = max(site.delay_s, min(rules.crawl_delay, MAX_ROBOTS_DELAY_S))
+            site.use_robots(origin, rules)
         return site
+
+    async def _allowed(self, site: _Site, url: str) -> bool:
+        """В источнике и разрешено robots своего origin (robots читается при первом обращении)."""
+        if not site.in_scope(url):
+            return False
+        origin = _origin(url)
+        if origin not in site.robots:
+            try:
+                rules = await load_robots(self.client, origin, self.client.user_agent)
+            except RobotsUnavailableError as e:
+                # RFC 9309: robots недоступен — origin запрещён; источник целиком не падает.
+                logger.warning("website.robots_unavailable", origin=origin, error=str(e))
+                rules = DISALLOW_ALL
+            site.use_robots(origin, rules)
+        return site.robots[origin].allowed(url)
 
     async def _crawl(self, site: _Site) -> tuple[list[RawItemRef], dict[str, DocumentItem]]:
         limit = min(site.config.max_pages, self.max_pages_cap)
@@ -194,7 +217,7 @@ class WebsiteConnector:
         visited = 0
         while queue and visited < limit:
             url, depth = queue.popleft()
-            if not site.allowed(url):
+            if not await self._allowed(site, url):
                 if url in site.start_urls:
                     # Иначе листинг опустеет и полный discover удалит документы источника.
                     raise WebsiteSourceError(f"стартовая страница запрещена robots.txt: {url}")
@@ -232,7 +255,7 @@ class WebsiteConnector:
             raise WebFetchError(f"{url}: HTTP {response.status}")
         if not 200 <= response.status < 300:
             raise _PageGoneError(f"{url}: HTTP {response.status}")
-        if not site.allowed(response.url):
+        if not await self._allowed(site, response.url):
             raise _PageGoneError(f"{url}: редирект на запрещённый адрес {response.url}")
         extracted = extract_page(decode_html(response.body, response.charset), response.url)
         if extracted.noindex or not extracted.text.strip():

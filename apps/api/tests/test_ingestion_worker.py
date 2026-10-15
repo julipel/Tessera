@@ -99,6 +99,7 @@ async def test_worker_task_runs_sync(
         "chunker": MarkdownChunker(),
         "embedder": FakeEmbedder(),
         "index": index,
+        "sync_timeout_s": 60.0,
     }
     await sync_source(ctx, str(tenant_id), str(queued_id), full)
 
@@ -205,6 +206,12 @@ async def test_arq_queue_enqueues_worker_job_with_unique_id() -> None:
 
 def test_worker_registers_sync_job_under_queue_name() -> None:
     assert [f.__name__ for f in WorkerSettings.functions] == [SYNC_SOURCE_JOB]
+
+
+def test_arq_job_timeout_leaves_time_to_record_sync_deadline() -> None:
+    """Синхронизацию завершает её дедлайн (failed), а не таймаут задачи arq (running навсегда)."""
+    assert WorkerSettings.job_timeout > Settings(_env_file=None).sync_timeout_s
+    assert Settings(_env_file=None).sync_timeout_s > 6 * 3600  # max_duration_s обхода сайта
 
 
 def test_fakes_satisfy_protocols() -> None:

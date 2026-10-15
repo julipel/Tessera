@@ -1,5 +1,9 @@
 """robots.txt краулера `website` (RFC 9309, ADR-0013)."""
 
+import random
+import re
+import time
+
 import httpx
 import pytest
 
@@ -83,6 +87,51 @@ def test_equal_length_allow_wins_and_empty_disallow() -> None:
 def test_percent_encoding_is_canonical() -> None:
     rules = parse_robots("User-agent: *\nDisallow: /каталог/\n", UA, BASE)
     assert not rules.allowed("https://example.ru/%D0%BA%D0%B0%D1%82%D0%B0%D0%BB%D0%BE%D0%B3/1")
+
+
+def _disallowed(rule: str, path: str) -> bool:
+    rules = parse_robots(f"User-agent: *\nDisallow: {rule}\n", UA, BASE)
+    return not rules.allowed(f"https://example.ru{path}")
+
+
+@pytest.mark.parametrize(
+    ("rule", "path", "matches"),
+    [
+        ("/a$", "/a", True),
+        ("/a$", "/ab", False),
+        ("/a*$", "/abc", True),
+        ("*/b", "/a/b/c", True),
+        ("/a*b$", "/ab", True),
+        ("/a*b$", "/a", False),
+        ("/*b*b$", "/b", False),  # куски не перекрываются
+        ("/*b*b$", "/bb", True),
+        ("/a*a*ab", "/aaab", True),
+        ("/a*a*ab", "/aab", False),
+        ("/a**b", "/a-b", True),
+    ],
+)
+def test_wildcard_and_end_anchor(rule: str, path: str, matches: bool) -> None:
+    assert _disallowed(rule, path) is matches
+
+
+def test_matches_like_regex_semantics() -> None:
+    """Сверка с прежней реализацией (`*` → `.*`, `$` в конце) на случайных шаблонах."""
+    rng = random.Random(9309)
+    for _ in range(3000):
+        rule = "/" + "".join(rng.choice("ab*") for _ in range(rng.randint(0, 6)))
+        rule += rng.choice(["", "$"])
+        path = "/" + "".join(rng.choice("ab") for _ in range(rng.randint(0, 8)))
+        body = rule.removesuffix("$")
+        regex = ".*".join(re.escape(part) for part in body.split("*"))
+        expected = re.match(regex + ("$" if rule.endswith("$") else ""), path) is not None
+        assert _disallowed(rule, path) is expected, (rule, path)
+
+
+def test_many_wildcards_do_not_backtrack() -> None:
+    rules = parse_robots("User-agent: *\nDisallow: /" + "*a" * 12 + "b\n", UA, BASE)
+    started = time.perf_counter()
+    assert rules.allowed("https://example.ru/" + "a" * 2000)
+    assert time.perf_counter() - started < 0.05
 
 
 def _response(status: int, text: str = "") -> httpx.Response:

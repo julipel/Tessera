@@ -10,6 +10,12 @@ from app.settings import Settings
 
 TRACE_ID_HEADER = "X-Trace-Id"
 
+# Трейсбек в JSON без локальных переменных фреймов: `dict_tracebacks` по умолчанию пишет их
+# (`show_locals=True`), а там контакты из форм, токены, ключи API — мимо маскирования ADR-0032.
+_exception_dict = structlog.processors.ExceptionRenderer(
+    structlog.tracebacks.ExceptionDictTransformer(show_locals=False)
+)
+
 
 def configure_logging(settings: Settings) -> None:
     """Локально — читаемый вывод в консоль, в остальных окружениях — JSON."""
@@ -18,7 +24,7 @@ def configure_logging(settings: Settings) -> None:
     renderers: list[structlog.typing.Processor] = (
         [structlog.dev.ConsoleRenderer()]
         if settings.is_local
-        else [structlog.processors.dict_tracebacks, structlog.processors.JSONRenderer()]
+        else [_exception_dict, structlog.processors.JSONRenderer()]
     )
     structlog.configure(
         processors=[

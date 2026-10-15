@@ -34,17 +34,21 @@ def urlset(*paths: str) -> tuple[int, str, str]:
 
 
 class Site:
-    """Сайт на `httpx.MockTransport`: путь → (статус, Content-Type, тело) или (3xx, Location)."""
+    """Сайт на `httpx.MockTransport`: путь → (статус, Content-Type, тело) или (3xx, Location).
+    Ключ — полный URL, если ответ зависит от схемы; иначе путь (любая схема)."""
 
     def __init__(self, routes: dict[str, Any]) -> None:
         self.routes = {"/robots.txt": (404, "text/plain", ""), **routes}
         self.requests: list[str] = []
+        self.urls: list[str] = []
         self.sleeps: list[float] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.raw_path.decode()
+        url = f"{request.url.scheme}://{request.url.netloc.decode()}{path}"
         self.requests.append(path)
-        route = self.routes.get(path, (404, "text/html", "нет"))
+        self.urls.append(url)
+        route = self.routes.get(url) or self.routes.get(path, (404, "text/html", "нет"))
         if isinstance(route, Exception):
             raise route
         if len(route) == 2:
@@ -170,6 +174,46 @@ async def test_invalid_config() -> None:
         await connector.discover(SourceSpec(TenantId(uuid4()), uuid4(), {"start_urls": []}))
     with pytest.raises(WebsiteSourceError, match="start_urls"):
         await connector.discover(spec(start_urls=["ftp://example.ru/"]))
+
+
+async def test_redirect_to_other_scheme_reads_its_robots() -> None:
+    """Адрес введён без https, сайт перенаправляет на https: robots читается и для него."""
+    site = Site(
+        {
+            "http://example.ru/": (301, f"{SITE}/"),
+            f"{SITE}/": page("/a"),
+            "/a": page(text="Страница А"),
+        }
+    )
+    assert await listed(site, start_urls=["http://example.ru/"]) == ["/", "/a"]
+    assert "http://example.ru/robots.txt" in site.urls
+    assert f"{SITE}/robots.txt" in site.urls
+
+
+async def test_link_with_other_scheme_follows_that_origin_robots() -> None:
+    site = Site(
+        {
+            "/": page("http://example.ru/b", "http://example.ru/c"),
+            "http://example.ru/robots.txt": (200, "text/plain", "User-agent: *\nDisallow: /b"),
+            "/b": page(),
+            "/c": page(),
+        }
+    )
+    listing = await site.connector().discover(spec())
+    assert sorted(ref.external_id for ref in listing.refs) == ["http://example.ru/c", f"{SITE}/"]
+    assert "http://example.ru/b" not in site.urls
+
+
+async def test_unavailable_robots_of_other_origin_forbids_only_its_pages() -> None:
+    site = Site(
+        {
+            "/": page("http://example.ru/c"),
+            "http://example.ru/robots.txt": (503, "text/plain", ""),
+            "/c": page(),
+        }
+    )
+    assert await listed(site) == ["/"]
+    assert "http://example.ru/c" not in site.urls
 
 
 async def test_duration_limit() -> None:

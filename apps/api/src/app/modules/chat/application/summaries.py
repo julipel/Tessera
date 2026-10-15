@@ -76,7 +76,8 @@ async def summarize_conversation(
     """Свернуть старую часть истории после прошлой сводки, если она длиннее порога.
 
     True — сводка записана; False — сворачивать нечего, модель не вернула текст или сводку
-    уже обновил параллельный запуск. Ошибка провайдера (`LLMError`) не перехватывается."""
+    уже обновил параллельный запуск. Ошибка провайдера (`LLMError`) не перехватывается.
+    Чтение и запись — две короткие транзакции, вызов модели — между ними."""
     conversation = await require_conversation(tenant_id, conversation_id, conversations)
     config = await configs.config(tenant_id, conversation.agent_config_id)
     if config is None:
@@ -88,6 +89,9 @@ async def summarize_conversation(
     if point is None:
         return False
     folded = pending[:point]
+    # Соединение не держим, пока модель пишет сводку (ADR-0034, REVIEW.md: C-4): запись
+    # ниже — условный UPDATE, параллельный запуск или новая сводка её не испортят.
+    await commit()
     summary = await summarizer.summarize(config, previous, folded)
     if summary is None:
         logger.warning("summary_empty", conversation_id=str(conversation_id))
@@ -113,11 +117,15 @@ class SummaryScheduler:
     `run` — `summarize_conversation` со своей сессией БД (infrastructure). Ошибка сводки
     только логируется: ход уже записан. Задача, потерянная при рестарте, не восстанавливается —
     следующий ход снова увидит длинную историю и запустит её.
+
+    Одновременно идёт не больше `max_concurrent` сводок, остальные ждут: под нагрузкой
+    сводки не забирают пул соединений и лимиты провайдера у ходов (REVIEW.md: C-4).
     """
 
-    def __init__(self, run: SummaryRun) -> None:
+    def __init__(self, run: SummaryRun, *, max_concurrent: int = 4) -> None:
         self._run = run
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
+        self._slots = asyncio.Semaphore(max_concurrent)
 
     def schedule(self, tenant_id: TenantId, conversation_id: UUID) -> bool:
         """Запустить сводку диалога. False — по диалогу уже идёт сводка."""
@@ -131,7 +139,8 @@ class SummaryScheduler:
 
     async def _summarize(self, tenant_id: TenantId, conversation_id: UUID) -> None:
         try:
-            await self._run(tenant_id, conversation_id)
+            async with self._slots:
+                await self._run(tenant_id, conversation_id)
         except Exception:
             logger.exception("summary_failed", conversation_id=str(conversation_id))
 

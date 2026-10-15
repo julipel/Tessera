@@ -283,6 +283,37 @@ async def test_long_history_is_folded_except_recent_turns(db_session: AsyncSessi
     assert "Q2" not in prompt
 
 
+async def test_summary_holds_no_transaction_while_model_writes(db_session: AsyncSession) -> None:
+    tenant_id, conversation_id = await _conversation(db_session, "shop", _config(SMALL_MEMORY))
+    ids = await _add(db_session, tenant_id, conversation_id, "Q1 " + LONG, "A1", "Q2", "A2")
+    in_transaction: list[bool] = []
+
+    class CheckingSummarizer:
+        async def summarize(
+            self, agent_config: dict[str, Any], previous: str | None, messages: Any
+        ) -> str | None:
+            # Соединение не занято, пока модель пишет сводку (REVIEW.md: C-4).
+            in_transaction.append(db_session.in_transaction())
+            return "- сводка"
+
+    saved = await summarize_conversation(
+        tenant_id,
+        conversation_id,
+        ConversationRepository(db_session),
+        MessageRepository(db_session),
+        TenantsAgentConfigs(db_session),
+        CheckingSummarizer(),
+        db_session.commit,
+    )
+
+    assert saved
+    assert in_transaction == [False]
+    assert not db_session.in_transaction()
+    conversation = await ConversationRepository(db_session).find(tenant_id, conversation_id)
+    assert conversation is not None
+    assert (conversation.summary, conversation.summary_message_id) == ("- сводка", ids[1])
+
+
 async def test_next_summary_extends_previous_and_short_history_is_kept(
     db_session: AsyncSession,
 ) -> None:
@@ -404,6 +435,32 @@ async def test_scheduler_runs_one_summary_per_conversation() -> None:
     assert scheduler.schedule(tenant, first)  # закончилась — можно снова
     await scheduler.drain()
     assert runs == [first, second, first]
+
+
+async def test_scheduler_limits_concurrent_summaries() -> None:
+    release = asyncio.Event()
+    running = 0
+    peak = 0
+
+    async def run(tenant_id: TenantId, conversation_id: UUID) -> bool:
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await release.wait()
+        running -= 1
+        return True
+
+    scheduler = SummaryScheduler(run, max_concurrent=2)
+    tenant = TenantId(uuid4())
+    for _ in range(4):
+        assert scheduler.schedule(tenant, uuid4())
+    await asyncio.sleep(0.01)
+
+    # Остальные сводки ждут свободного места и не берут соединения из пула.
+    assert running == 2
+    release.set()
+    await scheduler.drain()
+    assert (peak, running) == (2, 0)
 
 
 async def test_scheduler_close_cancels_running_summaries() -> None:

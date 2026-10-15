@@ -38,7 +38,14 @@ from app.modules.agent.public import (
 from app.modules.chat.api.router import get_turn_agent
 from app.modules.chat.api.sse import TurnResponse, sse_stream
 from app.modules.chat.application.turns import TurnRegistry, retry_turn, start_turn
-from app.modules.chat.domain.entities import Conversation, ToolCallEntry, TurnRequest
+from app.modules.chat.domain.entities import (
+    ChatMessage,
+    Conversation,
+    MessageRole,
+    NewMessage,
+    ToolCallEntry,
+    TurnRequest,
+)
 from app.modules.chat.domain.ports import TurnAgent
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent, builtin_turn_agent
 from app.modules.chat.infrastructure.models import MessageRecord
@@ -354,6 +361,109 @@ async def test_client_disconnect_saves_partial_answer_as_interrupted(
     _, assistant = (await _history(db_client, conversation_id)).messages
     assert (assistant.status, assistant.message_id) == ("interrupted", turn.message_id)
     assert [b.root.model_dump()["text"] for b in assistant.blocks] == ["Подбираю "]
+
+
+# --- Запись ответа: сбой и обрыв во время записи (REVIEW.md: C-1) ---
+
+
+class FlakyMessages(MessageRepository):
+    """Запись ответа ассистента падает `failures` раз (таймаут пула) или ждёт `gate`."""
+
+    def __init__(
+        self, session: AsyncSession, failures: int = 0, gate: anyio.Event | None = None
+    ) -> None:
+        super().__init__(session)
+        self.failures = failures
+        self.gate = gate
+        self.saving = anyio.Event()
+
+    async def add_once(self, tenant_id: TenantId, message: NewMessage) -> tuple[ChatMessage, bool]:
+        if message.role is MessageRole.ASSISTANT:
+            self.saving.set()
+            if self.gate is not None:
+                await self.gate.wait()
+            if self.failures > 0:
+                self.failures -= 1
+                raise TimeoutError("QueuePool limit reached, connection timed out")
+        return await super().add_once(tenant_id, message)
+
+
+async def _flaky_turn(
+    db_session: AsyncSession, shop: TenantId, conversation_id: UUID, messages: FlakyMessages
+) -> Any:
+    return await start_turn(
+        shop,
+        conversation_id,
+        uuid4(),
+        UserInput.model_validate(TEXT),
+        ConversationRepository(db_session),
+        messages,
+        ToolCallRepository(db_session),
+        TenantsAgentConfigs(db_session),
+        ScriptedAgent(),
+        db_session.commit,
+        TurnRegistry(),
+        rollback=db_session.rollback,
+    )
+
+
+async def test_failed_save_ends_stream_with_error_and_keeps_answer_as_failed(
+    db_client: AsyncClient, db_session: AsyncSession, shop: TenantId, conversation_id: UUID
+) -> None:
+    turn = await _flaky_turn(
+        db_session, shop, conversation_id, FlakyMessages(db_session, failures=1)
+    )
+
+    events = [e.root async for e in turn.events()]
+
+    assert [e.type for e in events[-2:]] == ["error", "done"]
+    assert events[-2].data.model_dump()["code"] == "internal"
+    assert events[-1].data.model_dump()["status"] == "failed"
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    assert (assistant.message_id, assistant.status) == (turn.message_id, "failed")
+    assert assistant.error is not None and assistant.error.code == "internal"
+    assert "".join(b.root.model_dump()["text"] for b in assistant.blocks) == ANSWER
+
+
+async def test_stream_ends_with_done_even_if_answer_cannot_be_saved(
+    db_client: AsyncClient, db_session: AsyncSession, shop: TenantId, conversation_id: UUID
+) -> None:
+    turn = await _flaky_turn(
+        db_session, shop, conversation_id, FlakyMessages(db_session, failures=2)
+    )
+
+    types = [e.root.type async for e in turn.events()]
+
+    assert types[-2:] == ["error", "done"]
+    assert len((await _history(db_client, conversation_id)).messages) == 1
+    # При закрытии стрима — ещё одна попытка: ответ не потерян.
+    await turn.close()
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    assert assistant.status == "interrupted"
+
+
+async def test_client_disconnect_during_save_does_not_lose_answer(
+    db_client: AsyncClient, db_session: AsyncSession, shop: TenantId, conversation_id: UUID
+) -> None:
+    gate = anyio.Event()
+    messages = FlakyMessages(db_session, gate=gate)
+    turn = await _flaky_turn(db_session, shop, conversation_id, messages)
+
+    async def consume() -> None:
+        async for _ in sse_stream(turn):
+            pass
+
+    # Клиент закрыл виджет, пока ответ записывается: Starlette отменяет стрим.
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(consume)
+        with anyio.fail_after(WAIT):
+            await messages.saving.wait()
+        tg.cancel_scope.cancel()
+        gate.set()
+
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    assert (assistant.message_id, assistant.status) == (turn.message_id, "completed")
+    assert "".join(b.root.model_dump()["text"] for b in assistant.blocks) == ANSWER
 
 
 class SlowAgent:

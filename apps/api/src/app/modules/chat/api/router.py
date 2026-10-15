@@ -225,6 +225,7 @@ async def send_message(
             summaries,
             agent_events=AgentEventRepository(session),
             trace_id=_trace_id(request),
+            rollback=session.rollback,
         )
     except ConversationNotFoundError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e
@@ -282,6 +283,7 @@ async def retry_message(
             summaries,
             agent_events=AgentEventRepository(session),
             trace_id=_trace_id(request),
+            rollback=session.rollback,
         )
     except ConversationNotFoundError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "conversation_not_found", str(e)) from e

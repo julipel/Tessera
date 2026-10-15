@@ -1,6 +1,7 @@
 """Ход ассистента: события агента → SSE-протокол (docs/contracts.md §2) и запись ответа."""
 
 import asyncio
+import contextlib
 import time
 from collections.abc import AsyncGenerator, Iterator, Sequence
 from contextlib import aclosing
@@ -123,6 +124,11 @@ class TurnStream:
     Транзакция подготовки хода закрыта до стрима (`start_turn`/`retry_turn`), пока модель
     отвечает, ход не держит соединение пула: хранилища берут его заново только в `save()`
     и отпускают на `commit` (ADR-0034).
+
+    Запись ответа — под щитом от отмены: обрыв соединения во время commit не теряет уже
+    показанный ответ. Сбой записи (например, таймаут пула) — rollback (`rollback`) и вторая
+    попытка записать ответ как `failed`; стрим в любом случае заканчивается `error`
+    и `done` (REVIEW.md: C-1).
     """
 
     def __init__(
@@ -140,6 +146,7 @@ class TurnStream:
         agent_events: AgentEventStore | None = None,
         trace_id: str = "",
         retry_of: UUID | None = None,
+        rollback: Commit | None = None,
     ) -> None:
         self.conversation = conversation
         self.conversations = conversations
@@ -148,6 +155,7 @@ class TurnStream:
         self.messages = messages
         self.tool_calls = tool_calls
         self.commit = commit
+        self.rollback = rollback
         self.registry = registry
         self.summaries = summaries
         self.turn_id = request.turn_id
@@ -207,8 +215,12 @@ class TurnStream:
                 for event in self._translate(item):
                     yield event
             finished = item
+        if finished.error is None:
+            for event in self._close_text():
+                yield event
+        if not await self._save_shielded(finished.status, finished.error):
+            finished = _AgentFinished(MessageStatus.FAILED, _INTERNAL)
         if finished.error is not None:
-            await self.save(finished.status, finished.error)
             yield self._event(
                 "error",
                 {
@@ -219,10 +231,38 @@ class TurnStream:
             )
             yield self._event("done", {"status": finished.status})
             return
-        for event in self._close_text():
-            yield event
-        await self.save(finished.status)
         yield self._event("done", {"status": finished.status, "usage": self._usage})
+
+    async def _save_shielded(self, status: MessageStatus, error: _TurnError | None) -> bool:
+        """Записать ответ под щитом от отмены. False — запись не удалась (если удалась вторая
+        попытка, ответ записан как `failed` с `internal`), и стрим отдаст `error`."""
+        saved = False
+        with anyio.CancelScope(shield=True):
+            try:
+                await self.save(status, error)
+                saved = True
+            except Exception:
+                logger.exception("turn_save_failed", turn_id=str(self.turn_id), status=status)
+                await self._save_failed()
+        return saved
+
+    async def _save_failed(self) -> None:
+        """Вторая попытка после сбоя записи: ответ с уже показанными блоками как `failed`, без
+        вызовов инструментов, состояния и журнала (в них может быть причина сбоя). Без
+        `rollback` сессию после сбоя не восстановить — попытки нет."""
+        if self.rollback is None:
+            return
+        try:
+            await self.rollback()
+            await self.messages.add_once(
+                self.conversation.tenant_id, self._answer(MessageStatus.FAILED, _INTERNAL)
+            )
+            await self.commit()
+            self._saved = True
+        except Exception:
+            logger.exception("turn_save_failed_again", turn_id=str(self.turn_id))
+            with contextlib.suppress(Exception):
+                await self.rollback()
 
     def _translate(self, event: AgentEvent) -> Iterator[Event]:
         match event:
@@ -325,7 +365,7 @@ class TurnStream:
             if self._agent_task is not None and not self._agent_task.done():
                 self._agent_task.cancel()
                 await asyncio.wait([self._agent_task])
-            await self.save(MessageStatus.INTERRUPTED)
+            await self._save_shielded(MessageStatus.INTERRUPTED, None)
         finally:
             await self.registry.remove(self)
 
@@ -335,25 +375,8 @@ class TurnStream:
         после `done` повторный вызов (например, при закрытии стрима) ничего не меняет."""
         if self._saved:
             return
-        self._saved = True
-        texts = [b["text"] for b in self._blocks if b["type"] == "text"]
-        content = "\n\n".join(texts)
-        await self.messages.add_once(
-            self.conversation.tenant_id,
-            NewMessage(
-                id=self.message_id,
-                conversation_id=self.conversation.id,
-                role=MessageRole.ASSISTANT,
-                status=status,
-                content=content,
-                blocks=tuple(self._blocks),
-                error=(
-                    {"code": error.code, "message": error.message, "retryable": error.retryable}
-                    if error
-                    else None
-                ),
-            ),
-        )
+        answer = self._answer(status, error)
+        await self.messages.add_once(self.conversation.tenant_id, answer)
         if self._finished_calls:
             await self.tool_calls.add_many(
                 self.conversation.tenant_id, self.message_id, self._finished_calls
@@ -373,11 +396,28 @@ class TurnStream:
         if self.agent_events is not None:
             await self._save_journal(status, error)
         await self.commit()
+        self._saved = True  # после commit: упавшая запись повторится (REVIEW.md: C-1)
         logger.info("turn_finished", turn_id=str(self.turn_id), status=status)
         if self.summaries is not None and needs_summary(
-            self.request.agent_config, self.request.history, content
+            self.request.agent_config, self.request.history, answer.content
         ):
             self.summaries.schedule(self.conversation.tenant_id, self.conversation.id)
+
+    def _answer(self, status: MessageStatus, error: _TurnError | None) -> NewMessage:
+        texts = [b["text"] for b in self._blocks if b["type"] == "text"]
+        return NewMessage(
+            id=self.message_id,
+            conversation_id=self.conversation.id,
+            role=MessageRole.ASSISTANT,
+            status=status,
+            content="\n\n".join(texts),
+            blocks=tuple(self._blocks),
+            error=(
+                {"code": error.code, "message": error.message, "retryable": error.retryable}
+                if error
+                else None
+            ),
+        )
 
     async def _save_journal(self, status: MessageStatus, error: _TurnError | None) -> None:
         assert self.agent_events is not None
@@ -427,6 +467,7 @@ async def start_turn(
     *,
     agent_events: AgentEventStore | None = None,
     trace_id: str = "",
+    rollback: Commit | None = None,
 ) -> TurnStream:
     """Загрузить версию AgentConfig диалога, проверить и записать ввод пользователя,
     загрузить историю и зафиксировать всё до начала стрима.
@@ -469,6 +510,7 @@ async def start_turn(
             summaries=summaries,
             agent_events=agent_events,
             trace_id=trace_id,
+            rollback=rollback,
         )
     except BaseException:
         await _release_shielded(registry, tenant_id, conversation_id, turn_id)
@@ -490,6 +532,7 @@ async def retry_turn(
     *,
     agent_events: AgentEventStore | None = None,
     trace_id: str = "",
+    rollback: Commit | None = None,
 ) -> TurnStream:
     """Новый ход для сохранённого ввода вместо неудачного ответа `message_id` (ADR-0023).
 
@@ -536,6 +579,7 @@ async def retry_turn(
             agent_events=agent_events,
             trace_id=trace_id,
             retry_of=message_id,
+            rollback=rollback,
         )
     except BaseException:
         await _release_shielded(registry, tenant_id, conversation_id, turn_id)

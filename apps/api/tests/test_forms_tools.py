@@ -129,7 +129,10 @@ def test_create_lead_schema_lists_forms_and_fields_of_all_forms() -> None:
     properties = tool.parameters["properties"]
 
     assert properties["form_key"]["enum"] == ["consultation", "callback"]
-    assert list(properties["fields"]["properties"]) == ["name", "contact", "comment", "time"]
+    fields = properties["fields"]["properties"]
+    assert list(fields) == ["name", "contact", "comment", "time"]
+    # Лимит длины — и в схеме для модели, и в проверке значений (L-6).
+    assert (fields["name"]["maxLength"], fields["comment"]["maxLength"]) == (200, 2000)
     assert (tool.side_effect, tool.requires_confirmation) == (True, True)
 
 
@@ -180,7 +183,8 @@ async def test_create_lead_without_confirmation_does_not_store_lead() -> None:
     [
         ("consultation", {"name": "Анна"}, "обязательное поле contact"),
         ("consultation", {**ANNA, "time": "morning"}, "нет полей: time"),
-        ("callback", {"contact": "+7900", "time": "night"}, "не из вариантов"),
+        ("callback", {"contact": "+7 900 111-22-33", "time": "night"}, "не из вариантов"),
+        ("callback", {"contact": "@anna"}, "не похоже на номер телефона"),
     ],
 )
 async def test_create_lead_fields_are_checked_against_chosen_form(
@@ -209,6 +213,57 @@ async def test_create_lead_fields_are_checked_against_chosen_form(
 )
 def test_form_values_problem(values: dict[str, Any], problem: str | None) -> None:
     assert form_values_problem(FORMS["consultation"], values) == problem
+
+
+CONTACTS = FormConfig.model_validate(
+    {
+        "title": "Контакты",
+        "fields": [
+            {"name": "phone", "label": "Телефон", "kind": "phone"},
+            {"name": "email", "label": "E-mail", "kind": "email"},
+            {"name": "name", "label": "Имя", "kind": "text"},
+            {"name": "comment", "label": "Комментарий", "kind": "textarea"},
+        ],
+    }
+)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"phone": "+7 (999) 111-22-33"},
+        {"phone": "89991112233"},
+        {"phone": " 8.999.111.22.33 "},
+        {"phone": "1112233"},
+        {"email": "anna.k+spa@mail.example.ru"},
+        {"name": "x" * 200, "comment": "строка\nвторая\tс табом\r\n" + "я" * 1900},
+        # Поле kind: text не проверяется по виду: «телефон или Telegram» одним полем.
+        {"name": "@anna"},
+    ],
+)
+def test_form_values_accept_contacts_in_usual_formats(values: dict[str, str]) -> None:
+    assert form_values_problem(CONTACTS, values) is None
+
+
+@pytest.mark.parametrize(
+    ("values", "problem"),
+    [
+        ({"phone": "@anna"}, "phone (Телефон): не похоже на номер телефона"),
+        ({"phone": "+7 900"}, "phone (Телефон): не похоже на номер телефона"),
+        ({"phone": "1" * 16}, "phone (Телефон): не похоже на номер телефона"),
+        ({"phone": "+7 999 111 22 33 доб. 5"}, "phone (Телефон): не похоже на номер телефона"),
+        ({"email": "anna@mail"}, "email (E-mail): не похоже на e-mail"),
+        ({"email": "anna @mail.ru"}, "email (E-mail): не похоже на e-mail"),
+        ({"email": "@mail.ru"}, "email (E-mail): не похоже на e-mail"),
+        ({"name": "x" * 201}, "поле name: не длиннее 200 символов"),
+        ({"comment": "x" * 2001}, "поле comment: не длиннее 2000 символов"),
+        ({"name": "Анна\u0000"}, "поле name: недопустимые символы"),
+        ({"comment": "текст\x1b[31m"}, "поле comment: недопустимые символы"),
+    ],
+)
+def test_form_values_reject_bad_formats(values: dict[str, str], problem: str) -> None:
+    result = form_values_problem(CONTACTS, values)
+    assert result is not None and result.endswith(problem)
 
 
 def config(builtin: list[str], forms: dict[str, Any] | None) -> AgentConfig:

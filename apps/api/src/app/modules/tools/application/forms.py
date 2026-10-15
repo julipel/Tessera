@@ -3,6 +3,7 @@
 только после подтверждения пользователя.
 """
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -13,6 +14,19 @@ from app.modules.tools.domain.result import ToolError, ToolResult
 
 SHOW_FORM = "show_form"
 CREATE_LEAD = "create_lead"
+
+# Длина значения поля формы (REVIEW.md: L-6); те же числа — maxLength полей в виджете
+# (apps/web/src/components/rich/Forms.tsx).
+MAX_TEXTAREA_LENGTH = 2000
+MAX_FIELD_LENGTH = 200
+
+# Управляющие символы, кроме табуляции и переводов строки: \u0000 Postgres не принимает
+# в JSONB, остальные в заявке не нужны (REVIEW.md: L-2).
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# Мягкая проверка формата: телефон — цифры и разделители, от 7 до 15 цифр (E.164 — до 15);
+# e-mail — «имя@домен.зона» без пробелов.
+_PHONE = re.compile(r"\+?[\d\s().\-]+")
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s.]+")
 
 _SHOW_FORM_DESCRIPTION = (
     "Покажи пользователю форму из настроек: например, чтобы оставить контакт. Значения "
@@ -58,7 +72,13 @@ def create_lead_tool(forms: Mapping[str, FormConfig], leads: LeadStore) -> ToolD
     for form in forms.values():
         for field in form.fields:
             properties.setdefault(
-                field.name, {"type": "string", "minLength": 1, "description": field.label}
+                field.name,
+                {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": _max_length(field.kind),
+                    "description": field.label,
+                },
             )
 
     async def handler(arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
@@ -110,8 +130,9 @@ def create_lead_tool(forms: Mapping[str, FormConfig], leads: LeadStore) -> ToolD
 
 
 def form_values_problem(form: FormConfig, values: Mapping[str, Any]) -> str | None:
-    """Почему значения не подходят форме (лишнее поле, пустое обязательное, не строка, нет
-    в вариантах select) или None. Общая проверка `create_lead` и отправки формы."""
+    """Почему значения не подходят форме (лишнее поле, пустое обязательное, не строка,
+    длиннее лимита, управляющие символы, не телефон/e-mail по виду, нет в вариантах select)
+    или None. Общая проверка `create_lead` и отправки формы."""
     fields = {field.name: field for field in form.fields}
     if unknown := sorted(set(values) - set(fields)):
         return f"в форме «{form.title}» нет полей: {', '.join(unknown)}"
@@ -121,9 +142,28 @@ def form_values_problem(form: FormConfig, values: Mapping[str, Any]) -> str | No
             return f"поле {name}: значение должно быть строкой"
         if field.required and not (value or "").strip():
             return f"не заполнено обязательное поле {name} ({field.label})"
-        if value and field.kind == "select" and value not in {o.value for o in field.options or ()}:
+        if not value:
+            continue
+        if len(value) > (limit := _max_length(field.kind)):
+            return f"поле {name}: не длиннее {limit} символов"
+        if _CONTROL.search(value):
+            return f"поле {name}: недопустимые символы"
+        if field.kind == "phone" and not _is_phone(value):
+            return f"поле {name} ({field.label}): не похоже на номер телефона"
+        if field.kind == "email" and not _EMAIL.fullmatch(value.strip()):
+            return f"поле {name} ({field.label}): не похоже на e-mail"
+        if field.kind == "select" and value not in {o.value for o in field.options or ()}:
             return f"поле {name}: значение не из вариантов"
     return None
+
+
+def _max_length(kind: str) -> int:
+    return MAX_TEXTAREA_LENGTH if kind == "textarea" else MAX_FIELD_LENGTH
+
+
+def _is_phone(value: str) -> bool:
+    value = value.strip()
+    return bool(_PHONE.fullmatch(value)) and 7 <= sum(c.isdigit() for c in value) <= 15
 
 
 def _summary(form: FormConfig, values: Mapping[str, str]) -> str:

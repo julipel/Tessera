@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from app.main import create_app
 from app.modules.shared.public import (
@@ -63,3 +64,22 @@ async def test_app_engine_pool_from_settings(settings: Settings) -> None:
     pool = app.state.engine.pool
     assert (pool.size(), pool._max_overflow) == (20, 5)
     await app.state.engine.dispose()
+
+
+async def test_db_errors_do_not_contain_query_parameters(db_url: str) -> None:
+    """Текст ошибки уходит в лог (`logger.exception`): значения запроса — контакты из
+    заявок — в нём не показываются (REVIEW.md: L-2)."""
+    engine = create_engine(db_url)
+    try:
+        async with engine.connect() as conn:
+            with pytest.raises(DBAPIError) as raised:
+                # \u0000 Postgres не принимает в JSONB — ошибка БД с параметром-телефоном.
+                await conn.execute(
+                    text("SELECT CAST(:value AS jsonb)"),
+                    {"value": '{"phone": "+79991234567\\u0000"}'},
+                )
+    finally:
+        await engine.dispose()
+
+    assert "79991234567" not in str(raised.value)
+    assert "hide_parameters" in str(raised.value)

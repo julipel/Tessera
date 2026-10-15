@@ -1053,8 +1053,17 @@ async def form_conversation(db_client: AsyncClient, forms_tenant: TenantId, use_
         ("contact", {}),
         ("contact", {"phone": "+7900", "email": "a@b.c"}),
         ("contact", {"phone": "+7900", "time": "night"}),
+        ("contact", {"phone": "7" * 201}),
+        ("contact", {"phone": "+7900\u0000"}),
     ],
-    ids=["unknown_form", "missing_required", "unknown_field", "not_an_option"],
+    ids=[
+        "unknown_form",
+        "missing_required",
+        "unknown_field",
+        "not_an_option",
+        "too_long",
+        "control_char",
+    ],
 )
 async def test_invalid_form_submit_is_422_and_not_saved(
     db_client: AsyncClient, form_conversation: UUID, form_id: str, values: dict[str, Any]

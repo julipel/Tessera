@@ -17,6 +17,10 @@ const INPUT_TYPE: Record<Exclude<FormField["kind"], "textarea" | "select">, stri
   date: "date",
 };
 
+// Длина значения — как проверяет сервер (apps/api …/tools/application/forms.py, REVIEW.md: L-6).
+const MAX_TEXTAREA_LENGTH = 2000;
+const MAX_FIELD_LENGTH = 200;
+
 const CONTROL =
   "min-h-10 w-full rounded-chat border border-chat-border bg-chat-surface px-3 py-2 text-base focus:outline-2 focus:outline-chat-primary";
 
@@ -31,7 +35,7 @@ function Field({ formId, field }: { formId: string; field: FormField }) {
         {field.required && <span aria-hidden className="text-chat-danger"> *</span>}
       </label>
       {field.kind === "textarea" ? (
-        <textarea rows={3} {...common} />
+        <textarea rows={3} maxLength={MAX_TEXTAREA_LENGTH} {...common} />
       ) : field.kind === "select" ? (
         <select defaultValue="" {...common}>
           <option value="" disabled>
@@ -44,7 +48,7 @@ function Field({ formId, field }: { formId: string; field: FormField }) {
           ))}
         </select>
       ) : (
-        <input type={INPUT_TYPE[field.kind]} {...common} />
+        <input type={INPUT_TYPE[field.kind]} maxLength={MAX_FIELD_LENGTH} {...common} />
       )}
     </div>
   );

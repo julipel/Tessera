@@ -748,6 +748,10 @@
     `agent_config_draft_saved` и `agent_config_activated` (config_id, version,
     previous_version, changed) с tenant_id и admin_user_id; `activate` возвращает
     `Activation` с номером прежней активной версии (`RETURNING` под блокировкой тенанта).
+  - [x] **P9-01l Данные заявок: логи и проверка полей** (`REVIEW.md`: L-2, L-6, TO-3, TO-5).
+    `hide_parameters=True` у engine; `form_values_problem` — длина (200, textarea 2000;
+    `maxLength` в схеме `create_lead` и в виджете), управляющие символы, мягкий формат
+    `phone` (7–15 цифр) и `email`.
   - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
     образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
 - [ ] **P9-02 Пилот и разбор.** Реальные диалоги → новые эталоны в evals → итерации P6-03.

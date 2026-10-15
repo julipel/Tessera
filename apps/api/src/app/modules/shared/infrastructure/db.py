@@ -42,9 +42,12 @@ def create_engine(
     max_overflow: int = 10,
     pool_timeout: float = 30,
 ) -> AsyncEngine:
+    # hide_parameters: текст ошибок SQLAlchemy без значений запроса — в логи не попадают
+    # контакты из заявок и формулировки пользователя (REVIEW.md: L-2, TO-5).
     return create_async_engine(
         database_url,
         echo=echo,
+        hide_parameters=True,
         pool_pre_ping=True,
         pool_size=pool_size,
         max_overflow=max_overflow,

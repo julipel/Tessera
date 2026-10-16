@@ -26,6 +26,8 @@ const STICK_PX = 80;
  *
  * Автоскролл: лента едет за ответом, только пока посетитель внизу; прокрутил вверх — лента
  * стоит, появляется кнопка «К новым сообщениям». Своя отправка всегда возвращает вниз.
+ * Событие scroll приходит на кадр позже прокрутки: если кусок ответа успел раньше, эффект
+ * сам сверяет положение ленты с последней автопрокруткой и не тянет вниз.
  */
 export function MessageList({
   messages,
@@ -49,6 +51,8 @@ export function MessageList({
   const { t } = useI18n();
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  // scrollTop после последней автопрокрутки: ниже него посетитель мог уйти только сам.
+  const autoTop = useRef<number | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const lastUser = useRef<string | undefined>(undefined);
   const last = messages.at(-1);
@@ -61,7 +65,9 @@ export function MessageList({
   const scrollToEnd = () => {
     const el = scroller.current;
     // Не scrollIntoView: во фрейме виджета он прокрутил бы и страницу сайта.
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    autoTop.current = el.scrollTop;
   };
   const onScroll = () => {
     const el = scroller.current;
@@ -71,9 +77,20 @@ export function MessageList({
   };
   useEffect(() => {
     const userId = messages.findLast((m) => m.role === "user")?.id;
+    const el = scroller.current;
     if (userId !== lastUser.current) {
       lastUser.current = userId;
       stick.current = true;
+    } else if (stick.current && el && autoTop.current !== null) {
+      // Посетитель прокрутил вверх, а onScroll ещё не сработал. Оба условия: лента выше
+      // последней автопрокрутки (а не просто выросла снизу) и далеко от низа (а не прижата
+      // браузером, когда содержимое укоротилось).
+      const movedUp = el.scrollTop < autoTop.current - 1;
+      const farFromEnd = el.scrollHeight - el.scrollTop - el.clientHeight > STICK_PX;
+      if (movedUp && farFromEnd) {
+        stick.current = false;
+        setAtBottom(false);
+      }
     }
     if (stick.current) scrollToEnd();
   }, [messages, activity, greeting, starter, onRetry]);

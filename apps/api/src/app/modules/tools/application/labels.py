@@ -55,6 +55,15 @@ def localize_display_labels(
     ]
 
 
+_SUBMIT_LABELS = {"ru": "Отправить", "en": "Send", "sv": "Skicka"}
+
+
+def submit_label(language: str) -> str:
+    """Кнопка отправки формы на языке диалога (REVIEW.md: TO-1): иначе в компонент уходило
+    бы умолчание контракта «Отправить», и фронт до своего перевода не доходил."""
+    return _SUBMIT_LABELS.get(language, _SUBMIT_LABELS["ru"])
+
+
 def confirm_labels(
     language: str, confirm: str | None = None, cancel: str | None = None
 ) -> ConfirmLabels:

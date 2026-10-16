@@ -7,7 +7,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
-from httpx import AsyncClient
+from fastapi.routing import APIRoute
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +23,14 @@ from app.modules.access.public import (
     SqlAdminUserDirectory,
     upsert_admin_user,
 )
-from app.modules.shared.public import AdminPrincipal, AdminRole, InMemoryRateLimiter, TenantId
+from app.modules.shared.public import (
+    AdminEditor,
+    AdminPrincipal,
+    AdminRole,
+    AdminViewer,
+    InMemoryRateLimiter,
+    TenantId,
+)
 from app.modules.tenants.public import SqlTenantDirectory
 
 AdminLogin = Callable[..., Awaitable[dict[str, str]]]  # фикстура admin_login из conftest
@@ -460,3 +468,50 @@ async def test_relogin_closes_previous_cookie_session(
     assert again.status_code == 200
     assert (await db_client.get(ME, headers=_bearer(first))).status_code == 401
     assert (await db_client.get(ME, headers=_bearer(again.json()["token"]))).status_code == 200
+
+
+# --- tenant_id только из пути (REVIEW.md: AC-6) ---
+
+
+def _role_dependencies() -> set[Any]:
+    return {AdminViewer.dependency, AdminEditor.dependency}
+
+
+def _uses_role(dependant: Any) -> bool:
+    return any(d.call in _role_dependencies() or _uses_role(d) for d in dependant.dependencies)
+
+
+def _api_routes(app: FastAPI) -> list[APIRoute]:
+    """Маршруты приложения: FastAPI 0.142 держит подключённые роутеры обёртками, префикс
+    роутера уже в пути маршрута (префиксы подключения у нас пустые)."""
+    routes: list[APIRoute] = []
+    for item in app.routes:
+        router = getattr(item, "original_router", None)
+        candidates = router.routes if router is not None else [item]
+        routes.extend(r for r in candidates if isinstance(r, APIRoute))
+    return routes
+
+
+def test_every_tenant_role_route_has_tenant_in_path(app: FastAPI) -> None:
+    role_routes = [route.path for route in _api_routes(app) if _uses_role(route.dependant)]
+
+    assert role_routes  # проверка не пустая
+    assert [path for path in role_routes if "{tenant_id}" not in path] == []
+
+
+async def test_tenant_role_ignores_tenant_id_from_query(
+    app: FastAPI, admin_login: AdminLogin
+) -> None:
+    """Маршрут без {tenant_id} в пути с проверкой роли: query ?tenant_id= не подставляется."""
+    headers = await admin_login(superadmin=True)
+
+    @app.get("/v1/admin/no-tenant-in-path", dependencies=[AdminViewer])
+    async def no_tenant() -> dict[str, bool]:
+        return {"ok": True}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            f"/v1/admin/no-tenant-in-path?tenant_id={uuid4()}", headers=headers
+        )
+
+    assert response.status_code == 422

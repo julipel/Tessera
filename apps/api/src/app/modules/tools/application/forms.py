@@ -40,11 +40,19 @@ _CREATE_LEAD_DESCRIPTION = (
 )
 
 
-def show_form_tool(forms: Mapping[str, FormConfig]) -> ToolDefinition:
+def show_form_tool(forms: Mapping[str, FormConfig], submit_label: str) -> ToolDefinition:
+    """`submit_label` — кнопка отправки на языке диалога (`labels.submit_label`)."""
+
     async def handler(arguments: Mapping[str, Any], ctx: ToolContext, /) -> ToolResult:
         key = arguments["form_key"]
         form = forms[key]
-        component = Form(type="form", form_id=key, title=form.title, fields=form.fields)
+        component = Form(
+            type="form",
+            form_id=key,
+            title=form.title,
+            fields=form.fields,
+            submit_label=submit_label,
+        )
         return ToolResult(
             content=f"Форма «{form.title}» показана; дождись, пока пользователь её отправит.",
             components=(component.model_dump(mode="json", exclude_none=True),),

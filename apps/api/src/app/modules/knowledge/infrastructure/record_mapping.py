@@ -16,6 +16,7 @@ from app.modules.knowledge.infrastructure.entity_mapping import (
     AttributeSpec,
     EntityFields,
     Value,
+    link,
     map_entity,
     text,
 )
@@ -98,5 +99,5 @@ def map_record(record: Record, mapping: ItemMapping, external_id: str) -> RawIte
     body = text(record(mapping.text))
     if body is None:
         raise ValueError(f"пустой текст («{mapping.text}»)")
-    url = text(record(mapping.url)) if mapping.url else None
+    url = link(text(record(mapping.url))) if mapping.url else None
     return DocumentItem(external_id=external_id, title=title, text=body, url=url)

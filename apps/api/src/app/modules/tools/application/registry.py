@@ -108,6 +108,7 @@ class ToolRegistry:
                 "tool.injection_suspected",
                 tenant_id=str(ctx.tenant_id),
                 conversation_id=str(ctx.conversation_id),
+                turn_id=str(ctx.turn_id),
                 tool=invocation.name,
                 matches=len(found),
                 sample=found[0],
@@ -144,10 +145,15 @@ class ToolRegistry:
                 "validation_error",
                 f"{invocation.name}: аргументы не соответствуют схеме: {details}",
             )
-        if definition.check is not None and (problem := definition.check(invocation.arguments)):
-            return _failure("validation_error", f"{invocation.name}: {problem}")
-        if definition.requires_confirmation and not confirmed:
-            return self._ask_confirmation(definition, invocation)
+        # check и текст подтверждения — код инструмента: исключение в них — сбой этого вызова,
+        # а не всего шага (TaskGroup в execute_many отменил бы соседние вызовы; TO-4).
+        try:
+            if definition.check is not None and (problem := definition.check(invocation.arguments)):
+                return _failure("validation_error", f"{invocation.name}: {problem}")
+            if definition.requires_confirmation and not confirmed:
+                return self._ask_confirmation(definition, invocation)
+        except Exception:
+            return _precheck_crashed(invocation, ctx)
 
         try:
             async with asyncio.timeout(definition.timeout_s) as deadline:
@@ -213,6 +219,21 @@ def _with_security_note(content: str | dict[str, Any]) -> str | dict[str, Any]:
     if isinstance(content, str):
         return f"[security_note: {SECURITY_NOTE}]\n{content}"
     return {"security_note": SECURITY_NOTE, **content}
+
+
+def _precheck_crashed(invocation: ToolInvocation, ctx: ToolContext) -> ToolResult:
+    """Исключение в `check` или тексте подтверждения: до обработчика, действие точно не
+    выполнено. Повторять с теми же аргументами бессмысленно."""
+    logger.exception(
+        "tool.failed",
+        tenant_id=str(ctx.tenant_id),
+        conversation_id=str(ctx.conversation_id),
+        turn_id=str(ctx.turn_id),
+        tool=invocation.name,
+        tool_call_id=invocation.id,
+        stage="precheck",
+    )
+    return _failure("upstream_error", f"{invocation.name}: сбой проверки, действие не выполнено")
 
 
 def _crashed(

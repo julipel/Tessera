@@ -130,7 +130,11 @@ async def purge_expired_data(ctx: dict[str, Any]) -> None:
 async def startup(ctx: dict[str, Any]) -> None:
     settings = Settings()
     configure_logging(settings)
-    engine = create_engine(settings.database_url, echo=settings.database_echo)
+    engine = create_engine(
+        settings.database_url,
+        echo=settings.database_echo,
+        statement_timeout_s=settings.db_statement_timeout_s,
+    )
     ctx["engine"] = engine
     ctx["sync_timeout_s"] = settings.sync_timeout_s
     ctx["session_factory"] = create_session_factory(engine)

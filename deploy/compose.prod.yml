@@ -11,6 +11,11 @@ x-app-env: &app-env
   KNOWLEDGE_FILES_DIR: /srv/data/knowledge
   # Свой веб-чат и витрины — на том же origin (ADR-0022, дополнение P9-00b).
   CORS_ORIGINS: '["https://${DOMAIN:?}"]'
+  # IP посетителя (лимиты, ADR-0030) uvicorn берёт из X-Forwarded-For только от своей сети
+  # compose (там XFF ставит лишь Caddy; web ходит в API без него). С «*» он взял бы крайний
+  # левый адрес заголовка — его подделывает клиент, если перед Caddy встанет ещё один прокси
+  # (REVIEW.md: S-5).
+  FORWARDED_ALLOW_IPS: ${COMPOSE_SUBNET:-172.30.240.0/24}
 
 # Остальные настройки API (ключи LLM, Langfuse, лимиты, SOURCE_SECRET_*) — из env-файла.
 x-app: &app
@@ -142,6 +147,14 @@ services:
       web:
         condition: service_healthy
     restart: unless-stopped
+
+# Своя подсеть: API доверяет X-Forwarded-For только адресам из неё (FORWARDED_ALLOW_IPS).
+# Пересекается с сетями сервера или других compose-проектов — задать COMPOSE_SUBNET.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${COMPOSE_SUBNET:-172.30.240.0/24}
 
 volumes:
   postgres-data:

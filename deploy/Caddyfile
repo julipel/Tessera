@@ -12,7 +12,10 @@
 	}
 
 	# API: без сжатия — SSE-ход (text/event-stream) уходит посетителю по событию, без буфера.
-	# X-Forwarded-For Caddy ставит сам; uvicorn берёт из него IP для лимитов (ADR-0030).
+	# X-Forwarded-For Caddy ставит сам; uvicorn берёт из него IP для лимитов (ADR-0030) и
+	# доверяет только своей сети compose (FORWARDED_ALLOW_IPS). Входящий XFF клиента Caddy без
+	# trusted_proxies не пропускает; если перед ним встанет CDN — trusted_proxies только
+	# на его подсети, иначе лимиты по IP станут обходимыми (REVIEW.md: S-5).
 	@api path /v1/* /health
 	handle @api {
 		# Первый рубеж против огромных тел; точные лимиты — в API (до 20 МБ — файлы

@@ -79,7 +79,7 @@ class Leads:
 
 
 async def show(arguments: dict[str, Any]) -> ToolResult:
-    [result] = await ToolRegistry([show_form_tool(FORMS)]).execute_many(
+    [result] = await ToolRegistry([show_form_tool(FORMS, "Отправить")]).execute_many(
         [ToolInvocation(id="c1", name=SHOW_FORM, arguments=arguments)], CTX
     )
     return result
@@ -285,3 +285,16 @@ def test_form_tools_need_forms_in_config_and_lead_store() -> None:
     assert [t.name for t in builtin_tools(config(enabled, FORMS), leads=Leads())] == enabled
     assert [t.name for t in builtin_tools(config(enabled, FORMS))] == [SHOW_FORM]
     assert builtin_tools(config(enabled, None), leads=Leads()) == []
+
+
+@pytest.mark.parametrize(
+    ("language", "label"), [("ru", "Отправить"), ("en", "Send"), ("sv", "Skicka")]
+)
+async def test_form_submit_label_follows_dialog_language(language: str, label: str) -> None:
+    """TO-1: кнопка формы — на языке диалога, а не умолчание контракта «Отправить»."""
+    [tool] = builtin_tools(config([SHOW_FORM], FORMS), language=language)
+    [result] = await ToolRegistry([tool]).execute_many(
+        [ToolInvocation(id="c1", name=SHOW_FORM, arguments={"form_key": "callback"})], CTX
+    )
+
+    assert result.components[0]["submit_label"] == label

@@ -194,6 +194,40 @@ async def test_handler_exception_is_upstream_error_without_internals() -> None:
     assert "secret" not in result.error.message
 
 
+@pytest.mark.parametrize("stage", ["check", "confirm_text"])
+async def test_precheck_exception_fails_only_its_call(stage: str) -> None:
+    """TO-4: исключение в check или тексте подтверждения — ошибка этого вызова; соседний
+    вызов шага отрабатывает (TaskGroup не отменяет его), действие не выполнено."""
+    handled: list[str] = []
+
+    async def records(arguments: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
+        handled.append("broken")
+        return ToolResult(content="готово")
+
+    def explode(_: Any) -> str:
+        raise RuntimeError("postgres://secret@db")
+
+    broken = replace(
+        tool("broken_tool", records),
+        check=explode if stage == "check" else None,
+        requires_confirmation=stage == "confirm_text",
+        confirm_text=explode if stage == "confirm_text" else None,
+        side_effect=True,
+    )
+    registry = ToolRegistry([broken, tool()])
+
+    failed, fine = await registry.execute_many(
+        [inv("c1", "broken_tool", **VALID), inv("c2", **VALID)], CTX
+    )
+
+    assert failed.error is not None
+    assert failed.error.code == "upstream_error"
+    assert not failed.error.retryable
+    assert "не выполнено" in failed.error.message and "secret" not in failed.error.message
+    assert handled == []
+    assert fine.ok
+
+
 async def test_timeout_raised_inside_handler_is_upstream_error() -> None:
     async def own_timeout(arguments: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
         raise TimeoutError("httpx read timeout")

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
 
 # src/app/settings.py → корень репозитория на 4 уровня выше пакета.
@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # DB_POOL_SIZE + DB_MAX_OVERFLOW; остальные ждут свободное соединение до таймаута пула.
     db_pool_size: int = 5
     db_max_overflow: int = 10
+    # Ожидание свободного соединения пула и потолок одного запроса к БД, с (REVIEW.md: S-4).
+    db_pool_timeout_s: float = Field(default=30, gt=0)
+    db_statement_timeout_s: float = Field(default=30, gt=0)
     redis_url: str = "redis://localhost:6379/0"
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: SecretStr | None = None

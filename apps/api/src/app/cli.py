@@ -137,7 +137,9 @@ async def admin_user(
     settings: Settings,
 ) -> bool:
     """Создать или изменить пользователя админки. False — неизвестный slug тенанта."""
-    engine = create_engine(settings.database_url)
+    engine = create_engine(
+        settings.database_url, statement_timeout_s=settings.db_statement_timeout_s
+    )
     try:
         async with create_session_factory(engine)() as session, session.begin():
             directory = SqlTenantDirectory(session)
@@ -191,7 +193,9 @@ async def seed(
     reset_widget_key: bool,
     settings: Settings,
 ) -> None:
-    engine = create_engine(settings.database_url)
+    engine = create_engine(
+        settings.database_url, statement_timeout_s=settings.db_statement_timeout_s
+    )
     try:
         async with create_session_factory(engine)() as session, session.begin():
             for spec, declarations in specs:
@@ -234,7 +238,9 @@ async def seed(
 async def sync(slugs: list[str], names: list[str], full: bool, settings: Settings) -> bool:
     """Синхронизировать именованные источники тенантов в этом процессе (без воркера).
     False — тенант или источник не найден либо синхронизация завершилась ошибкой."""
-    engine = create_engine(settings.database_url)
+    engine = create_engine(
+        settings.database_url, statement_timeout_s=settings.db_statement_timeout_s
+    )
     session_factory = create_session_factory(engine)
     web_client = build_web_client(
         user_agent=settings.crawler_user_agent, timeout_s=settings.crawler_timeout_s
@@ -294,7 +300,9 @@ async def sync(slugs: list[str], names: list[str], full: bool, settings: Setting
 async def retention(slugs: list[str], dry_run: bool, settings: Settings) -> bool:
     """Чистка по срокам хранения (ADR-0043) в этом процессе — то же, что cron воркера.
     False — тенант из `slugs` не найден или его чистка упала."""
-    engine = create_engine(settings.database_url)
+    engine = create_engine(
+        settings.database_url, statement_timeout_s=settings.db_statement_timeout_s
+    )
     try:
         run = await purge_all_tenants(
             create_session_factory(engine), datetime.now(UTC), slugs=slugs, dry_run=dry_run
@@ -464,7 +472,9 @@ def _admin_user_command(args: argparse.Namespace) -> int:
 
 
 async def _admin_user_exists(email: str, settings: Settings) -> bool:
-    engine = create_engine(settings.database_url)
+    engine = create_engine(
+        settings.database_url, statement_timeout_s=settings.db_statement_timeout_s
+    )
     try:
         async with create_session_factory(engine)() as session:
             users = SqlAdminUserDirectory(session)

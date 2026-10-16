@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from app.modules.knowledge.domain.ingestion import DocumentItem
 from app.modules.knowledge.infrastructure.entity_mapping import (
     AttributeSpec,
     EntityFields,
@@ -15,6 +16,7 @@ from app.modules.knowledge.infrastructure.entity_mapping import (
     text,
     value_list,
 )
+from app.modules.knowledge.infrastructure.record_mapping import DocumentFields, map_record
 
 
 @pytest.mark.parametrize(
@@ -72,3 +74,62 @@ def test_map_entity_with_list_attribute() -> None:
     )
 
     assert item.attributes == {"skin_types": ["dry", "oily"]}
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("https://shop.example/p/1", "https://shop.example/p/1"),
+        ("HTTP://Shop.Example", "HTTP://Shop.Example"),
+        ("https://shop.example/faq#delivery", "https://shop.example/faq#delivery"),
+        ("https://shop.example/#/product/1", "https://shop.example/#/product/1"),
+        ("javascript:alert(1)", None),
+        ("data:text/html;base64,PHNjcmlwdD4=", None),
+        ("//evil.example/x", None),
+        ("/relative/path", None),
+        ("https://user:pass@shop.example/", None),
+        ("  ", None),
+    ],
+    ids=[
+        "https",
+        "kept-as-is",
+        "anchor",
+        "hash-routing",
+        "javascript",
+        "data",
+        "scheme-relative",
+        "relative",
+        "creds",
+        "blank",
+    ],
+)
+def test_entity_links_are_http_only(raw: str, expected: str | None) -> None:
+    """K-8: url/image_url становятся href/src в карточке — только абсолютный http(s)."""
+    record: dict[str, Value] = {"id": "A-1", "name": "Крем", "url": raw, "img": raw}
+
+    item = map_entity(
+        record.__getitem__,
+        entity_type="product",
+        external_id="A-1",
+        fields=EntityFields(external_id="id", title="name", url="url", image_url="img"),
+        attributes={},
+    )
+
+    assert (item.url, item.image_url) == (expected, expected)
+
+
+def test_document_link_from_record_is_http_only() -> None:
+    record: dict[str, Value] = {
+        "id": "D-1",
+        "title": "Доставка",
+        "body": "Текст",
+        "link": "javascript:x",
+    }
+
+    item = map_record(
+        record.__getitem__,
+        DocumentFields(external_id="id", title="title", text="body", url="link"),
+        "D-1",
+    )
+
+    assert isinstance(item, DocumentItem) and item.url is None

@@ -1,5 +1,6 @@
 """Базовая декларативная модель, engine и фабрика сессий."""
 
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import MetaData
@@ -41,7 +42,17 @@ def create_engine(
     pool_size: int = 5,
     max_overflow: int = 10,
     pool_timeout: float = 30,
+    statement_timeout_s: float | None = None,
 ) -> AsyncEngine:
+    """`statement_timeout_s` — потолок одного запроса (REVIEW.md: S-4): зависший запрос не
+    держит соединение пула бесконечно. Postgres прерывает его сам (`statement_timeout`),
+    asyncpg — чуть позже на случай, если сервер не ответил вовсе (`command_timeout`)."""
+    connect_args: dict[str, Any] = {}
+    if statement_timeout_s is not None:
+        connect_args = {
+            "server_settings": {"statement_timeout": str(int(statement_timeout_s * 1000))},
+            "command_timeout": statement_timeout_s + 5,
+        }
     # hide_parameters: текст ошибок SQLAlchemy без значений запроса — в логи не попадают
     # контакты из заявок и формулировки пользователя (REVIEW.md: L-2, TO-5).
     return create_async_engine(
@@ -52,6 +63,7 @@ def create_engine(
         pool_size=pool_size,
         max_overflow=max_overflow,
         pool_timeout=pool_timeout,
+        connect_args=connect_args,
     )
 
 

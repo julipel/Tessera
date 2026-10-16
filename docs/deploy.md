@@ -79,7 +79,14 @@ make deploy-seed       # если менялись config/tenants или data/pi
 
 - `deploy/.env` — только на сервере, права `600`. В git — только `deploy/.env.example`.
 - Наружу открыты только 80 и 443. Postgres, Redis, Qdrant и порт API не опубликованы.
-- Лимиты частоты (ADR-0030) считаются по IP посетителя из `X-Forwarded-For` Caddy.
+- Лимиты частоты (ADR-0030) считаются по IP посетителя из `X-Forwarded-For` Caddy. API доверяет
+  этому заголовку только из своей подсети compose (`COMPOSE_SUBNET` в `deploy/.env`, по
+  умолчанию 172.30.240.0/24 — из стандартных пулов Docker; менять, если пересекается с
+  сетями сервера или других проектов). Смена подсети у уже созданного стека — через
+  `docker compose … down` и `make deploy-up` (сеть пересоздаётся). CDN перед Caddy — только с
+  `trusted_proxies` на его подсети.
+- Запрос к БД ограничен `DB_STATEMENT_TIMEOUT_S` (30 с), ожидание соединения пула —
+  `DB_POOL_TIMEOUT_S`; миграции этого потолка не имеют.
 - Caddy ставит на весь домен HSTS (без поддоменов), `nosniff` и `Referrer-Policy`; админка —
   со своей CSP с nonce и `frame-ancestors 'none'` (ADR-0044). Срок HSTS — `HSTS_MAX_AGE`:
   по умолчанию сутки; когда домен и HTTPS проверены после выкладки — `31536000` (год) и

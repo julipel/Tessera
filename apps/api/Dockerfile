@@ -37,6 +37,7 @@ USER app
 
 EXPOSE 8000
 # За Caddy (deploy/Caddyfile): IP посетителя для лимитов — из X-Forwarded-For (ADR-0030).
-# Порт API наружу не публикуется, поэтому доверяем заголовкам от любого адреса сети compose.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Доверенные прокси — FORWARDED_ALLOW_IPS (подсеть compose, задаёт compose.prod.yml; без неё
+# uvicorn доверяет только 127.0.0.1 и ::1 — тогда все посетители в одной корзине лимитов),
+# не «*» (REVIEW.md: S-5).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

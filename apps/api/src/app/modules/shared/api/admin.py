@@ -9,7 +9,7 @@ from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import Depends, Header, Request, status
+from fastapi import Depends, Header, Path, Request, status
 
 from app.modules.shared.api.errors import ApiError
 from app.modules.shared.domain.admin import AdminAuthenticator, AdminPrincipal, AdminRole
@@ -69,7 +69,11 @@ def require_tenant_role(role: AdminRole) -> Callable[..., Awaitable[AdminPrincip
     """Зависимость для эндпоинтов `…/tenants/{tenant_id}/…`: 403, если у пользователя нет
     роли `role` (или старшей) в тенанте из пути. Суперадмину доступны все тенанты."""
 
-    async def dependency(tenant_id: UUID, principal: CurrentAdmin) -> AdminPrincipal:
+    # Path(), а не просто UUID: маршрут без {tenant_id} в пути не должен молча брать тенант
+    # из query (?tenant_id=…) — такой запрос получит 422 (REVIEW.md: AC-6).
+    async def dependency(
+        tenant_id: Annotated[UUID, Path()], principal: CurrentAdmin
+    ) -> AdminPrincipal:
         if not principal.can(TenantId(tenant_id), role):
             raise ApiError(status.HTTP_403_FORBIDDEN, "forbidden", "нет доступа к тенанту")
         structlog.contextvars.bind_contextvars(tenant_id=str(tenant_id))

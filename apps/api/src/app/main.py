@@ -84,6 +84,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         echo=settings.database_echo,
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout_s,
+        statement_timeout_s=settings.db_statement_timeout_s,
     )
     app.state.session_factory = create_session_factory(app.state.engine)
     # Redis — для лимитов частоты (ADR-0030); соединение ленивое, таймауты короткие:

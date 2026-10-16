@@ -29,7 +29,7 @@ from app.modules.tools.application.forms import (
     show_form_tool,
 )
 from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
-from app.modules.tools.application.labels import localize_display_labels
+from app.modules.tools.application.labels import localize_display_labels, submit_label
 from app.modules.tools.application.show_entities import SHOW_ENTITIES, show_entities_tool
 from app.modules.tools.application.suggest_replies import SUGGEST_REPLIES, suggest_replies_tool
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition, ToolHandler
@@ -96,7 +96,7 @@ def builtin_tools(
         )
     forms = config.forms or {}
     if forms:
-        factories[SHOW_FORM] = lambda c: show_form_tool(forms)
+        factories[SHOW_FORM] = lambda c: show_form_tool(forms, submit_label(language))
         if leads is not None:
             factories[CREATE_LEAD] = lambda c: create_lead_tool(forms, leads)
     enabled = config.tools.builtin or []

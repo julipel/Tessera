@@ -116,7 +116,7 @@
 - [x] *(исправлено в P9-01r)* **AG-8. Текстовый блок из одних пробелов.** `anthropic_llm.py:138,142` — `if text` пропускает `"\n\n"`, Anthropic отклоняет такие блоки → 400 на шаге 2, ход падает (правило API, на живой модели не проверялось). *Исправление:* `text.strip()`; тест.
 
 ### Мелочи
-- [ ] AG-9. `loop.py:102-104` — `StopReason.MAX_TOKENS` игнорируется: обрезанный ответ становится `ANSWERED` без лога.
+- [x] *(исправлено в P9-01s: лог agent.output_truncated)* AG-9. `loop.py:102-104` — `StopReason.MAX_TOKENS` игнорируется: обрезанный ответ становится `ANSWERED` без лога.
 - [ ] AG-10. `openai_responses_llm.py:222-227` — `response.failed`/`error` всегда retryable; постоянные коды (`invalid_prompt`, переполнение контекста) дают лишние попытки и fallback.
 - [ ] AG-11. `loop.py:226-227` — `raw_arguments` неразобранного вызова целиком уходит модели и в БД (обрезать до ~500 символов).
 - [ ] AG-12. `loop.py:115-118` — два вызова с подтверждением в одном шаге: действует последний, кнопка первого всегда «устарело» (отклонять второй). (Связано с TO-12.)
@@ -135,10 +135,10 @@
 — нет.
 
 ### Важно
-- [ ] **TO-1. Кнопка формы всегда «Отправить», даже в en/sv (ADR-0025).** `application/forms.py:30-36` — default `submit_label` из контракта попадает в компонент, и фронт (`Forms.tsx:80`, `data.submit_label ?? t.formSubmit`) до своего перевода не доходит. Тест `test_forms_tools.py:108` закрепляет это поведение. *Исправление:* выставлять `submit_label` по языку диалога через `labels.py`, как `confirm_labels`.
+- [x] *(исправлено в P9-01y)* **TO-1. Кнопка формы всегда «Отправить», даже в en/sv (ADR-0025).** `application/forms.py:30-36` — default `submit_label` из контракта попадает в компонент, и фронт (`Forms.tsx:80`, `data.submit_label ?? t.formSubmit`) до своего перевода не доходит. Тест `test_forms_tools.py:108` закрепляет это поведение. *Исправление:* выставлять `submit_label` по языку диалога через `labels.py`, как `confirm_labels`.
 - [x] *(исправлено в P9-01g)* **TO-2. `create_lead` не идемпотентен** — дубль L-1, корень в M-1. Дополнительно: для ошибок инструментов с побочным эффектом ставить `retryable=False`.
 - [x] *(исправлено в P9-01l)* **TO-3. Контакты не проверяются по `kind`, длина полей не ограничена** — совпадает с L-6. Для phone/email можно переиспользовать шаблоны `has_contact` из `observability.kernel` (ADR-0032), для `date` — проверку ISO.
-- [ ] **TO-4. `check`/`confirm_text` вызываются вне `try`.** `application/registry.py:138-141` — исключение не превращается в `ToolResult.error`, вопреки докстрингу; `TaskGroup` в `execute_many` (83-85) отменяет параллельные вызовы, и наружу уходит `ExceptionGroup`. Сейчас встроенные `check` безопасны, но будущий HTTP-инструмент (contracts §4) обрушит шаг агента. *Исправление:* обернуть в тот же `try → _crashed`, тест.
+- [x] *(исправлено в P9-01y)* **TO-4. `check`/`confirm_text` вызываются вне `try`.** `application/registry.py:138-141` — исключение не превращается в `ToolResult.error`, вопреки докстрингу; `TaskGroup` в `execute_many` (83-85) отменяет параллельные вызовы, и наружу уходит `ExceptionGroup`. Сейчас встроенные `check` безопасны, но будущий HTTP-инструмент (contracts §4) обрушит шаг агента. *Исправление:* обернуть в тот же `try → _crashed`, тест.
 - [x] *(параметры скрыты в P9-01l: `hide_parameters=True`)* **TO-5. В лог пишется текст `SQLAlchemyError` с SQL и параметрами.** `application/catalog.py:262`, `application/show_entities.py:278` — `error=str(error)`; без `hide_parameters` (см. L-2) в лог попадает `query` с формулировкой пользователя. *Исправление:* логировать тип ошибки или включить `hide_parameters=True`.
 
 ### Мелочи
@@ -147,7 +147,7 @@
 - [ ] TO-8. `application/builtin.py:134-143` — у `facts`/`forget_facts` нет `maxLength`, у `facts` нет `maxItems`: раздутый факт уходит в промпт каждого хода.
 - [ ] TO-9. `domain/injection.py:71-73` — сканируются значения, но не ключи (ключи `attributes` каталога — данные тенанта); шаблон на строке 37 (`print … instructions`) даст ложные срабатывания — проверить на корпусе пилота.
 - [ ] TO-10. `_number` продублирован в `catalog.py:241` и `show_entities.py:245`.
-- [ ] TO-11. `application/registry.py:98-105` — в логе `tool.injection_suspected` нет `turn_id`.
+- [x] *(исправлено в P9-01y)* TO-11. `application/registry.py:98-105` — в логе `tool.injection_suspected` нет `turn_id`.
 - [ ] TO-12. Тесты: сбой `LeadStore.create` и двойной `create_lead` в одном шаге (замена `pending_confirmation`) не покрыты.
 
 ---
@@ -168,7 +168,7 @@
 - [ ] **K-5. После вытеснения кэша каждый `fetch` заново выполняет весь `_load`.** `infrastructure/http_api_connector.py:201-210`, `infrastructure/database_connector.py:194-203` — `cache_size=4` при `max_jobs=10`: 5+ параллельных синхронизаций → полный SQL на 50k строк (или 100 страниц API) на каждый элемент, N² нагрузки на систему клиента. *Исправление:* держать записи в контексте одной синхронизации или хотя бы кэшировать повторный `_load`.
 - [x] *(исправлено в P9-01n)* **K-6. Нет защиты от массового удаления при пустом листинге.** `application/ingestion.py:148-157` — `http_api` (`[]` с 200) или `database` (0 строк из-за ошибки) при полном discover молча удаляют весь каталог тенанта из Postgres и Qdrant. *Исправление:* пустой листинг при `known > 0` или удаление > X% без явного `full=True` — ошибка синхронизации; порог в конфиге.
 - [ ] **K-7. CPU-тяжёлый разбор недоверенных данных — в event loop.** `infrastructure/website_connector.py:237,269`, `infrastructure/http_api_connector.py:239,265` — `extract_page` (до 5 МБ HTML), `ElementTree.fromstring` sitemap (до 50 МБ), `json.loads` + `map_records` (до 20 МБ) блокируют воркер на секунды и вызывают ложные таймауты в соседних задачах. *Исправление:* `asyncio.to_thread`, как в file/table.
-- [ ] **K-8. `url`/`image_url` сущностей сохраняются без проверки схемы.** `infrastructure/entity_mapping.py:90-91`, `infrastructure/record_mapping.py:101` — `javascript:`/`data:`/фишинговые ссылки из table/http_api/database попадают в `product_card.url` (`apps/web/.../ProductCard.tsx:30`, `href={card.url}`). React 19, вероятно, блокирует `javascript:` (не подтверждено), `data:` проходит. *Исправление:* `normalize_url` (только http/https) при маппинге.
+- [x] *(исправлено в P9-01y)* **K-8. `url`/`image_url` сущностей сохраняются без проверки схемы.** `infrastructure/entity_mapping.py:90-91`, `infrastructure/record_mapping.py:101` — `javascript:`/`data:`/фишинговые ссылки из table/http_api/database попадают в `product_card.url` (`apps/web/.../ProductCard.tsx:30`, `href={card.url}`). React 19, вероятно, блокирует `javascript:` (не подтверждено), `data:` проходит. *Исправление:* `normalize_url` (только http/https) при маппинге.
 
 ### Мелочи
 - [ ] K-9. `infrastructure/html_extract.py:234` — текст, скрытый `display:none`/`visibility:hidden`/`font-size:0`, индексируется (канал для отравленных знаний; ADR-0031 смягчает частично).
@@ -284,7 +284,7 @@
 - [x] *(исправлено в P9-01d и P9-01o: по email считаются только неудачные входы)* **AC-3. Лимит по email позволяет заблокировать вход конкретному админу.** `access/api/router.py:47-50` — счётчик растёт до проверки пароля и на успешных попытках; 21 запрос в час с любых IP блокирует владельца (закреплено тестом `test_login_is_rate_limited_by_email_and_ip`). *Исправление:* считать по email только неудачные попытки или ключ «email+IP» плюс общий лимит с высоким порогом; описать в ADR.
 - [ ] **AC-4. Вход держит соединение БД на время scrypt, пул потоков общий.** `access/application/auth.py:42-46` + `DbSession` в `router.py:34` — распределённый флуд `/auth/login` исчерпает пул БД (5+10) и общий пул потоков `to_thread`, и встанет чат (не подтверждено нагрузкой). *Исправление:* закрывать транзакцию до KDF, ограничить KDF семафором или отдельным executor на 2–4 потока.
 - [x] *(исправлено в P9-01u и P9-01v, ADR-0044)* **AC-5. Токен админки в localStorage на общем origin, на `/admin` нет CSP.** `apps/web/src/lib/admin/api.ts:28-41`, `apps/web/src/proxy.ts:17-19` (CSP только для `/widget`), `deploy/Caddyfile` (без заголовков безопасности). По ADR-0040 домен один, поэтому любая XSS на нём (демо-витрины с inline-скриптом, будущий markdown в чате) уводит токен (у суперадмина — доступ ко всем тенантам); без `frame-ancestors` возможен clickjacking. Готовой XSS не найдено, это защита в глубину. *Исправление:* cookie `HttpOnly; Secure; SameSite=Strict` + CSRF (нужен ADR) или минимум CSP `script-src 'self'; frame-ancestors 'none'` для `/admin/*`.
-- [ ] **AC-6. Проверка роли берёт `tenant_id` из пути неявно.** `shared/api/admin.py:47`, особенно `observability/api/router.py:12` (`dependencies=[AdminViewer]` на всём роутере `/v1/admin`). Сейчас дыры нет, но маршрут без `{tenant_id}` в пути молча возьмёт его из query (`?tenant_id=<свой>`). *Исправление:* `tenant_id: Annotated[UUID, Path()]` в зависимости; тест по `app.routes`.
+- [x] *(исправлено в P9-01y)* **AC-6. Проверка роли берёт `tenant_id` из пути неявно.** `shared/api/admin.py:47`, особенно `observability/api/router.py:12` (`dependencies=[AdminViewer]` на всём роутере `/v1/admin`). Сейчас дыры нет, но маршрут без `{tenant_id}` в пути молча возьмёт его из query (`?tenant_id=<свой>`). *Исправление:* `tenant_id: Annotated[UUID, Path()]` в зависимости; тест по `app.routes`.
 
 ### Мелочи
 - [ ] AC-7. `access/application/auth.py:23-27` — `_dummy_hash` ленивый: первый неизвестный email в процессе стоит два scrypt (разница во времени ответа).
@@ -296,7 +296,7 @@
 - [ ] AC-13. `access/domain/errors.py`, `passwords.py:30` — `InvalidEmailError` содержит исходный email.
 - [ ] AC-14. `access/public.py:3-21` — экспорт `AdminSessionRecord` и репозиториев; оставить комментарий, что он только для метаданных Alembic.
 - [ ] AC-15. Тесты импортируют внутренности; нет тестов на закрытие сессий при смене пароля, лимит при недоступном Redis, суперадмина через HTTP, снятие флага суперадмина на открытой сессии.
-- [ ] AC-16. `apps/api/Dockerfile:41-42` — `--forwarded-allow-ips "*"`: безопасно, пока наружу открыт только Caddy; лучше подсеть docker-сети.
+- [x] *(исправлено в P9-01y)* AC-16. `apps/api/Dockerfile:41-42` — `--forwarded-allow-ips "*"`: безопасно, пока наружу открыт только Caddy; лучше подсеть docker-сети.
 
 ---
 
@@ -310,20 +310,20 @@
 - [x] *(исправлено в P9-01d)* **S-1. Один IP может заблокировать ходы всем посетителям тенанта.** `modules/shared/api/rate_limit.py:26-30`, вызов в `modules/chat/api/router.py:114-123` — запросы, отклонённые по `turns_ip`, всё равно увеличивают `turns_tenant`. Ключ виджета публичный: 300+ запросов в минуту с одного IP получают 429, но исчерпывают лимит тенанта (300/мин) — и 429 получают все посетители. До LLM запросы не доходят, атака стоит дёшево. *Исправление:* проверять правила от узкого к широкому и останавливаться на первом отказе; тест «после 429 по IP счётчик тенанта не растёт».
 
 ### Важно
-- [ ] *(частично в P9-01d: отклонённые по IP попытки не считаются по email; осталось — считать только неудачные входы)* **S-2. Вход в админку можно заблокировать по чужому email** — дубль AC-3 (тот же корень, что у S-1).
+- [x] *(исправлено в P9-01d и P9-01o: по email считаются только неудачные входы)* **S-2. Вход в админку можно заблокировать по чужому email** — дубль AC-3 (тот же корень, что у S-1).
 - [x] *(исправлено в P9-01c)* **S-3. Синхронизация может навсегда остаться `running`** (= K-3, там подробнее). `worker.py:140-144` — у arq `job_timeout=300` по умолчанию; при таймауте в `run_sync` (`modules/knowledge/application/ingestion.py:83`) поднимается `CancelledError`, `except Exception` её не ловит, и `finish(FAILED)` не вызывается. Краулинг с эмбеддингами дольше 5 минут → статус навсегда `running`, ошибки в админке нет. *Исправление:* `job_timeout` из настроек, перевод в FAILED при отмене (shield-запись статуса или `asyncio.timeout` внутри); ADR.
-- [ ] **S-4. Нет таймаутов на запросы к БД.** `modules/shared/infrastructure/db.py:37-52` — ни `command_timeout`, ни `statement_timeout`; `pool_timeout` захардкожен. Зависший запрос держит соединение бесконечно, при пуле 5+10 весь API быстро встаёт. *Исправление:* `connect_args`/`server_settings` из Settings.
-- [ ] **S-5. Защита от подмены IP держится только на настройке Caddy.** `apps/api/Dockerfile:41-42`, `deploy/Caddyfile:5-8` — при `--forwarded-allow-ips "*"` uvicorn берёт самый левый адрес из XFF. Если перед Caddy поставят Cloudflare и включат `trusted_proxies`, все лимиты по IP станут обходимыми. *Исправление:* подсеть compose вместо `*`, комментарий в Caddyfile. (Расширяет AC-16.)
-- [ ] **S-6. Нет тестов на поведение `get_session`.** `tests/test_db_session.py:10-20` проверяет только `SELECT 1`: commit при успехе, rollback при `ApiError`, ошибка commit → 500, `StreamDbSession` при обрыве — не покрыты.
+- [x] *(исправлено в P9-01y)* **S-4. Нет таймаутов на запросы к БД.** `modules/shared/infrastructure/db.py:37-52` — ни `command_timeout`, ни `statement_timeout`; `pool_timeout` захардкожен. Зависший запрос держит соединение бесконечно, при пуле 5+10 весь API быстро встаёт. *Исправление:* `connect_args`/`server_settings` из Settings.
+- [x] *(исправлено в P9-01y)* **S-5. Защита от подмены IP держится только на настройке Caddy.** `apps/api/Dockerfile:41-42`, `deploy/Caddyfile:5-8` — при `--forwarded-allow-ips "*"` uvicorn берёт самый левый адрес из XFF. Если перед Caddy поставят Cloudflare и включат `trusted_proxies`, все лимиты по IP станут обходимыми. *Исправление:* подсеть compose вместо `*`, комментарий в Caddyfile. (Расширяет AC-16.)
+- [x] *(исправлено в P9-01y)* **S-6. Нет тестов на поведение `get_session`.** `tests/test_db_session.py:10-20` проверяет только `SELECT 1`: commit при успехе, rollback при `ApiError`, ошибка commit → 500, `StreamDbSession` при обрыве — не покрыты.
 
 ### Мелочи
 - [ ] S-7. `modules/shared/api/deps.py:13-19` — при обрыве SSE `get_session` может закоммитить частичное состояние, если отмена пришлась между записями (не подтверждено).
 - [ ] S-8. `modules/shared/infrastructure/repository.py:22-27` — фильтр по тенанту есть только в `_scoped`; `session` открыт наследникам, `_scoped_update`/`_scoped_delete` нет (нарушений сейчас не найдено).
 - [ ] S-9. `modules/shared/infrastructure/db.py:34` — у `tenant_id` нет FK на `tenants.id` (если это осознанно — отметить в ADR-0006).
-- [ ] S-10. `modules/shared/api/admin.py:47` — `tenant_id` неявно из пути — дубль AC-6.
+- [x] *(исправлено в P9-01y)* S-10. `modules/shared/api/admin.py:47` — `tenant_id` неявно из пути — дубль AC-6.
 - [ ] S-11. `modules/shared/api/errors.py:96-97` — для 413/415 и других статусов вне таблицы код ошибки `internal`; `str(exc.detail)` отдаётся как есть.
 - [ ] S-12. `errors.py:135-138` — двойной лог при ошибке посреди стрима.
-- [ ] S-13. `logs.py:58-60` — `X-Trace-Id` без проверки — см. O-6.
+- [x] *(исправлено в P9-01w, см. O-6)* S-13. `logs.py:58-60` — `X-Trace-Id` без проверки — см. O-6.
 - [ ] S-14. `main.py:53-70` — упавший `aclose()` одного ресурса пропускает закрытие остальных (`AsyncExitStack`).
 - [ ] S-15. `main.py:163`, `worker.py:144` — `create_app()` и `Settings()` выполняются при импорте; `cli.py:55` импортирует `app.worker`, так что любая CLI-команда создаёт engine и Redis (`uvicorn --factory`).
 - [ ] S-16. `worker.py:133-137` — если `startup` упал на полпути, `shutdown` падает на `KeyError`.

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -87,14 +88,32 @@ def map_entity(
         currency=currency_code(text(get(fields.currency)) or currency),
         in_stock=boolean(get(fields.in_stock)),
         category=text(get(fields.category)),
-        url=text(get(fields.url)),
-        image_url=text(get(fields.image_url)),
+        url=link(text(get(fields.url))),
+        image_url=link(text(get(fields.image_url))),
         attributes={
             name: parsed
             for name, spec in attributes.items()
             if (parsed := attribute(get(spec.key), spec.type, spec.separator)) is not None
         },
     )
+
+
+def link(value: str | None) -> str | None:
+    """Ссылка из данных тенанта — только абсолютный http(s)-URL с хостом и без логина
+    (REVIEW.md: K-8): она становится `href`/`src` в карточке, а `javascript:`/`data:` из
+    таблицы или API там недопустимы. Другая схема или мусор — ссылки нет, элемент не падает.
+    Строка не нормализуется: якорь и hash-роутинг магазина (`/#/product/1`) сохраняются."""
+    if not value:
+        return None
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        return None
+    if parts.username is not None or parts.password is not None:
+        return None
+    return value
 
 
 _TRUE = {"да", "true", "yes", "y", "+", "есть", "в наличии", "имеется"}

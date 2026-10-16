@@ -22,6 +22,21 @@ test("без входа — страница входа; неверный пар
   await expect(page).toHaveURL(/\/admin\/login$/);
 });
 
+test("сессия — HttpOnly-cookie API, скрипту страницы токен недоступен (ADR-0044)", async ({ page, context }) => {
+  await login(page);
+  await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();
+
+  // Без URL: фильтр по http-адресу отбрасывает Secure-cookie, хотя браузер шлёт её на localhost.
+  const [cookie] = (await context.cookies()).filter((c) => c.name === "tessera_admin");
+  expect(cookie).toMatchObject({ httpOnly: true, secure: true, sameSite: "Strict", path: "/v1/admin" });
+  const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + document.cookie);
+  expect(stored).not.toContain(cookie.value);
+
+  // Перезагрузка: сессия жива без всякого клиентского хранилища.
+  await page.reload();
+  await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();
+});
+
 test("конфиг: ошибка проверки, черновик, активация, откат; выход", async ({ page }) => {
   page.on("dialog", (dialog) => void dialog.accept());
   await login(page);

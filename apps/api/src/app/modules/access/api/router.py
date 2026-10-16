@@ -1,4 +1,5 @@
-"""API админки: вход, выход, текущий пользователь (docs/contracts.md §7, ADR-0036)."""
+"""API админки: вход, выход, текущий пользователь (docs/contracts.md §7, ADR-0036).
+Сессия браузера — HttpOnly-cookie, у CLI и тестов — Bearer (ADR-0044)."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -14,13 +15,17 @@ from app.modules.access.infrastructure.repositories import (
     SqlAdminUserDirectory,
 )
 from app.modules.shared.public import (
+    ADMIN_COOKIE,
+    ADMIN_COOKIE_PATH,
     AdminPrincipal,
     ApiError,
     CurrentAdmin,
     DbSession,
     RateLimit,
     RateLimiter,
+    admin_token,
     bearer_token,
+    check_admin_origin,
     client_ip,
     enforce_rate_limits,
     ensure_not_limited,
@@ -32,13 +37,20 @@ router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
 @router.post("/auth/login")
 async def admin_login(
-    body: AdminLoginRequest, request: Request, session: DbSession
+    body: AdminLoginRequest, request: Request, response: Response, session: DbSession
 ) -> AdminLoginResponse:
     """Сессия по email и паролю; 401 без уточнения, что не так. Лимит по IP считает все
     попытки, по email — только неудачные (REVIEW.md: AC-3): перебор пароля одного
     пользователя с разных адресов упирается в лимит, а входы владельца его не тратят. Redis
-    недоступен — лимиты считаются в памяти процесса, а не снимаются (ADR-0030)."""
+    недоступен — лимиты считаются в памяти процесса, а не снимаются (ADR-0030).
+
+    Вход ставит cookie сессии (ADR-0044); с чужой страницы (Origin не из CORS_ORIGINS) —
+    403: иначе сторонний сайт мог бы подсунуть браузеру свою сессию (login CSRF). Без Origin
+    (CLI) — можно. Прежняя сессия из cookie закрывается."""
     settings = request.app.state.settings
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in settings.cors_origins:
+        raise ApiError(status.HTTP_403_FORBIDDEN, "forbidden", "вход не со страницы админки")
     limiter: RateLimiter = request.app.state.rate_limiter
     ip_rule = RateLimit(
         "admin_login_ip", settings.rate_admin_login_per_ip_per_min, 60, local_fallback=True
@@ -52,18 +64,33 @@ async def admin_login(
     email = body.email.strip().lower()
     await enforce_rate_limits(limiter, [(ip_rule, client_ip(request))])
     await ensure_not_limited(limiter, email_rule, email)
+    now = datetime.now(UTC)
+    sessions = SqlAdminSessionStore(session)
     try:
         result = await login(
             body.email,
             body.password,
             users=SqlAdminUserDirectory(session),
-            sessions=SqlAdminSessionStore(session),
+            sessions=sessions,
             ttl=timedelta(hours=settings.admin_session_ttl_hours),
-            now=datetime.now(UTC),
+            now=now,
         )
     except InvalidCredentialsError as e:
         await limiter.hit(email_rule, email)
         raise ApiError(status.HTTP_401_UNAUTHORIZED, "unauthorized", str(e)) from e
+    if previous := request.cookies.get(ADMIN_COOKIE):
+        await logout(previous, sessions=sessions)
+    # Браузер держит токен в HttpOnly-cookie — скрипт страницы его не прочитает (ADR-0044);
+    # в теле токен остаётся для Bearer-клиентов (CLI, тесты).
+    response.set_cookie(
+        ADMIN_COOKIE,
+        result.token,
+        max_age=int((result.expires_at - now).total_seconds()),
+        path=ADMIN_COOKIE_PATH,
+        secure=settings.admin_cookie_secure,
+        httponly=True,
+        samesite="strict",
+    )
     return AdminLoginResponse(
         token=result.token,
         expires_at=result.expires_at,
@@ -73,14 +100,28 @@ async def admin_login(
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def admin_logout(
-    _: CurrentAdmin,
+    request: Request,
     session: DbSession,
     authorization: Annotated[str | None, Header()] = None,
 ) -> Response:
-    token = bearer_token(authorization)
-    assert token is not None  # CurrentAdmin пропускает только с токеном
+    """Закрывает сессию и стирает cookie (ADR-0044). Сессия уже истекла или закрыта —
+    тоже 204: устаревшая cookie не должна оставаться в браузере. Нет токена — 401; запрос
+    по cookie не со страницы админки — 403 (CSRF)."""
+    token = admin_token(request, authorization)
+    if token is None:
+        raise ApiError(status.HTTP_401_UNAUTHORIZED, "unauthorized", "нужен вход в админку")
+    if bearer_token(authorization) is None:
+        check_admin_origin(request)
     await logout(token, sessions=SqlAdminSessionStore(session))
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.delete_cookie(
+        ADMIN_COOKIE,
+        path=ADMIN_COOKIE_PATH,
+        secure=request.app.state.settings.admin_cookie_secure,
+        httponly=True,
+        samesite="strict",
+    )
+    return response
 
 
 @router.get("/me")

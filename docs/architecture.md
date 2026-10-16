@@ -446,8 +446,9 @@ Entity хранится в Postgres: нормализованные поля (`t
   (пользователь может работать в нескольких тенантах), роль в тенанте — `admin_memberships`
   (`viewer` — диалоги и журнал, `editor` — ещё конфиг и источники); `is_superadmin` — все
   тенанты. Пароль — scrypt с параметрами в хэше. Создание — `make admin-user`.
-  Вход выдаёт токен сессии (`admin_sessions`: sha256 токена, срок 12 ч), запрос админки
-  несёт его в `Authorization: Bearer`. Проверка — порт `AdminAuthenticator` в `shared.kernel`
+  Вход выдаёт токен сессии (`admin_sessions`: sha256 токена, срок 12 ч): браузеру — в
+  HttpOnly-cookie `SameSite=Strict` (изменяющие запросы по cookie — только с `Origin` из
+  `CORS_ORIGINS`), CLI и тестам — в теле для `Authorization: Bearer` (ADR-0044). Проверка — порт `AdminAuthenticator` в `shared.kernel`
   (реализация в `access`) и зависимости `shared`: `AdminViewer`/`AdminEditor` для путей
   `…/tenants/{tenant_id}/…` (401 — нет сессии, 403 — нет роли), `CurrentAdmin`.
 - Все репозитории принимают `tenant_id` явно; в тестах есть проверка изоляции.

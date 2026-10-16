@@ -1,5 +1,6 @@
-// HTTP API админки (docs/contracts.md §7): вход по email и паролю, дальше — токен сессии
-// в `Authorization: Bearer`. Ошибки — ApiError, как у API чата.
+// HTTP API админки (docs/contracts.md §7): вход по email и паролю, дальше — сессия в
+// HttpOnly-cookie, которую ставит API (ADR-0044): скрипт страницы токена не видит, запросы
+// идут с `credentials: "include"`. Ошибки — ApiError, как у API чата.
 import type {
   AdminLoginRequest,
   AdminLoginResponse,
@@ -23,31 +24,12 @@ import type {
 } from "@/contracts";
 import { ApiError, errorBody } from "@/lib/api/client";
 
-const TOKEN_KEY = "tessera:admin-token";
-
-// localStorage может быть недоступен (приватный режим, запрет cookies) — тогда вход живёт
-// до перезагрузки страницы.
-export function loadToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function saveToken(token: string | null): void {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    // см. loadToken
-  }
-}
-
-/** Вход: токен сессии и текущий пользователь. Неверные данные — ApiError 401, лимит — 429. */
+/** Вход: API ставит cookie сессии и возвращает текущего пользователя. Неверные данные —
+ * ApiError 401, лимит — 429. */
 export async function login(apiUrl: string, request: AdminLoginRequest): Promise<AdminLoginResponse> {
   const resp = await fetch(new URL("/v1/admin/auth/login", apiUrl), {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
@@ -56,10 +38,7 @@ export async function login(apiUrl: string, request: AdminLoginRequest): Promise
 }
 
 export class AdminApi {
-  constructor(
-    private readonly baseUrl: string,
-    private readonly token: string,
-  ) {}
+  constructor(private readonly baseUrl: string) {}
 
   async me(): Promise<AdminMe> {
     return (await this.request("/v1/admin/me")).json() as Promise<AdminMe>;
@@ -186,11 +165,8 @@ export class AdminApi {
   private async request(path: string, init: RequestInit = {}): Promise<Response> {
     const resp = await fetch(new URL(path, this.baseUrl), {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.token}`,
-        ...init.headers,
-      },
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...init.headers },
     });
     if (!resp.ok) throw new ApiError(resp.status, await errorBody(resp));
     return resp;

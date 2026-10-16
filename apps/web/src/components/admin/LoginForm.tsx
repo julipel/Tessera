@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
-import { login, saveToken } from "@/lib/admin/api";
+import { login } from "@/lib/admin/api";
 import { ApiError } from "@/lib/api/client";
 import { primaryButton } from "./AdminShell";
 
@@ -18,8 +18,8 @@ export function LoginForm({ apiUrl }: { apiUrl: string }) {
     setBusy(true);
     setError(null);
     try {
-      const { token } = await login(apiUrl, { email, password });
-      saveToken(token);
+      // Сессию браузер хранит в HttpOnly-cookie API (ADR-0044) — токен из ответа не нужен.
+      await login(apiUrl, { email, password });
       router.replace("/admin");
     } catch (e) {
       setError(loginError(e));

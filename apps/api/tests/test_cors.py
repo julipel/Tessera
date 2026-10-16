@@ -69,3 +69,50 @@ async def test_preflight_allows_admin_methods(settings: Settings, method: str, p
 
     assert resp.status_code == 200
     assert method in resp.headers["access-control-allow-methods"]
+
+
+async def test_admin_preflight_allows_credentials(settings: Settings) -> None:
+    """Сессия админки — cookie (ADR-0044): fetch с credentials требует allow-credentials."""
+    async with AsyncClient(transport=ASGITransport(app=_app(settings)), base_url="http://t") as ac:
+        resp = await ac.options(
+            "/v1/admin/me",
+            headers={"Origin": CHAT_ORIGIN, "Access-Control-Request-Method": "GET"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == CHAT_ORIGIN
+    assert resp.headers["access-control-allow-credentials"] == "true"
+
+
+async def test_unknown_origin_cannot_read_admin_responses(settings: Settings) -> None:
+    """Starlette ставит Allow-Credentials всем ответам, но без Allow-Origin браузер ответ
+    чужому origin не отдаёт."""
+    async with AsyncClient(transport=ASGITransport(app=_app(settings)), base_url="http://t") as ac:
+        resp = await ac.get("/v1/admin/me", headers={"Origin": "http://evil.example"})
+
+    assert "access-control-allow-origin" not in resp.headers
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "*",
+        "http://chat.example/",
+        "chat.example",
+        "http://chat.example/path",
+        "HTTP://Chat.example",
+        "http://chat.example:abc",
+        "http://user@chat.example",
+        "http://chat.example?",
+    ],
+)
+def test_cors_origins_must_be_exact_origins(origin: str) -> None:
+    """«*» с credentials — любой origin читает ответы админки; путь и слэш не совпадут с Origin."""
+    with pytest.raises(ValueError, match="CORS_ORIGINS"):
+        Settings(_env_file=None, cors_origins=[origin])
+
+
+def test_cors_origins_accept_exact_origins() -> None:
+    origins = ["https://chat.example", "https://chat.example:8443", "http://127.0.0.2:3001"]
+
+    assert Settings(_env_file=None, cors_origins=origins).cors_origins == origins

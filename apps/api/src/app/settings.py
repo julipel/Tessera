@@ -5,6 +5,7 @@ import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
@@ -68,7 +69,9 @@ class Settings(BaseSettings):
     # если тенант один); у тенанта без ключа здесь — сгенерировать.
     seed_widget_key: str | None = None
     # Origin своего веб-чата (env — JSON-список): CORS и проверка Origin по ключу виджета —
-    # с него ключ работает всегда, сайты тенанта задаёт allowed_origins (ADR-0022).
+    # с него ключ работает всегда, сайты тенанта задаёт allowed_origins (ADR-0022). Он же —
+    # origin админки: изменяющие запросы по cookie сессии принимаются только с него (ADR-0044).
+    # Сравнение точное: «*», путь и слэш в конце отклоняются при старте.
     cors_origins: list[str] = ["http://localhost:3000"]
     # LLM-провайдеры (ADR-0010); base_url пусто — официальный endpoint.
     openai_api_key: SecretStr | None = None
@@ -93,8 +96,32 @@ class Settings(BaseSettings):
     # Админка (ADR-0036): срок сессии после входа (без продления) и лимиты попыток входа
     # (ADR-0030; 0 — правило выключено).
     admin_session_ttl_hours: int = 12
+    # Cookie сессии админки (ADR-0044) только по HTTPS. localhost браузеры считают безопасным,
+    # false — только для разработки по http с другого адреса (LAN IP).
+    admin_cookie_secure: bool = True
     rate_admin_login_per_ip_per_min: int = 10
     rate_admin_login_per_email_per_hour: int = 20
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _check_origins(cls, values: list[str]) -> list[str]:
+        # «*» с credentials Starlette превращает в «любой origin читает ответы админки».
+        # Значение должно совпадать с заголовком Origin побайтно: каноничная форма —
+        # схема и хост в нижнем регистре, порт числом, без пути, query и учётных данных.
+        for value in values:
+            try:
+                parts = urlsplit(value)
+                port = parts.port
+            except ValueError:
+                parts, port = None, None
+            canonical = (
+                f"{parts.scheme}://{parts.hostname}{f':{port}' if port is not None else ''}"
+                if parts and parts.scheme in ("http", "https") and parts.hostname
+                else None
+            )
+            if canonical != value:
+                raise ValueError(f"CORS_ORIGINS: {value!r} — не origin вида https://host[:port]")
+        return values
 
     @field_validator("source_db_allowed_networks")
     @classmethod

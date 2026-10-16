@@ -153,7 +153,6 @@ cat <<EOF
   Lumière:       $web_url/demo/shop/lumiere.html?key=$beauty_key
   Зелёный угол:  $web_url/demo/shop/garden.html?key=$garden_key
   Все витрины:   $web_url/demo/shop/index.html
-  Админка:       $web_url/admin/login
   API:           $api_url
 Логи — $LOG_DIR. Остановить — Ctrl+C.
 EOF

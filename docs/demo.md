@@ -22,9 +22,7 @@
    Без sudo: `dpkg-deb -x /tmp/cloudflared.deb /tmp/cf && cp /tmp/cf/usr/bin/cloudflared ~/.local/bin/`.
 2. Данные демо-тенантов: `make up && make pilot`. Ключи виджета — `SEED_WIDGET_KEY`
    (`demo-beauty=wk_…,demo-garden=wk_…`) в `.env`; по ним скрипт собирает ссылки.
-3. Пользователь админки, чтобы показать диалоги:
-   `make admin-user email=demo@example.com args="--tenant demo-beauty=viewer --tenant demo-garden=viewer"`.
-4. Лимит расходов у провайдера LLM: ссылка публичная, каждый ход — платный запрос.
+3. Лимит расходов у провайдера LLM: ссылка публичная, каждый ход — платный запрос.
 
 ## Запуск
 
@@ -41,8 +39,11 @@ web с `NEXT_PUBLIC_API_URL` = адрес API-туннеля, затем печ�
 ```
 Lumière:       https://….trycloudflare.com/demo/shop/lumiere.html?key=wk_…
 Зелёный угол:  https://….trycloudflare.com/demo/shop/garden.html?key=wk_…
-Админка:       https://….trycloudflare.com/admin/login
 ```
+
+Админки в демо нет: web и API — два туннеля на разных сайтах `*.trycloudflare.com`, а cookie
+сессии админки (`SameSite=Strict`, ADR-0044) между сайтами не ходит. Админку показывать
+локально или после выкладки (один домен, ADR-0040).
 
 Ключи в ссылках можно задать явно: `DEMO_BEAUTY_KEY=… DEMO_GARDEN_KEY=… make demo-public`.
 Логи — `.demo/`. Ctrl+C останавливает всё; упавший процесс останавливает остальные.

@@ -12,7 +12,7 @@ export function AdminShell({
   apiUrl: string;
   children: (session: AdminSession) => ReactNode;
 }) {
-  const { session, error } = useAdminSession(apiUrl);
+  const { session, error, logoutError } = useAdminSession(apiUrl);
 
   return (
     <div className="min-h-dvh bg-chat-bg text-chat-text">
@@ -36,6 +36,11 @@ export function AdminShell({
         {error && (
           <p role="alert" className="text-chat-danger">
             Не удалось загрузить данные: {error}
+          </p>
+        )}
+        {logoutError && (
+          <p role="alert" className="text-chat-danger">
+            Выход не выполнен, сессия осталась открытой: {logoutError}. Повторите «Выйти».
           </p>
         )}
         {session ? children(session) : !error && <p className="text-chat-muted">Загрузка…</p>}

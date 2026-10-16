@@ -1,10 +1,14 @@
 """Публичный интерфейс модуля shared — единственная точка входа для других модулей."""
 
 from app.modules.shared.api.admin import (
+    ADMIN_COOKIE,
+    ADMIN_COOKIE_PATH,
     AdminEditor,
     AdminViewer,
     CurrentAdmin,
+    admin_token,
     bearer_token,
+    check_admin_origin,
     require_tenant_role,
 )
 from app.modules.shared.api.body_limit import BodySizeLimitMiddleware
@@ -29,6 +33,8 @@ from app.modules.shared.infrastructure.rate_limit import InMemoryRateLimiter, Re
 from app.modules.shared.infrastructure.repository import TenantRepository
 
 __all__ = [
+    "ADMIN_COOKIE",
+    "ADMIN_COOKIE_PATH",
     "AdminAuthenticator",
     "AdminEditor",
     "AdminPrincipal",
@@ -50,7 +56,9 @@ __all__ = [
     "TenantMismatchError",
     "TenantRepository",
     "TenantScopedBase",
+    "admin_token",
     "bearer_token",
+    "check_admin_origin",
     "client_ip",
     "create_engine",
     "create_session_factory",

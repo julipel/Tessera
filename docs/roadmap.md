@@ -787,6 +787,14 @@
     365; 1–1825); cron воркера раз в сутки порциями с commit, `make retention [dry=1]`;
     `leads.conversation_id` — `SET NULL`; индексы журнала `(tenant_id, ts)` и
     `(conversation_id)` вместо `tenant_id`; миграция 0018; Langfuse и бэкапы — `deploy.md`.
+  - [x] **P9-01u Сессия админки в HttpOnly-cookie** (`REVIEW.md`: AC-5 частично, ADR-0044).
+    Вход ставит `tessera_admin` (`HttpOnly; Secure; SameSite=Strict; Path=/v1/admin`), выход
+    стирает; `require_admin` — Bearer или cookie; изменяющий запрос по cookie без своего
+    `Origin` — 403; CORS с credentials; фронт без `localStorage`, `credentials: "include"`;
+    админка в демо через два туннеля убрана (разные сайты).
+  - [ ] **P9-01v CSP и заголовки безопасности** (`REVIEW.md`: AC-5, остаток). nonce-CSP для
+    `/admin/*` (`script-src` с nonce, `frame-ancestors 'none'`) в `proxy.ts`; HSTS,
+    `X-Content-Type-Options`, `Referrer-Policy` в Caddy.
   - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
     образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
 - [ ] **P9-02 Пилот и разбор.** Реальные диалоги → новые эталоны в evals → итерации P6-03.

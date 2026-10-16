@@ -160,7 +160,9 @@ async def test_logout_closes_session(db_client: AsyncClient, admin_login: AdminL
 
     assert (await db_client.post(LOGOUT, headers=headers)).status_code == 204
     assert (await db_client.get(ME, headers=headers)).status_code == 401
-    assert (await db_client.post(LOGOUT, headers=headers)).status_code == 401
+    # Повторный выход идемпотентен (ADR-0044: устаревшая cookie тоже стирается); без токена — 401.
+    assert (await db_client.post(LOGOUT, headers=headers)).status_code == 204
+    assert (await db_client.post(LOGOUT)).status_code == 401
 
 
 @pytest.mark.parametrize(
@@ -296,3 +298,165 @@ async def test_successful_logins_do_not_use_up_email_limit(
     assert (await db_client.post(LOGIN, json=right)).status_code == 200
     assert (await db_client.post(LOGIN, json=wrong)).status_code == 401
     assert (await db_client.post(LOGIN, json=right)).status_code == 429
+
+
+# --- Сессия в HttpOnly-cookie (ADR-0044) ---
+
+ADMIN_ORIGIN = "http://localhost:3000"  # CORS_ORIGINS по умолчанию
+
+
+async def _cookie_login(db_client: AsyncClient, db_session: AsyncSession) -> tuple[str, str]:
+    """Вход; возвращает токен и заголовок Set-Cookie."""
+    await _user(db_session, "anna@example.com", password=PASSWORD, is_superadmin=True)
+    response = await db_client.post(LOGIN, json={"email": "anna@example.com", "password": PASSWORD})
+    assert response.status_code == 200
+    return response.json()["token"], response.headers["set-cookie"]
+
+
+def _cookie(token: str) -> dict[str, str]:
+    return {"Cookie": f"tessera_admin={token}"}
+
+
+async def test_login_sets_httponly_strict_cookie(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    token, set_cookie = await _cookie_login(db_client, db_session)
+
+    attrs = [part.strip() for part in set_cookie.split(";")]
+    assert attrs[0] == f"tessera_admin={token}"
+    lowered = {a.lower() for a in attrs[1:]}
+    assert lowered >= {"httponly", "secure", "samesite=strict", "path=/v1/admin"}
+    # Срок — до expires_at сессии (12 ч), с точностью до секунды обработки.
+    (max_age,) = [int(a.split("=")[1]) for a in lowered if a.startswith("max-age=")]
+    assert 12 * 3600 - 5 <= max_age <= 12 * 3600
+
+
+async def test_cookie_session_reads_and_writes_from_own_origin(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    token, _ = await _cookie_login(db_client, db_session)
+
+    me = await db_client.get(ME, headers=_cookie(token))
+    assert me.status_code == 200
+    assert me.json()["email"] == "anna@example.com"
+
+    logout = await db_client.post(LOGOUT, headers=_cookie(token) | {"Origin": ADMIN_ORIGIN})
+    assert logout.status_code == 204
+    # Cookie стёрта, сессия закрыта.
+    cleared = [part.strip().lower() for part in logout.headers["set-cookie"].split(";")]
+    assert cleared[0] in ('tessera_admin=""', "tessera_admin=")
+    assert "max-age=0" in cleared and "path=/v1/admin" in cleared
+    assert (await db_client.get(ME, headers=_cookie(token))).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "origin", [None, "http://evil.example", "http://localhost:3001"], ids=["none", "evil", "port"]
+)
+async def test_cookie_write_from_foreign_origin_is_forbidden(
+    db_client: AsyncClient, db_session: AsyncSession, origin: str | None
+) -> None:
+    """CSRF: изменяющий запрос по cookie — только со страницы админки."""
+    token, _ = await _cookie_login(db_client, db_session)
+    headers = _cookie(token) | ({"Origin": origin} if origin else {})
+
+    response = await db_client.post(LOGOUT, headers=headers)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden"
+    # Сессия не закрыта: запрос отклонён до действия.
+    assert (await db_client.get(ME, headers=_cookie(token))).status_code == 200
+
+
+async def test_bearer_write_needs_no_origin(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Bearer браузер сам не подставит — CSRF ему не грозит, Origin не проверяется (CLI)."""
+    token, _ = await _cookie_login(db_client, db_session)
+
+    assert (await db_client.post(LOGOUT, headers=_bearer(token))).status_code == 204
+
+
+async def test_insecure_cookie_setting_for_http_development(
+    app: FastAPI, db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    app.state.settings = app.state.settings.model_copy(update={"admin_cookie_secure": False})
+
+    _, set_cookie = await _cookie_login(db_client, db_session)
+
+    assert "secure" not in {a.strip().lower() for a in set_cookie.split(";")}
+
+
+async def test_bearer_takes_precedence_over_cookie(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    token, _ = await _cookie_login(db_client, db_session)
+
+    response = await db_client.get(ME, headers=_cookie(token) | _bearer("as_nope"))
+
+    assert response.status_code == 401
+
+
+async def test_cookie_write_to_tenant_endpoint_from_foreign_origin_is_forbidden(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Проверка Origin — в общей зависимости: любой изменяющий путь админки, не только выход."""
+    token, _ = await _cookie_login(db_client, db_session)
+    path = f"/v1/admin/tenants/{uuid4()}/conversations/{uuid4()}/messages/{uuid4()}/rating"
+    headers = _cookie(token) | {"Origin": "http://evil.example"}
+
+    put = await db_client.put(path, headers=headers, json={"rating": "good"})
+    delete = await db_client.delete(path, headers=headers)
+
+    assert (put.status_code, delete.status_code) == (403, 403)
+    assert put.json()["error"]["code"] == "forbidden"
+
+
+@pytest.mark.parametrize("expired", [True, False], ids=["expired-session", "unknown-token"])
+async def test_logout_with_stale_cookie_clears_it(
+    db_client: AsyncClient, db_session: AsyncSession, expired: bool
+) -> None:
+    token = "as_unknown"
+    if expired:
+        token, _ = await _cookie_login(db_client, db_session)
+        record = (await db_session.execute(select(AdminSessionRecord))).scalar_one()
+        record.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        await db_session.flush()
+        assert (await db_client.get(ME, headers=_cookie(token))).status_code == 401
+
+    response = await db_client.post(LOGOUT, headers=_cookie(token) | {"Origin": ADMIN_ORIGIN})
+
+    assert response.status_code == 204
+    assert "max-age=0" in response.headers["set-cookie"].lower()
+
+
+async def test_login_from_foreign_page_is_forbidden(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Login CSRF: чужая страница не подсунет браузеру свою сессию."""
+    await _user(db_session, "anna@example.com", password=PASSWORD)
+
+    response = await db_client.post(
+        LOGIN,
+        json={"email": "anna@example.com", "password": PASSWORD},
+        headers={"Origin": "http://evil.example"},
+    )
+
+    assert response.status_code == 403
+    assert "set-cookie" not in response.headers
+    assert (await db_session.execute(select(AdminSessionRecord))).scalars().all() == []
+
+
+async def test_relogin_closes_previous_cookie_session(
+    db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    first, _ = await _cookie_login(db_client, db_session)
+
+    again = await db_client.post(
+        LOGIN,
+        json={"email": "anna@example.com", "password": PASSWORD},
+        headers=_cookie(first) | {"Origin": ADMIN_ORIGIN},
+    )
+
+    assert again.status_code == 200
+    assert (await db_client.get(ME, headers=_bearer(first))).status_code == 401
+    assert (await db_client.get(ME, headers=_bearer(again.json()["token"]))).status_code == 200

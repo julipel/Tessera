@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AdminMe } from "@/contracts";
 import { ApiError } from "@/lib/api/client";
-import { AdminApi, loadToken, saveToken } from "./api";
+import { AdminApi } from "./api";
 
 export const LOGIN_PATH = "/admin/login";
 
@@ -18,26 +18,27 @@ export interface AdminSession {
 }
 
 /**
- * Сессия админки из сохранённого токена. Нет токена или он не принят — переход на вход;
- * пока `/v1/admin/me` не ответил — null. `error` — сбой загрузки, не связанный со входом.
+ * Сессия админки — HttpOnly-cookie API (ADR-0044): есть ли она, знает только сервер, поэтому
+ * первым идёт `/v1/admin/me`. 401 — переход на вход; пока ответа нет — null. `error` — сбой
+ * загрузки, не связанный со входом.
  */
-export function useAdminSession(apiUrl: string): { session: AdminSession | null; error: string | null } {
+export function useAdminSession(apiUrl: string): {
+  session: AdminSession | null;
+  error: string | null;
+  /** Выход не выполнен (сбой сети или сервера): сессия жива, на вход не уходим. */
+  logoutError: string | null;
+} {
   const router = useRouter();
-  const [token] = useState(loadToken);
-  const api = useMemo(() => (token ? new AdminApi(apiUrl, token) : null), [apiUrl, token]);
+  const api = useMemo(() => new AdminApi(apiUrl), [apiUrl]);
   const [me, setMe] = useState<AdminMe | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   const expire = useCallback(() => {
-    saveToken(null);
     router.replace(LOGIN_PATH);
   }, [router]);
 
   useEffect(() => {
-    if (!api) {
-      router.replace(LOGIN_PATH);
-      return;
-    }
     api
       .me()
       .then(setMe)
@@ -45,20 +46,27 @@ export function useAdminSession(apiUrl: string): { session: AdminSession | null;
         if (e instanceof ApiError && e.status === 401) expire();
         else setError(e instanceof Error ? e.message : String(e));
       });
-  }, [api, expire, router]);
+  }, [api, expire]);
 
   const logout = useCallback(async () => {
+    setLogoutError(null);
     try {
-      await api?.logout();
-    } catch {
-      // Сессия уже закрыта или сеть недоступна — токен всё равно забываем.
+      await api.logout();
+    } catch (e) {
+      // Cookie HttpOnly — стереть её может только сервер. Не вышло — пользователь должен это
+      // увидеть, иначе на общем компьютере админка откроется снова без пароля. 401 — сессии
+      // уже нет, это и есть выход.
+      if (!(e instanceof ApiError && e.status === 401)) {
+        setLogoutError(e instanceof Error ? e.message : String(e));
+        return;
+      }
     }
     expire();
   }, [api, expire]);
 
   const session = useMemo(
-    () => (api && me ? { api, me, logout, expire } : null),
+    () => (me ? { api, me, logout, expire } : null),
     [api, me, logout, expire],
   );
-  return { session, error };
+  return { session, error, logoutError };
 }

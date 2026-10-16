@@ -371,13 +371,23 @@ HTTP-ответ с `invalid_input` может нести `details: [{loc, messag
 ```
 POST /v1/admin/auth/login  AdminLoginRequest {email, password}   # admin_auth.schema.json
   → 200 AdminLoginResponse {token, expires_at, me: AdminMe}
+    + Set-Cookie: tessera_admin=<token>; HttpOnly; Secure; SameSite=Strict; Path=/v1/admin;
+      Max-Age=<до expires_at>   # Secure — ADMIN_COOKIE_SECURE (по умолчанию да);
+                                # прежняя сессия из cookie при входе закрывается
+  → 403 forbidden — Origin есть, но не из CORS_ORIGINS (login CSRF)
   → 401 unauthorized — неверный email или пароль, пользователь отключён (причина не уточняется)
   → 429 rate_limited + Retry-After — RATE_ADMIN_LOGIN_PER_IP_PER_MIN / _PER_EMAIL_PER_HOUR
-POST /v1/admin/auth/logout → 204   # закрывает сессию из Authorization
+POST /v1/admin/auth/logout → 204   # закрывает сессию (Bearer или cookie), стирает cookie;
+                                   # истёкшая или неизвестная сессия — тоже 204
+  → 401 unauthorized — нет ни Bearer, ни cookie
+  → 403 forbidden — по cookie без Origin из CORS_ORIGINS (CSRF)
 GET  /v1/admin/me          → 200 AdminMe {id, email, is_superadmin, memberships[]}
 ```
 
-Остальные запросы `/v1/admin/*` несут `Authorization: Bearer <token>`. Токен непрозрачный,
+Остальные запросы `/v1/admin/*` несут сессию (ADR-0044): браузер — cookie `tessera_admin`
+(fetch с `credentials: "include"`), CLI и тесты — `Authorization: Bearer <token>`; Bearer
+главнее. Запрос по cookie с POST/PUT/DELETE без `Origin` из `CORS_ORIGINS` — 403
+`forbidden` (CSRF). Токен непрозрачный,
 сервер хранит только его sha256; срок — `ADMIN_SESSION_TTL_HOURS` (12 ч) от входа, без продления.
 Нет сессии, она истекла или закрыта, пользователь отключён — 401 `unauthorized`. Пути
 `/v1/admin/tenants/{tenant_id}/…` требуют роли в этом тенанте (`viewer` < `editor`,

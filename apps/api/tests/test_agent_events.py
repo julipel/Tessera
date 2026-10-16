@@ -1,7 +1,9 @@
 """Журнал событий хода (AgentEvent, P7-02) и его эндпоинт админки (ADR-0028)."""
 
+import base64
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -38,6 +40,7 @@ from app.modules.chat.infrastructure.repositories import (
     ToolCallRepository,
 )
 from app.modules.memory.public import DialogState
+from app.modules.observability.kernel import AgentEventEntry
 from app.modules.observability.public import AgentEventRepository
 from app.modules.shared.public import AdminRole, TenantId
 from app.modules.tenants.public import (
@@ -351,3 +354,90 @@ async def test_admin_events_auth_and_filters(
     assert len(await _journal(db_client, shop, root, **query)) == 3
     editor = await admin_login("editor@example.com", roles={shop: AdminRole.EDITOR})
     assert len(await _journal(db_client, shop, editor, **query)) == 3
+
+
+async def _seed_journal(
+    session: AsyncSession, tenant_id: TenantId, conversation_id: UUID
+) -> list[tuple[str, int]]:
+    """Три хода: у первых двух одинаковый ts (граница страницы между ними однозначна только
+    с turn_id), третий позже. Возвращает ожидаемый порядок (turn_id, seq)."""
+    t0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    turns = [(uuid4(), t0, 3), (uuid4(), t0, 3), (uuid4(), t0 + timedelta(seconds=1), 2)]
+    entries = [
+        AgentEventEntry(
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            trace_id="trace",
+            seq=seq,
+            type="text",
+            payload={"n": seq},
+            ts=ts,
+        )
+        for turn_id, ts, count in turns
+        for seq in range(1, count + 1)
+    ]
+    await AgentEventRepository(session).add_many(tenant_id, entries)
+    await session.flush()
+    return [
+        (str(e.turn_id), e.seq) for e in sorted(entries, key=lambda e: (e.ts, e.turn_id, e.seq))
+    ]
+
+
+@pytest.mark.parametrize("limit", [1, 3, 4, 8, 1000])
+async def test_admin_events_are_paged_without_gaps_or_repeats(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    viewer: dict[str, str],
+    limit: int,
+) -> None:
+    """O-8: длинный журнал — страницами по курсору; последняя страница — next_after = null,
+    в том числе когда она заполнена ровно до limit (4 и 8 из 8 событий)."""
+    expected = await _seed_journal(db_session, shop, conversation_id)
+    seen: list[tuple[str, int]] = []
+    pages, after = 0, None
+
+    while True:
+        params: dict[str, Any] = {"conversation_id": conversation_id, "limit": limit}
+        if after is not None:
+            params["after"] = after
+        response = await _events(db_client, shop, viewer, **params)
+        assert response.status_code == 200
+        page = AgentEventList.model_validate(response.json())
+        assert 0 < len(page.events) <= limit
+        seen += [(str(e.turn_id), e.seq) for e in page.events]
+        pages += 1
+        after = page.next_after
+        if after is None:
+            break
+
+    assert seen == expected
+    assert pages == -(-len(expected) // limit)
+
+
+async def test_admin_events_reject_bad_cursor_and_limit(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+    shop: TenantId,
+    conversation_id: UUID,
+    viewer: dict[str, str],
+    admin_login: AdminLogin,
+) -> None:
+    await _seed_journal(db_session, shop, conversation_id)
+    query = {"conversation_id": conversation_id}
+    # Подделанное время у границы календаря: в UTC это год 0 — 422, а не 500 от Postgres.
+    raw = f"0001-01-01T00:00:00+14:00|{uuid4()}|1"
+    overflow = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+    for bad in ("не-курсор", "MjAyNg", "bm9wZXxub3BlfG5vcGU", overflow):
+        response = await _events(db_client, shop, viewer, **query, after=bad)
+        assert response.status_code == 422, bad
+    for limit in (0, 1001):
+        assert (await _events(db_client, shop, viewer, **query, limit=limit)).status_code == 422
+
+    # Курсор не открывает чужой журнал: в другом тенанте по нему ничего нет.
+    first = await _events(db_client, shop, viewer, **query, limit=1)
+    after = first.json()["next_after"]
+    other = await _tenant(db_session, "other")
+    other_viewer = await admin_login("other@example.com", roles={other: AdminRole.VIEWER})
+    assert await _journal(db_client, other, other_viewer, **query, after=after) == []

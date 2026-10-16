@@ -8,6 +8,7 @@ import type {
   ConversationDetail,
   ConversationList,
   AgentConfigVersionDetail,
+  AgentEventItem,
   AgentEventList,
   AgentConfigVersionList,
   CreateAgentConfigRequest,
@@ -23,6 +24,10 @@ import type {
   StartSyncRequest,
 } from "@/contracts";
 import { ApiError, errorBody } from "@/lib/api/client";
+
+/** Журнал хода в админке: размер страницы и сколько страниц грузить за раз. */
+const EVENT_PAGE_SIZE = 1000;
+const MAX_EVENT_PAGES = 20;
 
 /** Вход: API ставит cookie сессии и возвращает текущего пользователя. Неверные данные —
  * ApiError 401, лимит — 429. */
@@ -137,11 +142,26 @@ export class AdminApi {
     return (await resp.json()) as ConversationDetail;
   }
 
-  /** Журнал хода диалога: события по ходам (ts) и внутри хода (seq), до 1000. */
-  async listEvents(tenantId: string, conversationId: string): Promise<AgentEventList> {
-    const query = new URLSearchParams({ conversation_id: conversationId });
-    const resp = await this.request(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/events?${query}`);
-    return (await resp.json()) as AgentEventList;
+  /**
+   * Журнал хода диалога по времени событий: страницы подряд, начиная с `after`, но не больше
+   * MAX_EVENT_PAGES за вызов; `nextAfter` — курсор продолжения, null — журнал загружен весь.
+   */
+  async listEvents(
+    tenantId: string,
+    conversationId: string,
+    after: string | null = null,
+  ): Promise<{ events: AgentEventItem[]; nextAfter: string | null }> {
+    const events: AgentEventItem[] = [];
+    for (let page = 0; page < MAX_EVENT_PAGES; page++) {
+      const query = new URLSearchParams({ conversation_id: conversationId, limit: String(EVENT_PAGE_SIZE) });
+      if (after) query.set("after", after);
+      const resp = await this.request(`/v1/admin/tenants/${encodeURIComponent(tenantId)}/events?${query}`);
+      const list = (await resp.json()) as AgentEventList;
+      events.push(...list.events);
+      after = list.next_after;
+      if (!after) break;
+    }
+    return { events, nextAfter: after };
   }
 
   /** Оценка ответа ассистента; повторная заменяет прежнюю. */

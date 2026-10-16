@@ -6,11 +6,12 @@
   "$defs": {
     "AgentEventList": {
       "type": "object",
-      "description": "Ответ GET /v1/admin/tenants/{tenant_id}/events: события в порядке ходов (ts) и внутри хода (seq).",
+      "description": "Ответ GET /v1/admin/tenants/{tenant_id}/events: страница событий в порядке ходов (ts) и внутри хода (seq). next_after — курсор следующей страницы (параметр after), null — страница последняя.",
       "properties": {
-        "events": { "type": "array", "items": { "$ref": "#/$defs/AgentEventItem" } }
+        "events": { "type": "array", "items": { "$ref": "#/$defs/AgentEventItem" } },
+        "next_after": { "type": ["string", "null"] }
       },
-      "required": ["events"],
+      "required": ["events", "next_after"],
       "additionalProperties": false
     },
     "AgentEventItem": {

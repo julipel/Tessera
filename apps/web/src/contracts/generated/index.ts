@@ -603,13 +603,14 @@ export interface ConversationDetail {
   messages: AdminMessage[];
 }
 /**
- * Ответ GET /v1/admin/tenants/{tenant_id}/events: события в порядке ходов (ts) и внутри хода (seq).
+ * Ответ GET /v1/admin/tenants/{tenant_id}/events: страница событий в порядке ходов (ts) и внутри хода (seq). next_after — курсор следующей страницы (параметр after), null — страница последняя.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
  * via the `definition` "AgentEventList".
  */
 export interface AgentEventList {
   events: AgentEventItem[];
+  next_after: string | null;
 }
 /**
  * Событие хода. payload — данные по type (docs/contracts.md §7); turn_finished — последнее событие хода, есть всегда.

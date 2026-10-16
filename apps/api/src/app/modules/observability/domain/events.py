@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from app.modules.shared.kernel import DomainError
+
 
 @dataclass(frozen=True, slots=True)
 class AgentEventEntry:
@@ -19,3 +21,19 @@ class AgentEventEntry:
     type: str
     payload: dict[str, Any]
     ts: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class EventCursor:
+    """Последнее событие страницы журнала. Журнал упорядочен по времени события `ts`, при
+    равном `ts` — по `turn_id` и `seq`. Граница страницы однозначна, пока `(turn_id, seq)`
+    уникальна: её обеспечивает запись журнала (ход пишет журнал один раз, seq — по порядку),
+    ограничения в БД нет."""
+
+    ts: datetime
+    turn_id: UUID
+    seq: int
+
+
+class InvalidEventCursorError(DomainError):
+    """Курсор страницы журнала не разбирается."""

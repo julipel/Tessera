@@ -4,9 +4,9 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import ColumnElement
+from sqlalchemy import ColumnElement, tuple_
 
-from app.modules.observability.domain.events import AgentEventEntry
+from app.modules.observability.domain.events import AgentEventEntry, EventCursor
 from app.modules.observability.infrastructure.models import AgentEventRecord
 from app.modules.shared.public import TenantId, TenantRepository
 
@@ -44,8 +44,10 @@ class AgentEventRepository(TenantRepository[AgentEventRecord]):
         turn_id: UUID | None = None,
         trace_id: str | None = None,
         limit: int = 1000,
+        after: EventCursor | None = None,
     ) -> list[AgentEventEntry]:
-        """События тенанта по фильтрам (заданные — все сразу) в порядке ходов и событий."""
+        """События тенанта по фильтрам (заданные — все сразу) в порядке `(ts, turn_id, seq)`;
+        `after` — продолжить после этого события (страницы без OFFSET)."""
         criteria: list[ColumnElement[bool]] = []
         if conversation_id is not None:
             criteria.append(AgentEventRecord.conversation_id == conversation_id)
@@ -53,10 +55,15 @@ class AgentEventRepository(TenantRepository[AgentEventRecord]):
             criteria.append(AgentEventRecord.turn_id == turn_id)
         if trace_id is not None:
             criteria.append(AgentEventRecord.trace_id == trace_id)
+        if after is not None:
+            criteria.append(
+                tuple_(AgentEventRecord.ts, AgentEventRecord.turn_id, AgentEventRecord.seq)
+                > tuple_(after.ts, after.turn_id, after.seq)
+            )
         stmt = (
             self._scoped(tenant_id)
             .where(*criteria)
-            .order_by(AgentEventRecord.ts, AgentEventRecord.seq)
+            .order_by(AgentEventRecord.ts, AgentEventRecord.turn_id, AgentEventRecord.seq)
             .limit(limit)
         )
         return [

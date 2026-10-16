@@ -206,6 +206,15 @@ test("диалоги: список, ход по шагам, оценка отв�
   });
   expect(await turn.text()).toContain("event: done");
 
+  // Журнал страницами по 2 события: админка догружает все страницы (REVIEW.md: O-8).
+  const journalPages: string[] = [];
+  await page.route(/\/v1\/admin\/tenants\/[^/]+\/events\?/, async (route) => {
+    const url = new URL(route.request().url());
+    url.searchParams.set("limit", "2");
+    journalPages.push(url.searchParams.get("after") ?? "");
+    await route.continue({ url: url.toString() });
+  });
+
   await login(page);
   await page.getByRole("link", { name: "Диалоги" }).click();
   await expect(page.getByRole("heading", { name: /^Диалоги/ })).toBeVisible();
@@ -221,6 +230,9 @@ test("диалоги: список, ход по шагам, оценка отв�
   await expect(steps).toContainText("suggest_replies");
   await expect(steps).toContainText("быстрые ответы");
   await expect(steps.getByRole("listitem").last()).toContainText("итог completed");
+  // Были запросы с курсором — журнал пришёл несколькими страницами и показан целиком.
+  expect(journalPages.filter(Boolean).length).toBeGreaterThan(0);
+  await expect(page.getByText("Журнал показан не полностью")).toHaveCount(0);
 
   // Плохая оценка с комментарием → диалог в фильтре «только с плохой оценкой».
   await answer.getByLabel("Комментарий к оценке").fill("не ответил на вопрос");

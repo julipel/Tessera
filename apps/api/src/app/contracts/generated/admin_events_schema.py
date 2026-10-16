@@ -48,10 +48,11 @@ class AgentEventItem(BaseModel):
 
 class AgentEventList(BaseModel):
     """
-    Ответ GET /v1/admin/tenants/{tenant_id}/events: события в порядке ходов (ts) и внутри хода (seq).
+    Ответ GET /v1/admin/tenants/{tenant_id}/events: страница событий в порядке ходов (ts) и внутри хода (seq). next_after — курсор следующей страницы (параметр after), null — страница последняя.
     """
 
     model_config = ConfigDict(
         extra="forbid",
     )
     events: list[AgentEventItem]
+    next_after: str | None

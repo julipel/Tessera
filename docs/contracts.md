@@ -481,13 +481,15 @@ agent_config_version, messages, preview, ratings {good, bad}}`: `messages` — �
 ### Журнал хода — роль `viewer`
 
 ```
-GET /v1/admin/tenants/{tenant_id}/events?conversation_id=…&turn_id=…&trace_id=…
-  → 200 AgentEventList {events: AgentEventItem[]}   # admin_events.schema.json
-  → 422 invalid_input — не задан ни один фильтр
+GET /v1/admin/tenants/{tenant_id}/events?conversation_id=…&turn_id=…&trace_id=…&after=…&limit=1000
+  → 200 AgentEventList {events: AgentEventItem[], next_after: string | null}   # admin_events.schema.json
+  → 422 invalid_input — не задан ни один фильтр, неверный курсор, limit вне 1…1000
 ```
 
-Фильтры применяются вместе; события — в порядке ходов (`ts`) и внутри хода (`seq`), не больше
-1000. `trace_id` — `X-Trace-Id` ответа, в котором шёл ход (заголовок запроса или сгенерированный).
+Фильтры применяются вместе; события — по времени события (`ts`), при равном `ts` — по
+`turn_id` и `seq`, страницами до `limit` (по умолчанию и максимум 1000). Следующая
+страница — `after` = `next_after` предыдущей; `next_after: null` — страница последняя.
+`trace_id` — `X-Trace-Id` ответа, в котором шёл ход (заголовок запроса или сгенерированный).
 Ход пишет журнал вместе с ответом ассистента (одна транзакция): ход без записанного ответа
 в журнале не виден.
 

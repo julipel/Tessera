@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   AdminMessage,
   AdminToolCall,
@@ -50,7 +50,11 @@ export function ConversationView({
 }) {
   const { api, expire } = session;
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
-  const [turns, setTurns] = useState<Map<string, AgentEventItem[]>>(new Map());
+  const [events, setEvents] = useState<AgentEventItem[]>([]);
+  // Курсор продолжения журнала: длинный журнал грузится частями (REVIEW.md: O-8).
+  const [journalAfter, setJournalAfter] = useState<string | null>(null);
+  const [journalLoading, setJournalLoading] = useState(false);
+  const turns = useMemo(() => turnsByMessage(events), [events]);
   const [problem, setProblem] = useState<Problem | null>(null);
 
   const fail = useCallback(
@@ -60,12 +64,27 @@ export function ConversationView({
 
   useEffect(() => {
     Promise.all([api.getConversation(tenantId, conversationId), api.listEvents(tenantId, conversationId)])
-      .then(([conversation, { events }]) => {
+      .then(([conversation, journal]) => {
         setDetail(conversation);
-        setTurns(turnsByMessage(events));
+        setEvents(journal.events);
+        setJournalAfter(journal.nextAfter);
       })
       .catch(fail);
   }, [api, tenantId, conversationId, fail]);
+
+  async function loadMoreJournal() {
+    if (!journalAfter) return;
+    setJournalLoading(true);
+    try {
+      const journal = await api.listEvents(tenantId, conversationId, journalAfter);
+      setEvents((prev) => [...prev, ...journal.events]);
+      setJournalAfter(journal.nextAfter);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setJournalLoading(false);
+    }
+  }
 
   function rated(messageId: string, rating: MessageRating | null) {
     setDetail((prev) => prev && withRating(prev, messageId, rating));
@@ -96,6 +115,19 @@ export function ConversationView({
         </p>
       </div>
       {problem && <ProblemView problem={problem} title="Ошибка" />}
+      {journalAfter && (
+        <div role="status" className="flex flex-wrap items-center gap-2 text-sm text-chat-muted">
+          <span>Журнал загружен не полностью: у последних ответов шагов хода пока нет.</span>
+          <button
+            type="button"
+            onClick={loadMoreJournal}
+            disabled={journalLoading}
+            className="text-chat-primary hover:underline disabled:opacity-50"
+          >
+            {journalLoading ? "Загрузка…" : "Догрузить журнал"}
+          </button>
+        </div>
+      )}
       <details className="rounded-chat border border-chat-border bg-chat-surface p-3 text-sm">
         <summary className="cursor-pointer font-medium">Состояние и сводка</summary>
         <p className="mt-2 text-chat-muted">Сводка ранней истории:</p>

@@ -89,6 +89,28 @@ class LimitsConfig(BaseModel):
     """
 
 
+class RetentionConfig(BaseModel):
+    """
+    Сроки хранения данных посетителей, в днях (ADR-0043). Задаёт тенант как оператор ПДн; бессрочного хранения нет. Удаляет ежедневная задача воркера.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    conversations_days: Annotated[int | None, Field(ge=1, le=1825)] = 180
+    """
+    Диалог удаляется через столько дней после последнего сообщения — вместе с сообщениями, вызовами инструментов, оценками и журналом хода.
+    """
+    agent_events_days: Annotated[int | None, Field(ge=1, le=1825)] = 90
+    """
+    Журнал хода (разбор по шагам в админке). Действует не дольше conversations_days.
+    """
+    leads_days: Annotated[int | None, Field(ge=1, le=1825)] = 365
+    """
+    Заявка удаляется через столько дней после создания; удаление диалога её не затрагивает.
+    """
+
+
 class MemoryConfig(BaseModel):
     """
     Сводка ранней истории (architecture.md §7): когда история после прошлой сводки длиннее порога, старая часть сворачивается в сводку, последние ходы остаются целиком.
@@ -377,3 +399,4 @@ class AgentConfig(BaseModel):
     knowledge: KnowledgeConfig | None = None
     memory: MemoryConfig | None = None
     branding: BrandingConfig | None = None
+    retention: RetentionConfig | None = None

@@ -27,8 +27,9 @@ class LeadRecord(TenantScopedBase):
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE"), index=True
     )
-    conversation_id: Mapped[UUID] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    # SET NULL: диалог удаляется по своему сроку хранения, заявка живёт свой (ADR-0043).
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), index=True
     )
     form_key: Mapped[str] = mapped_column(String(64))
     fields: Mapped[dict[str, str]] = mapped_column(JSONB)

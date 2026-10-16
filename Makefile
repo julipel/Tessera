@@ -6,8 +6,8 @@ HAS_API := $(wildcard $(API)/pyproject.toml)
 HAS_WEB := $(wildcard $(WEB)/package.json)
 
 .PHONY: up down ps install check check-fast test lint-py typecheck-py arch lint-web typecheck-web test-web \
-        contracts contracts-check migrate migration eval eval-diff loadtest demo-public seed sync pilot admin-user dev-api dev-web worker \
-        deploy-build deploy-up deploy-seed deploy-sync deploy-admin-user deploy-ps deploy-logs deploy-backup
+        contracts contracts-check migrate migration eval eval-diff loadtest demo-public seed sync retention pilot admin-user dev-api dev-web worker \
+        deploy-build deploy-up deploy-seed deploy-sync deploy-retention deploy-admin-user deploy-ps deploy-logs deploy-backup
 
 # --wait: команда завершается, когда все сервисы прошли healthcheck
 up:
@@ -88,6 +88,11 @@ admin-user:
 sync:
 	cd $(API) && uv run python -m app.cli sync $(t) $(if $(s),--source $(s),)
 
+# Чистка данных посетителей по срокам хранения (ADR-0043) — то же, что ежедневный cron воркера.
+# make retention [t="demo-beauty"] [dry=1] — dry=1 только считает (удаление откатывается).
+retention:
+	cd $(API) && uv run python -m app.cli retention $(t) $(if $(dry),--dry-run,)
+
 # Тенанты, источники и их индексация с нуля: после make up.
 pilot: migrate seed sync
 
@@ -142,6 +147,9 @@ deploy-seed:
 # make deploy-sync [t="demo-beauty"] [s="kb"] — как make sync, внутри контейнера.
 deploy-sync:
 	$(DEPLOY) run --rm api python -m app.cli sync $(t) $(if $(s),--source $(s),)
+
+deploy-retention:
+	$(DEPLOY) run --rm api python -m app.cli retention $(t) $(if $(dry),--dry-run,)
 
 # make deploy-admin-user email=a@b.c [args="--tenant demo-beauty=viewer"] — пароль вводится.
 deploy-admin-user:

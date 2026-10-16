@@ -477,7 +477,8 @@ Message(id, conversation_id, tenant_id, role, status, content, input JSONB, bloc
         client_message_id, created_at)  # input — UserInput (user); blocks — текст/компоненты
                                         # в порядке стрима (assistant); content — плоский текст
 ToolCall(id, message_id, tenant_id, name, arguments JSONB, result JSONB, error, duration_ms)
-Lead(id, tenant_id, conversation_id, form_key, fields JSONB, created_at)  # create_lead
+Lead(id, tenant_id, conversation_id?, form_key, fields JSONB, created_at)  # create_lead;
+     # conversation_id → NULL, когда диалог удалён по сроку хранения (ADR-0043)
 AgentEvent(id, tenant_id, conversation_id, turn_id, trace_id, type, payload JSONB, ts)
 MessageRating(id, tenant_id, conversation_id, message_id, rating, comment, rated_by,
               rated_by_email, updated_at)  # оценка ответа сотрудником, одна на сообщение
@@ -485,6 +486,10 @@ AdminUser(id, email, password_hash, is_superadmin, is_active, created_at)  # б�
 AdminMembership(id, tenant_id, user_id, role, created_at)   # одна роль на тенант
 AdminSession(id, user_id, token_hash, expires_at, created_at)  # без tenant_id, sha256 токена
 ```
+
+Сроки хранения данных посетителей (ADR-0043) — `retention` в AgentConfig: диалоги (каскадом
+сообщения, вызовы, оценки, журнал), журнал хода, заявки. Удаляет ежедневный cron воркера
+порциями с commit; вручную — `make retention [dry=1]`.
 
 ## 12. Надёжность
 

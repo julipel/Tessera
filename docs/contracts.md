@@ -317,6 +317,10 @@ limits: { max_steps: 6, max_tool_calls_per_step: 4, turn_timeout_s: 60, max_tool
 # (приблизительные токены, ~3 символа на токен) — старая часть сворачивается, последние
 # keep_recent_turns ходов остаются целиком. summary_model: null — model.primary.
 memory: { summary_threshold_tokens: 6000, keep_recent_turns: 4, summary_model: null }
+# Сроки хранения данных посетителей, дни (ADR-0043), 1–1825, бессрочно нельзя. Диалог — после
+# последнего сообщения (с сообщениями, вызовами, оценками, журналом); журнал хода — не дольше
+# диалогов; заявка — после создания, удаление диалога её не трогает. Удаляет cron воркера.
+retention: { conversations_days: 180, agent_events_days: 90, leads_days: 365 }
 prompt:
   tenant: |
     Ты — консультант компании Example...

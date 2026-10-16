@@ -1,16 +1,19 @@
 """arq-воркер фоновых задач: `make worker` (arq app.worker.WorkerSettings).
 
 Composition root воркера, как `main.py` для API: ресурсы создаются в `startup`
-и лежат в ctx задачи. Задачи ставятся через `ArqSyncQueue` (modules/knowledge).
+и лежат в ctx задачи. Задачи ставятся через `ArqSyncQueue` (modules/knowledge);
+чистка по срокам хранения (ADR-0043) — cron воркера раз в сутки.
 """
 
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, datetime
 from typing import Any, ClassVar, cast
 from uuid import UUID
 
 import structlog
 from arq.connections import RedisSettings
+from arq.cron import CronJob, cron
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -38,12 +41,15 @@ from app.modules.knowledge.public import (
     run_sync,
 )
 from app.modules.shared.public import TenantId, create_engine, create_session_factory
+from app.retention import purge_all_tenants
 from app.settings import Settings, source_secrets_env
 
 logger = structlog.get_logger(__name__)
 
 # На запись failed после дедлайна синхронизации, до того как задачу оборвёт arq.
 SYNC_FINISH_MARGIN_S = 120
+# Чистка по срокам хранения: порции с commit, прерванная продолжится на следующий день.
+RETENTION_TIMEOUT_S = 3600
 
 
 def build_connectors(
@@ -110,6 +116,17 @@ async def sync_source(ctx: dict[str, Any], tenant_id: str, sync_id: str, full: b
             )
 
 
+async def purge_expired_data(ctx: dict[str, Any]) -> None:
+    """Ежедневная чистка данных посетителей по срокам хранения тенантов (ADR-0043)."""
+    session_factory = cast(async_sessionmaker[AsyncSession], ctx["session_factory"])
+    trace_id = str(ctx.get("job_id") or uuid.uuid4())
+    with structlog.contextvars.bound_contextvars(trace_id=trace_id):
+        run = await purge_all_tenants(session_factory, datetime.now(UTC))
+    if run.failed:
+        # Остальные тенанты уже почищены; задача — failed, чтобы сбой был виден в arq.
+        raise RuntimeError(f"retention: сбой у тенантов {', '.join(run.failed)}")
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     settings = Settings()
     configure_logging(settings)
@@ -144,6 +161,11 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 class WorkerSettings:
     functions: ClassVar[list[Callable[..., Awaitable[None]]]] = [sync_source]
+    # Раз в сутки ночью по UTC; unique — одна чистка при нескольких воркерах. Таймаут — свой:
+    # первая чистка накопленного может идти дольше job_timeout синхронизаций.
+    cron_jobs: ClassVar[list[CronJob]] = [
+        cron(purge_expired_data, hour=3, minute=17, timeout=RETENTION_TIMEOUT_S)
+    ]
     on_startup = startup
     on_shutdown = shutdown
     _settings = Settings()

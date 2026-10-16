@@ -58,6 +58,13 @@ make deploy-seed       # если менялись config/tenants или data/pi
 - `make deploy-backup` — дамп Postgres в `backups/<время>.sql.gz` (каталог вне git).
   Восстановление:
   `gunzip -c backups/<файл>.sql.gz | docker compose -f deploy/compose.prod.yml --env-file deploy/.env exec -T postgres psql -U app app`.
+- Сроки хранения данных посетителей (ADR-0043): воркер раз в сутки (03:17 UTC) удаляет
+  диалоги, журнал хода и заявки старше `retention` из конфига тенанта. Перед первым запуском
+  на накопленной базе — `make deploy-retention dry=1` (только счётчики); вручную —
+  `make deploy-retention [t=<slug>]`. Итог — в логах воркера, событие `retention.purged`.
+  Удалённое остаётся в бэкапах до их удаления: храните `backups/` не дольше нужного
+  (срок ротации прибавляется к сроку хранения). В Langfuse задайте срок хранения трейсов
+  в настройках проекта — не дольше срока диалогов.
 - Qdrant отдельно не бэкапится: индекс восстанавливается `make deploy-sync` из источников.
 - Файлы источников из админки лежат в томе `tessera-prod_knowledge-files`.
 - Откат кода: `git checkout <коммит> && make deploy-up`. Миграции назад не откатываются

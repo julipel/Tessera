@@ -10,11 +10,12 @@ from app.modules.shared.kernel import TenantId
 
 @dataclass(frozen=True, slots=True)
 class Lead:
-    """`form_key` — форма из `forms` конфига, по полям которой собрана заявка."""
+    """`form_key` — форма из `forms` конфига, по полям которой собрана заявка.
+    `conversation_id` — None, если диалог уже удалён по сроку хранения (ADR-0043)."""
 
     id: UUID
     tenant_id: TenantId
-    conversation_id: UUID
+    conversation_id: UUID | None
     form_key: str
     fields: Mapping[str, str]
     created_at: datetime

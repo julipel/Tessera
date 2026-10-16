@@ -132,6 +132,8 @@ class MessageRatingRecord(TenantScopedBase):
     __table_args__ = (
         UniqueConstraint("message_id", name="uq_message_ratings_message_id"),
         Index("ix_message_ratings_tenant_id_conversation_id", "tenant_id", "conversation_id"),
+        # Каскад от удаления диалога (FK без tenant_id, ADR-0043).
+        Index("ix_message_ratings_conversation_id", "conversation_id"),
     )
 
     tenant_id: Mapped[UUID] = mapped_column(

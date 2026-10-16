@@ -1,6 +1,7 @@
 """Репозиторий журнала событий хода."""
 
 from collections.abc import Sequence
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import ColumnElement
@@ -28,6 +29,13 @@ class AgentEventRepository(TenantRepository[AgentEventRecord]):
             for e in entries
         )
         await self.session.flush()
+
+    async def purge_before(self, tenant_id: TenantId, before: datetime, limit: int) -> int:
+        """Порция событий журнала старше `before` (срок хранения, ADR-0043)."""
+        return await self._delete_batch(tenant_id, AgentEventRecord.ts < before, limit=limit)
+
+    async def count_before(self, tenant_id: TenantId, before: datetime) -> int:
+        return await self._count(tenant_id, AgentEventRecord.ts < before)
 
     async def find(
         self,

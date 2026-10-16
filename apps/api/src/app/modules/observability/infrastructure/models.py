@@ -17,11 +17,12 @@ class AgentEventRecord(TenantScopedBase):
         Index("ix_agent_events_tenant_id_conversation_id_ts", "tenant_id", "conversation_id", "ts"),
         Index("ix_agent_events_tenant_id_turn_id", "tenant_id", "turn_id"),
         Index("ix_agent_events_tenant_id_trace_id", "tenant_id", "trace_id"),
+        # Удаление по сроку хранения (ADR-0043) и каскад от диалога (FK без tenant_id).
+        Index("ix_agent_events_tenant_id_ts", "tenant_id", "ts"),
+        Index("ix_agent_events_conversation_id", "conversation_id"),
     )
 
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey("tenants.id", ondelete="CASCADE"), index=True
-    )
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
     conversation_id: Mapped[UUID] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE")
     )

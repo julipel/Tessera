@@ -804,6 +804,7 @@ export interface AgentConfig {
   knowledge?: KnowledgeConfig;
   memory?: MemoryConfig;
   branding?: BrandingConfig;
+  retention?: RetentionConfig;
 }
 /**
  * This interface was referenced by `AgentConfig`'s JSON-Schema
@@ -1230,6 +1231,29 @@ export interface BrandingTokens {
    */
   font?: string;
   [k: string]: unknown;
+}
+/**
+ * Сроки хранения данных посетителей, в днях (ADR-0043). Задаёт тенант как оператор ПДн; бессрочного хранения нет. Удаляет ежедневная задача воркера.
+ *
+ * This interface was referenced by `AgentConfig`'s JSON-Schema
+ * via the `definition` "RetentionConfig".
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "RetentionConfig".
+ */
+export interface RetentionConfig {
+  /**
+   * Диалог удаляется через столько дней после последнего сообщения — вместе с сообщениями, вызовами инструментов, оценками и журналом хода.
+   */
+  conversations_days?: number;
+  /**
+   * Журнал хода (разбор по шагам в админке). Действует не дольше conversations_days.
+   */
+  agent_events_days?: number;
+  /**
+   * Заявка удаляется через столько дней после создания; удаление диалога её не затрагивает.
+   */
+  leads_days?: number;
 }
 /**
  * Тело POST /v1/conversations. visitor_id генерирует и хранит клиент.

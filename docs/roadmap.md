@@ -782,6 +782,11 @@
     `agent.turn_budget_exhausted`, показанные вызовы закрываются `tool_finished` с ошибкой;
     обрезка лимитом вывода — лог `agent.output_truncated`, пустой обрезанный шаг — сразу
     fallback без повтора; Chat Completions на 400 по `max_completion_tokens` — `max_tokens`.
+  - [x] **P9-01t Сроки хранения данных посетителей** (`REVIEW.md`: L-3, L-4, O-9, ADR-0043).
+    `retention` в AgentConfig (диалоги 180 дней с последнего сообщения, журнал хода 90, заявки
+    365; 1–1825); cron воркера раз в сутки порциями с commit, `make retention [dry=1]`;
+    `leads.conversation_id` — `SET NULL`; индексы журнала `(tenant_id, ts)` и
+    `(conversation_id)` вместо `tenant_id`; миграция 0018; Langfuse и бэкапы — `deploy.md`.
   - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
     образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
 - [ ] **P9-02 Пилот и разбор.** Реальные диалоги → новые эталоны в evals → итерации P6-03.

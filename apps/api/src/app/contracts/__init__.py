@@ -52,6 +52,7 @@ from app.contracts.generated.agent_config_schema import (
     KnowledgeSearchConfig,
     MemoryConfig,
     ModelConfig,
+    RetentionConfig,
     ScenarioConfig,
     SlotDefinition,
 )
@@ -184,6 +185,7 @@ __all__ = [
     "PublicAssistant",
     "PublicConfig",
     "RateMessageRequest",
+    "RetentionConfig",
     "ScenarioConfig",
     "SendMessageRequest",
     "SlotDefinition",

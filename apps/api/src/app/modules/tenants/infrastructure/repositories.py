@@ -49,6 +49,11 @@ class SqlTenantDirectory:
         record = await self.session.get(TenantRecord, tenant_id)
         return _tenant(record) if record else None
 
+    async def list_all(self) -> list[Tenant]:
+        """Все тенанты по slug — для задач по всем тенантам (срок хранения, ADR-0043)."""
+        records = await self.session.execute(select(TenantRecord).order_by(TenantRecord.slug))
+        return [_tenant(r) for r in records.scalars()]
+
     async def get_by_slug(self, slug: str) -> Tenant | None:
         stmt = select(TenantRecord).where(TenantRecord.slug == slug)
         record = (await self.session.execute(stmt)).scalar_one_or_none()

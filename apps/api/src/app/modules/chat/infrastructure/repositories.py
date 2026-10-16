@@ -1,10 +1,11 @@
 """Репозитории модуля chat (реализации портов из domain/ports.py)."""
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Text, case, func, literal, update
+from sqlalchemy import ColumnElement, Text, case, exists, func, literal, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,8 +61,32 @@ def message_entity(record: MessageRecord) -> ChatMessage:
 PENDING_CONFIRMATION = "pending_confirmation"
 
 
+def _inactive(tenant_id: TenantId, before: datetime) -> tuple[ColumnElement[bool], ...]:
+    """Диалог создан раньше `before` и с тех пор без сообщений (ADR-0043)."""
+    recent = exists(
+        select(MessageRecord.id).where(
+            MessageRecord.tenant_id == tenant_id,
+            MessageRecord.conversation_id == ConversationRecord.id,
+            MessageRecord.created_at >= before,
+        )
+    )
+    return ConversationRecord.created_at < before, ~recent
+
+
 class ConversationRepository(TenantRepository[ConversationRecord]):
     model = ConversationRecord
+
+    async def purge_inactive(self, tenant_id: TenantId, before: datetime, limit: int) -> int:
+        """Порция диалогов без сообщений с `before` и созданных раньше него (срок хранения,
+        ADR-0043). Сообщения, вызовы, оценки и журнал удаляются каскадом по FK, у заявок
+        `conversation_id` обнуляется. Диалог, в который прямо сейчас пишется сообщение
+        (FK держит блокировку строки), пропускается до следующего запуска."""
+        return await self._delete_batch(
+            tenant_id, *_inactive(tenant_id, before), limit=limit, skip_locked=True
+        )
+
+    async def count_inactive(self, tenant_id: TenantId, before: datetime) -> int:
+        return await self._count(tenant_id, *_inactive(tenant_id, before))
 
     async def create(
         self,

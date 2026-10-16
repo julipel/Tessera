@@ -18,7 +18,8 @@
     },
     "knowledge": { "$ref": "#/$defs/KnowledgeConfig" },
     "memory": { "$ref": "#/$defs/MemoryConfig" },
-    "branding": { "$ref": "#/$defs/BrandingConfig" }
+    "branding": { "$ref": "#/$defs/BrandingConfig" },
+    "retention": { "$ref": "#/$defs/RetentionConfig" }
   },
   "required": ["assistant", "model", "limits", "prompt", "tools"],
   "additionalProperties": false,
@@ -168,6 +169,34 @@
           "minimum": 1000,
           "default": 120000,
           "description": "Бюджет хода: вход + выход по всем шагам (ADR-0042). Проверяется после шага; перерасход — мягкое завершение, как при лимите шагов."
+        }
+      },
+      "additionalProperties": false
+    },
+    "RetentionConfig": {
+      "type": "object",
+      "description": "Сроки хранения данных посетителей, в днях (ADR-0043). Задаёт тенант как оператор ПДн; бессрочного хранения нет. Удаляет ежедневная задача воркера.",
+      "properties": {
+        "conversations_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1825,
+          "default": 180,
+          "description": "Диалог удаляется через столько дней после последнего сообщения — вместе с сообщениями, вызовами инструментов, оценками и журналом хода."
+        },
+        "agent_events_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1825,
+          "default": 90,
+          "description": "Журнал хода (разбор по шагам в админке). Действует не дольше conversations_days."
+        },
+        "leads_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1825,
+          "default": 365,
+          "description": "Заявка удаляется через столько дней после создания; удаление диалога её не затрагивает."
         }
       },
       "additionalProperties": false

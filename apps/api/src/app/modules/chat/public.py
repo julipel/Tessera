@@ -6,9 +6,19 @@
 from app.modules.chat.api.admin_router import router as admin_router
 from app.modules.chat.api.router import router
 from app.modules.chat.api.summaries import background_summary
+from app.modules.chat.application.retention import (
+    count_expired,
+    purge_expired,
+    retention_policy,
+)
 from app.modules.chat.application.summaries import SummaryScheduler
 from app.modules.chat.application.turns import TurnRegistry
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, MessageStatus, TurnRequest
+from app.modules.chat.domain.retention import (
+    PurgeResult,
+    RetentionConfigInvalidError,
+    RetentionPolicy,
+)
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent, builtin_turn_agent
 from app.modules.chat.infrastructure.models import (
     ConversationRecord,
@@ -16,17 +26,22 @@ from app.modules.chat.infrastructure.models import (
     MessageRecord,
     ToolCallRecord,
 )
+from app.modules.chat.infrastructure.repositories import ConversationRepository
 from app.modules.chat.infrastructure.turn_directory import RedisTurnDirectory
 
 __all__ = [
     "ChatMessage",
     "ConversationRecord",
+    "ConversationRepository",
     "LoopTurnAgent",
     "MessageRatingRecord",
     "MessageRecord",
     "MessageRole",
     "MessageStatus",
+    "PurgeResult",
     "RedisTurnDirectory",
+    "RetentionConfigInvalidError",
+    "RetentionPolicy",
     "SummaryScheduler",
     "ToolCallRecord",
     "TurnRegistry",
@@ -34,5 +49,8 @@ __all__ = [
     "admin_router",
     "background_summary",
     "builtin_turn_agent",
+    "count_expired",
+    "purge_expired",
+    "retention_policy",
     "router",
 ]

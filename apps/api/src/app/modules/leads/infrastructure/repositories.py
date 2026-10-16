@@ -1,6 +1,7 @@
 """Репозиторий заявок и хранилище для инструмента `create_lead` (порт tools `LeadStore`)."""
 
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy.dialects.postgresql import insert
@@ -64,6 +65,13 @@ class LeadRepository(TenantRepository[LeadRecord]):
     async def list_for_conversation(self, tenant_id: TenantId, conversation_id: UUID) -> list[Lead]:
         records = await self.list(tenant_id, LeadRecord.conversation_id == conversation_id)
         return [_lead(r) for r in sorted(records, key=lambda r: r.created_at)]
+
+    async def purge_before(self, tenant_id: TenantId, before: datetime, limit: int) -> int:
+        """Порция заявок, созданных раньше `before` (срок хранения, ADR-0043)."""
+        return await self._delete_batch(tenant_id, LeadRecord.created_at < before, limit=limit)
+
+    async def count_before(self, tenant_id: TenantId, before: datetime) -> int:
+        return await self._count(tenant_id, LeadRecord.created_at < before)
 
 
 class SqlLeadStore:

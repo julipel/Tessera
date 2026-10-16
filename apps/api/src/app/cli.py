@@ -7,6 +7,7 @@ import getpass
 import os
 import sys
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -52,6 +53,7 @@ from app.modules.tenants.public import (
     load_tenant_spec,
     seed_tenant,
 )
+from app.retention import purge_all_tenants
 from app.settings import Settings
 from app.worker import build_connectors, build_embedder
 
@@ -289,6 +291,30 @@ async def sync(slugs: list[str], names: list[str], full: bool, settings: Setting
     return ok
 
 
+async def retention(slugs: list[str], dry_run: bool, settings: Settings) -> bool:
+    """Чистка по срокам хранения (ADR-0043) в этом процессе — то же, что cron воркера.
+    False — тенант из `slugs` не найден или его чистка упала."""
+    engine = create_engine(settings.database_url)
+    try:
+        run = await purge_all_tenants(
+            create_session_factory(engine), datetime.now(UTC), slugs=slugs, dry_run=dry_run
+        )
+    finally:
+        await engine.dispose()
+    prefix = "удалится" if dry_run else "удалено"
+    for slug, result in run.results.items():
+        print(
+            f"{slug}: {prefix} диалогов {result.conversations}, событий журнала "
+            f"{result.agent_events}, заявок {result.leads}"
+        )
+    for slug in run.failed:
+        print(f"{slug}: сбой чистки — см. лог retention.failed", file=sys.stderr)
+    missing = sorted(set(slugs) - run.results.keys() - set(run.failed))
+    for slug in missing:
+        print(f"{slug}: тенант не найден", file=sys.stderr)
+    return not missing and not run.failed
+
+
 async def _named_sources(
     session_factory: async_sessionmaker[AsyncSession], slug: str
 ) -> tuple[TenantId, dict[str, UUID]] | None:
@@ -357,6 +383,13 @@ def main(argv: list[str] | None = None) -> int:
         help="--no-active — отключить вход, --active — включить",
     )
     user_cmd.add_argument("--reset-password", action="store_true", help="задать новый пароль")
+    retention_cmd = sub.add_parser(
+        "retention", help="удалить данные посетителей старше сроков хранения (ADR-0043)"
+    )
+    retention_cmd.add_argument("slugs", nargs="*", help="по умолчанию — все тенанты")
+    retention_cmd.add_argument(
+        "--dry-run", action="store_true", help="только посчитать: удаление откатывается"
+    )
     sub.add_parser("ensure-db", help="создать базу из DATABASE_URL, если её нет")
     args = parser.parse_args(argv)
 
@@ -368,6 +401,9 @@ def main(argv: list[str] | None = None) -> int:
         created = asyncio.run(ensure_database(url))
         print(f"{make_url(url).database}: {'создана' if created else 'уже есть'}")
         return 0
+
+    if args.command == "retention":
+        return 0 if asyncio.run(retention(args.slugs, args.dry_run, Settings())) else 1
 
     if args.command == "sync":
         try:

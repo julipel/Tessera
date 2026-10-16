@@ -1,9 +1,10 @@
 """Базовый репозиторий: каждый запрос ограничен тенантом."""
 
 from collections.abc import Sequence
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, select
+from sqlalchemy import ColumnElement, CursorResult, Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.shared.domain.errors import NotFoundError, TenantMismatchError
@@ -46,6 +47,36 @@ class TenantRepository[ModelT: TenantScopedBase]:
         self.session.add(obj)
         await self.session.flush()
         return obj
+
+    async def _delete_batch(
+        self,
+        tenant_id: TenantId,
+        *criteria: ColumnElement[bool],
+        limit: int,
+        skip_locked: bool = False,
+    ) -> int:
+        """Удаляет не больше `limit` строк тенанта по условиям — порция для фоновой чистки
+        (ADR-0043): короткая транзакция, без блокировки всей выборки. `skip_locked` —
+        строки, занятые другими транзакциями, пропускаются. Возвращает число строк."""
+        ids = select(self.model.id).where(self.model.tenant_id == tenant_id, *criteria).limit(limit)
+        if skip_locked:
+            ids = ids.with_for_update(skip_locked=True)
+        stmt = (
+            delete(self.model)
+            .where(self.model.tenant_id == tenant_id, self.model.id.in_(ids.scalar_subquery()))
+            # Объекты в сессии не держим — синхронизировать нечего, без лишнего RETURNING.
+            .execution_options(synchronize_session=False)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        return result.rowcount
+
+    async def _count(self, tenant_id: TenantId, *criteria: ColumnElement[bool]) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(self.model)
+            .where(self.model.tenant_id == tenant_id, *criteria)
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
 
     async def delete(self, tenant_id: TenantId, id: UUID) -> bool:
         obj = await self.get(tenant_id, id)

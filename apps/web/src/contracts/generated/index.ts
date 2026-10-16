@@ -952,6 +952,14 @@ export interface LimitsConfig {
   max_tool_calls_per_step?: number;
   turn_timeout_s?: number;
   max_tool_retries?: number;
+  /**
+   * Лимит вывода модели на один шаг (ADR-0042). У reasoning-моделей в него входят и токены рассуждений.
+   */
+  max_output_tokens?: number;
+  /**
+   * Бюджет хода: вход + выход по всем шагам (ADR-0042). Проверяется после шага; перерасход — мягкое завершение, как при лимите шагов.
+   */
+  max_turn_tokens?: number;
 }
 /**
  * This interface was referenced by `AgentConfig`'s JSON-Schema

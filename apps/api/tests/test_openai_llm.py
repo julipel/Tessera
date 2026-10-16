@@ -470,3 +470,60 @@ async def test_stream_without_finish_reason_is_retryable(body: str) -> None:
 
     assert raised.value.retryable
     assert not any(isinstance(item, ResponseCompleted) for item in received)
+
+
+# --- лимит вывода: max_completion_tokens → max_tokens (ADR-0042) ---
+
+
+class RejectsMaxCompletionTokens(Server):
+    """Совместимый API, знающий только старый max_tokens."""
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        response = super().__call__(request)
+        if "max_completion_tokens" in self.requests[-1]:
+            return httpx2.Response(
+                400, json={"error": {"message": "Unknown parameter: 'max_completion_tokens'."}}
+            )
+        return response
+
+
+def limits_sent(server: Server) -> list[tuple[int | None, int | None]]:
+    return [(b.get("max_completion_tokens"), b.get("max_tokens")) for b in server.requests]
+
+
+async def test_max_output_tokens_sent_as_max_completion_tokens() -> None:
+    server = Server(sse(chunk({"content": "ok"}, finish="stop")))
+
+    await collect(llm_for(server), request(max_output_tokens=512))
+
+    assert limits_sent(server) == [(512, None)]
+
+
+async def test_rejected_max_completion_tokens_retried_as_max_tokens_and_remembered() -> None:
+    server = RejectsMaxCompletionTokens(sse(chunk({"content": "ok"}, finish="stop")))
+    llm = llm_for(server)
+
+    first = await collect(llm, request(max_output_tokens=512))
+    await collect(llm, request(max_output_tokens=512))
+
+    assert completed(first).response.text == "ok"
+    assert limits_sent(server) == [(512, None), (None, 512), (None, 512)]
+
+
+async def test_both_temperature_and_max_completion_tokens_rejected() -> None:
+    class RejectsBoth(RejectsMaxCompletionTokens):
+        def __call__(self, request: httpx2.Request) -> httpx2.Response:
+            response = super().__call__(request)
+            if response.status_code == 200 and "temperature" in self.requests[-1]:
+                return httpx2.Response(400, json=UNSUPPORTED_TEMPERATURE)
+            return response
+
+    server = RejectsBoth(sse(chunk({"content": "ok"}, finish="stop")))
+
+    chunks = await collect(llm_for(server), request(temperature=0.3, max_output_tokens=512))
+
+    assert completed(chunks).response.text == "ok"
+    assert [
+        (b.get("temperature"), b.get("max_completion_tokens"), b.get("max_tokens"))
+        for b in server.requests
+    ] == [(0.3, 512, None), (0.3, None, 512), (None, None, 512)]

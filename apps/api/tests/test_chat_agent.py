@@ -17,6 +17,7 @@ from app.modules.agent.public import (
     DialogStateUpdated,
     FakeLLM,
     FakeReply,
+    FinishReason,
     LLMClients,
     LLMError,
     LLMRequest,
@@ -28,7 +29,9 @@ from app.modules.agent.public import (
     ToolFinished,
     ToolResultMessage,
     ToolStarted,
+    TurnCompleted,
     TurnTimeoutError,
+    Usage,
     UserMessage,
 )
 from app.modules.chat.domain.entities import ChatMessage, MessageRole, MessageStatus, TurnRequest
@@ -540,6 +543,39 @@ async def test_max_tool_calls_per_step_from_config() -> None:
     assert first.is_error is False
     assert second.is_error is True
     assert "не больше 1 вызовов" in second.content
+
+
+async def test_token_limits_from_config() -> None:
+    call = ToolCall(
+        id="c1", name="update_dialog_state", arguments={"facts": ["факт"]}, raw_arguments="{}"
+    )
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(call,), usage=Usage(1500, 100)),
+            FakeReply(text="Не дойдёт до модели."),
+        ]
+    )
+
+    events = [
+        e
+        async for e in builtin_turn_agent(lambda _: llm).run_turn(
+            limits_request({"max_output_tokens": 512, "max_turn_tokens": 1000})
+        )
+    ]
+
+    assert [r.max_output_tokens for r in llm.requests] == [512]
+    assert llm.remaining == 1
+    done = events[-1]
+    assert isinstance(done, TurnCompleted) and done.finish is FinishReason.STEP_LIMIT
+
+
+async def test_token_limits_default_when_absent_in_config() -> None:
+    llm = FakeLLM([FakeReply(text="Привет!")])
+
+    async for _ in builtin_turn_agent(lambda _: llm).run_turn(limits_request({})):
+        pass
+
+    assert llm.requests[0].max_output_tokens == 4096
 
 
 @pytest.mark.parametrize(

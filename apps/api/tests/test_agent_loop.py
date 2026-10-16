@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, MutableMapping, Sequence
 from typing import Any
 from uuid import uuid4
 
@@ -20,6 +20,7 @@ from app.modules.agent.public import (
     FakeReply,
     FinishReason,
     LLMRequest,
+    StopReason,
     SuggestionsOffered,
     ToolCall,
     ToolExecutor,
@@ -120,6 +121,8 @@ def context(
     max_tool_retries: int = 2,
     turn_timeout_s: float = 60,
     max_tool_calls_per_step: int = 4,
+    max_output_tokens: int = 4096,
+    max_turn_tokens: int = 120_000,
     state: DialogState | None = None,
     confirmation: ConfirmationReply | None = None,
 ) -> TurnContext:
@@ -135,6 +138,8 @@ def context(
             max_tool_retries=max_tool_retries,
             turn_timeout_s=turn_timeout_s,
             max_tool_calls_per_step=max_tool_calls_per_step,
+            max_output_tokens=max_output_tokens,
+            max_turn_tokens=max_turn_tokens,
         ),
         fallback_message=FALLBACK,
         temperature=0.3,
@@ -180,6 +185,7 @@ async def test_direct_answer_streams_text_without_tools() -> None:
             messages=HISTORY,
             tools=SCHEMAS,
             temperature=0.3,
+            max_output_tokens=4096,
         )
     ]
     assert tools.batches == []
@@ -733,3 +739,117 @@ async def test_calls_over_step_limit_are_rejected_without_spending_retries() -> 
     assert all(m.is_error and "не больше 4 вызовов" in m.content for m in over)
     finished = [e for e in events if isinstance(e, ToolFinished)]
     assert [e.ok for e in finished[:6]] == [True] * 4 + [False] * 2
+
+
+# --- Бюджет токенов хода (ADR-0042) ---
+
+
+async def test_max_output_tokens_passed_to_every_step() -> None:
+    llm = FakeLLM([FakeReply(tool_calls=(call("call_1"),)), FakeReply(text="Готово.")])
+
+    await run(llm, FakeTools(), context(max_output_tokens=512))
+
+    assert [r.max_output_tokens for r in llm.requests] == [512, 512]
+
+
+async def test_turn_token_budget_stops_before_next_step(
+    debug_logs: list[MutableMapping[str, Any]],
+) -> None:
+    """Шаг перерасходовал бюджет и просит инструменты: они не исполняются, следующего шага
+    нет — мягкое завершение, как при лимите шагов."""
+    llm = FakeLLM(
+        [
+            FakeReply(text="Ищу. ", tool_calls=(call("call_1"),), usage=Usage(600, 100)),
+            FakeReply(text="Ещё ищу. ", tool_calls=(call("call_2"),), usage=Usage(700, 100)),
+        ]
+    )
+    tools = FakeTools()
+
+    events = await run(llm, tools, context(max_turn_tokens=1000))
+
+    assert len(llm.requests) == 2
+    assert [c.id for c in tools.executed] == ["call_1"]
+    # Показанный индикатор call_2 закрыт ошибкой, а не оставлен висеть.
+    (cut,) = [e for e in events if isinstance(e, ToolFinished) and e.tool_call_id == "call_2"]
+    assert cut.ok is False
+    assert cut.error_code == "validation_error"
+    assert cut.error_message is not None and "бюджет" in cut.error_message
+    assert events[-2] == AnswerDelta(FALLBACK)
+    done = completed(events)
+    assert done.finish is FinishReason.STEP_LIMIT
+    assert done.usage == Usage(1300, 200)
+    (budget,) = [log for log in debug_logs if log["event"] == "agent.turn_budget_exhausted"]
+    assert budget["used_tokens"] == 1500
+    assert budget["max_turn_tokens"] == 1000
+    assert budget["log_level"] == "warning"
+
+
+async def test_turn_token_budget_does_not_cut_final_answer() -> None:
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(call("call_1"),), usage=Usage(400, 50)),
+            FakeReply(text="Вот подборка.", usage=Usage(900, 100)),
+        ]
+    )
+
+    events = await run(llm, FakeTools(), context(max_turn_tokens=1000))
+
+    assert text(events) == "Вот подборка."
+    assert completed(events).finish is FinishReason.ANSWERED
+
+
+async def test_turn_within_token_budget_runs_all_steps() -> None:
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(call("call_1"),), usage=Usage(400, 50)),
+            FakeReply(tool_calls=(call("call_2"),), usage=Usage(400, 50)),
+            FakeReply(text="Готово.", usage=Usage(400, 50)),
+        ]
+    )
+
+    events = await run(llm, FakeTools(), context(max_turn_tokens=1000))
+
+    assert len(llm.requests) == 3
+    assert completed(events).finish is FinishReason.ANSWERED
+
+
+async def test_step_cut_by_output_limit_is_logged(
+    debug_logs: list[MutableMapping[str, Any]],
+) -> None:
+    llm = FakeLLM([FakeReply(text="Длинный ответ, обрезанный", stop_reason=StopReason.MAX_TOKENS)])
+
+    events = await run(llm, FakeTools(), context(max_output_tokens=16))
+
+    assert text(events) == "Длинный ответ, обрезанный"
+    assert completed(events).finish is FinishReason.ANSWERED
+    (truncated,) = [log for log in debug_logs if log["event"] == "agent.output_truncated"]
+    assert truncated["max_output_tokens"] == 16
+    assert truncated["step"] == 1
+
+
+async def test_turn_token_budget_reached_exactly_continues() -> None:
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(call("call_1"),), usage=Usage(900, 100)),
+            FakeReply(text="Готово."),
+        ]
+    )
+
+    events = await run(llm, FakeTools(), context(max_turn_tokens=1000))
+
+    assert completed(events).finish is FinishReason.ANSWERED
+
+
+async def test_empty_step_cut_by_output_limit_is_not_retried(
+    debug_logs: list[MutableMapping[str, Any]],
+) -> None:
+    """Рассуждения съели весь лимит вывода: повтор с тем же лимитом бесполезен — сразу fallback."""
+    llm = FakeLLM([FakeReply(stop_reason=StopReason.MAX_TOKENS), FakeReply(text="Не дойдёт.")])
+
+    events = await run(llm, FakeTools(), context(max_output_tokens=256))
+
+    assert len(llm.requests) == 1
+    assert text(events) == FALLBACK
+    assert completed(events).finish is FinishReason.EMPTY_RESPONSE
+    (empty,) = [log for log in debug_logs if log["event"] == "agent.empty_response"]
+    assert empty["stop_reason"] == "max_tokens"

@@ -79,6 +79,14 @@ class LimitsConfig(BaseModel):
     max_tool_calls_per_step: Annotated[int | None, Field(ge=1)] = 4
     turn_timeout_s: Annotated[float | None, Field(gt=0.0)] = 60
     max_tool_retries: Annotated[int | None, Field(ge=0)] = 2
+    max_output_tokens: Annotated[int | None, Field(ge=256)] = 4096
+    """
+    Лимит вывода модели на один шаг (ADR-0042). У reasoning-моделей в него входят и токены рассуждений.
+    """
+    max_turn_tokens: Annotated[int | None, Field(ge=1000)] = 120000
+    """
+    Бюджет хода: вход + выход по всем шагам (ADR-0042). Проверяется после шага; перерасход — мягкое завершение, как при лимите шагов.
+    """
 
 
 class MemoryConfig(BaseModel):

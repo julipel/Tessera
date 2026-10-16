@@ -82,6 +82,8 @@ AGENT_CONFIG: dict[str, Any] = {
         "max_tool_calls_per_step": 4,
         "turn_timeout_s": 60,
         "max_tool_retries": 2,
+        "max_output_tokens": 4096,
+        "max_turn_tokens": 120000,
     },
     "prompt": {
         "tenant": "Ты — консультант компании Example...",

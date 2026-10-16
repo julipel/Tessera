@@ -25,6 +25,7 @@ from app.modules.agent.domain.llm import (
     LLMRequest,
     LLMResponse,
     ResponseCompleted,
+    StopReason,
     TextDelta,
     ToolCall,
     ToolCallStarted,
@@ -77,6 +78,7 @@ class AgentLoop:
                 messages=messages,
                 tools=schemas,
                 temperature=ctx.temperature,
+                max_output_tokens=ctx.limits.max_output_tokens,
             )
             response: LLMResponse | None = None
             stream = self._llm.stream(request)
@@ -94,12 +96,31 @@ class AgentLoop:
             if response is None:
                 raise RuntimeError("LLMClient: стрим завершился без ResponseCompleted")
             usage = _add(usage, response.usage)
+            if response.stop_reason is StopReason.MAX_TOKENS:
+                # Текст шага уже у клиента — ответ не отзываем, только отмечаем обрезку.
+                logger.warning(
+                    "agent.output_truncated",
+                    tenant_id=str(ctx.tenant_id),
+                    conversation_id=str(ctx.conversation_id),
+                    turn_id=str(ctx.turn_id),
+                    step=steps,
+                    max_output_tokens=ctx.limits.max_output_tokens,
+                )
 
             if not response.tool_calls and not visible:
                 # Пустой ответ хода — один повтор шага, затем fallback-фраза (architecture.md
                 # §12). Пустой последний шаг после текста или компонентов — обычный конец хода.
-                logger.warning("agent.empty_response", turn_id=str(ctx.turn_id), step=steps)
-                if empty_retried:
+                # Пустой из-за лимита вывода (рассуждения reasoning-модели съели весь
+                # max_output_tokens) не повторяется: с тем же лимитом повтор тоже пуст (ADR-0042).
+                logger.warning(
+                    "agent.empty_response",
+                    tenant_id=str(ctx.tenant_id),
+                    conversation_id=str(ctx.conversation_id),
+                    turn_id=str(ctx.turn_id),
+                    step=steps,
+                    stop_reason=response.stop_reason.value,
+                )
+                if empty_retried or response.stop_reason is StopReason.MAX_TOKENS:
                     finish = FinishReason.EMPTY_RESPONSE
                     break
                 empty_retried = True
@@ -107,6 +128,27 @@ class AgentLoop:
 
             if not response.tool_calls:
                 finish = FinishReason.ANSWERED
+                break
+
+            used = usage.input_tokens + usage.output_tokens
+            if used > ctx.limits.max_turn_tokens:
+                # Бюджет хода исчерпан (ADR-0042): вызовы шага не исполняются, следующего
+                # шага нет — мягкое завершение, как при лимите шагов.
+                logger.warning(
+                    "agent.turn_budget_exhausted",
+                    tenant_id=str(ctx.tenant_id),
+                    conversation_id=str(ctx.conversation_id),
+                    turn_id=str(ctx.turn_id),
+                    step=steps,
+                    used_tokens=used,
+                    max_turn_tokens=ctx.limits.max_turn_tokens,
+                )
+                # Индикатор вызовов уже показан (ToolStarted из стрима) — закрываем каждый,
+                # чтобы журнал и SSE не остались с висячим tool_started.
+                for call in response.tool_calls:
+                    for event in _reported(call, _over_budget(call), 0):
+                        yield event
+                finish = FinishReason.STEP_LIMIT
                 break
 
             started = time.perf_counter()
@@ -224,6 +266,16 @@ def _over_limit(call: ToolCall, limit: int) -> ToolResult:
             code="validation_error",
             message=f"{call.name}: за шаг исполняется не больше {limit} вызовов, этот не "
             "исполнен; если он нужен, вызови его следующим шагом",
+            retryable=False,
+        )
+    )
+
+
+def _over_budget(call: ToolCall) -> ToolResult:
+    return ToolResult(
+        error=ToolError(
+            code="validation_error",
+            message=f"{call.name}: не исполнен — исчерпан бюджет токенов хода",
             retryable=False,
         )
     )

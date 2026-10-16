@@ -31,7 +31,8 @@ class FakeReply:
     - `text` режется на куски по словам; `chunks` задаёт куски явно (тогда `text` игнорируется);
     - `delay_s` — пауза перед каждым чанком (таймауты, отмена);
     - `fail_after_chunks` — поднять `error` после стольких текстовых чанков (обрыв стрима);
-    - `provider_items` — непрозрачные данные провайдера в ответе (ADR-0010).
+    - `provider_items` — непрозрачные данные провайдера в ответе (ADR-0010);
+    - `stop_reason` — причина остановки; по умолчанию TOOL_CALLS при вызовах, иначе END_TURN.
     """
 
     text: str = ""
@@ -42,6 +43,7 @@ class FakeReply:
     fail_after_chunks: int | None = None
     error: LLMError | None = None
     provider_items: tuple[ProviderItem, ...] = ()
+    stop_reason: StopReason | None = None
 
     def text_chunks(self) -> list[str]:
         if self.chunks is not None:
@@ -94,7 +96,8 @@ class FakeLLM:
             LLMResponse(
                 text=text,
                 tool_calls=step.tool_calls,
-                stop_reason=StopReason.TOOL_CALLS if step.tool_calls else StopReason.END_TURN,
+                stop_reason=step.stop_reason
+                or (StopReason.TOOL_CALLS if step.tool_calls else StopReason.END_TURN),
                 usage=step.usage or Usage(input_tokens=0, output_tokens=len(chunks)),
                 provider_items=step.provider_items,
             )

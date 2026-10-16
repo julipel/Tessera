@@ -10,11 +10,16 @@
 на 400 с `param: "temperature"` адаптер один раз повторяет запрос без неё и запоминает модель
 до конца жизни процесса; дальше параметр для неё отбрасывается с debug-логом
 `llm.param_dropped`. Ошибка приходит до начала стрима, повтор не дублирует ответ.
+
+Лимит вывода (ADR-0042) уходит как `max_completion_tokens`. Совместимый API, отклонивший его
+(400 с этим параметром), так же один раз получает повтор со старым `max_tokens`; модель
+запоминается, лог `llm.legacy_max_tokens`.
 """
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+import structlog
 from openai import (
     APIConnectionError,
     APIError,
@@ -50,6 +55,8 @@ from app.modules.agent.domain.llm import (
 from app.modules.agent.infrastructure.llm_arguments import parse_arguments
 from app.modules.agent.infrastructure.sampling import log_dropped_param
 
+logger = structlog.get_logger(__name__)
+
 # 408 Request Timeout, 409 Conflict, 429 Rate Limit — временные, как и 5xx (их же ретраит SDK).
 _RETRYABLE_STATUSES = frozenset({408, 409, 429})
 
@@ -80,6 +87,7 @@ class OpenAILLM:
     def __init__(self, client: AsyncOpenAI) -> None:
         self._client = client
         self._no_temperature: set[str] = set()  # модели, отклонившие temperature
+        self._legacy_max_tokens: set[str] = set()  # модели, отклонившие max_completion_tokens
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
         accumulator = _StreamAccumulator()
@@ -98,27 +106,49 @@ class OpenAILLM:
         if temperature is not None and request.model in self._no_temperature:
             log_dropped_param("openai", request.model, "temperature")
             temperature = None
-        try:
-            return await self._create(request, temperature)
-        except BadRequestError as error:
-            if temperature is None or not rejects_param(error, "temperature"):
-                raise
-            self._no_temperature.add(request.model)
-            log_dropped_param("openai", request.model, "temperature")
-            return await self._create(request, None)
+        legacy = request.model in self._legacy_max_tokens
+        # Не больше одного отката на каждый параметр: temperature и max_completion_tokens.
+        for _ in range(3):
+            try:
+                return await self._create(request, temperature, legacy_max_tokens=legacy)
+            except BadRequestError as error:
+                if temperature is not None and rejects_param(error, "temperature"):
+                    self._no_temperature.add(request.model)
+                    log_dropped_param("openai", request.model, "temperature")
+                    temperature = None
+                elif (
+                    not legacy
+                    and request.max_output_tokens is not None
+                    and _rejects_max_completion_tokens(error)
+                ):
+                    self._legacy_max_tokens.add(request.model)
+                    logger.info("llm.legacy_max_tokens", provider="openai", model=request.model)
+                    legacy = True
+                else:
+                    raise
+        raise AssertionError("unreachable")  # pragma: no cover
 
     async def _create(
-        self, request: LLMRequest, temperature: float | None
+        self, request: LLMRequest, temperature: float | None, *, legacy_max_tokens: bool
     ) -> AsyncStream[ChatCompletionChunk]:
+        limit = given(request.max_output_tokens)
         return await self._client.chat.completions.create(
             model=request.model,
             messages=to_openai_messages(request),
             tools=[to_openai_tool(tool) for tool in request.tools] or omit,
             temperature=given(temperature),
-            max_completion_tokens=given(request.max_output_tokens),
+            # Совместимые API, не знающие max_completion_tokens, получают старый max_tokens.
+            max_completion_tokens=omit if legacy_max_tokens else limit,
+            max_tokens=limit if legacy_max_tokens else omit,
             stream=True,
             stream_options={"include_usage": True},
         )
+
+
+def _rejects_max_completion_tokens(error: BadRequestError) -> bool:
+    """400 совместимого API на max_completion_tokens: формат ошибок у них разный, поэтому
+    достаточно имени параметра в `param` или в тексте ошибки."""
+    return error.param == "max_completion_tokens" or "max_completion_tokens" in error.message
 
 
 def rejects_param(error: BadRequestError, param: str) -> bool:

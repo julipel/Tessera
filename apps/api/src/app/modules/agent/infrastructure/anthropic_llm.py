@@ -70,7 +70,8 @@ _STOP_REASONS = {
 # что в `openai._httpx2.request_exceptions()`: TLS-сбои AnyIO httpx2 пока не переводит в свои.
 _STREAM_TRANSPORT_ERRORS = (httpx2.RequestError, ssl.SSLError, anyio.EndOfStream)
 
-# В Anthropic max_tokens обязателен; используется, если в запросе лимит не задан.
+# В Anthropic max_tokens обязателен; используется, если в запросе лимит не задан (цикл агента
+# и сводка свой лимит передают всегда — ADR-0042).
 DEFAULT_MAX_TOKENS = 4096
 
 

@@ -15,13 +15,17 @@ from app.modules.tools.kernel import ToolResult
 class TurnLimits:
     """`max_tool_retries` — сколько шагов с ошибкой валидации аргументов допускается за ход.
     `turn_timeout_s` — дедлайн хода от начала цикла (модель и инструменты);
-    `max_tool_calls_per_step` — сколько вызовов шага исполняется, остальные отклоняются.
+    `max_tool_calls_per_step` — сколько вызовов шага исполняется, остальные отклоняются;
+    `max_output_tokens` — лимит вывода модели на шаг; `max_turn_tokens` — бюджет хода
+    (вход + выход по всем шагам), проверяется после шага (ADR-0042).
     Значения по умолчанию — как в схеме AgentConfig."""
 
     max_steps: int
     max_tool_retries: int
     turn_timeout_s: float = 60
     max_tool_calls_per_step: int = 4
+    max_output_tokens: int = 4096
+    max_turn_tokens: int = 120_000
 
 
 class TurnTimeoutError(DomainError):

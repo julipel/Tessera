@@ -1,6 +1,8 @@
 """DialogState (P2-09, P6-05, P6-06): слияние патчей, слоты по сценариям, замена фактов,
 JSON для хранения и промпта."""
 
+import pytest
+
 from app.modules.memory.domain.dialog_state import MAX_FACTS
 from app.modules.memory.public import DialogState, PendingConfirmation
 
@@ -91,7 +93,7 @@ def test_partial_patch_keeps_other_parts() -> None:
 def test_dict_roundtrip_omits_empty_parts() -> None:
     state = DialogState(slots={"gift": {"budget": 3000}}, facts=("спешит",))
 
-    assert state.to_dict() == {"slots": {"gift": {"budget": 3000}}, "facts": ["спешит"]}
+    assert state.to_dict() == {"v": 2, "slots": {"gift": {"budget": 3000}}, "facts": ["спешит"]}
     assert DialogState.from_dict(state.to_dict()) == state
     assert DialogState.from_dict({}).is_empty
     assert DialogState.from_dict(None).to_dict() == {}
@@ -136,3 +138,110 @@ def test_pending_confirmation_is_replaced_and_cleared_by_patch() -> None:
     assert state.apply({"pending_confirmation": None}) == DialogState(facts=("спешит",))
     assert DialogState.from_dict(state.to_dict()) == state
     assert state.to_dict()["pending_confirmation"] == pending
+
+
+# --- версия схемы и повреждённое состояние (REVIEW.md: M-3) ---
+
+
+def test_stored_state_has_schema_version_but_prompt_does_not() -> None:
+    state = DialogState(facts=("спешит",), active_scenario="gift")
+
+    assert state.to_dict()["v"] == 2
+    assert "v" not in state.prompt_dict()
+    assert DialogState().to_dict() == {}
+    assert DialogState.parse(state.to_dict()) == (state, [])
+
+
+def test_version_2_keeps_object_slot_inside_scenario() -> None:
+    """В версии 2 слоты всегда по сценариям: слот-объект не путается с сценарием."""
+    saved = {"v": 2, "slots": {"gift": {"address": {"city": "Москва"}}}, "active_scenario": "gift"}
+
+    state, problems = DialogState.parse(saved)
+
+    assert problems == []
+    assert state.slots == {"gift": {"address": {"city": "Москва"}}}
+
+
+def test_version_2_flat_slot_is_a_problem_not_a_migration() -> None:
+    state, problems = DialogState.parse(
+        {"v": 2, "slots": {"budget": 3000}, "active_scenario": "gift"}
+    )
+
+    assert state.slots == {}
+    assert problems == ["slots.budget"]
+
+
+def test_unknown_version_is_read_as_current_with_problem() -> None:
+    state, problems = DialogState.parse({"v": 99, "facts": ["спешит"]})
+
+    assert state.facts == ("спешит",)
+    assert problems == ["v"]
+
+
+@pytest.mark.parametrize(
+    ("saved", "expected_problems", "kept"),
+    [
+        ("not a dict", ["state"], DialogState()),
+        ({"slots": ["budget"]}, ["slots"], DialogState()),
+        ({"facts": "спешит"}, ["facts"], DialogState()),
+        ({"facts": ["спешит", 42]}, ["facts"], DialogState(facts=("спешит",))),
+        ({"shown_entities": {"e1": 1}}, ["shown_entities"], DialogState()),
+        ({"active_scenario": 5}, ["active_scenario"], DialogState()),
+        (
+            {"pending_confirmation": {"tool": "create_lead"}},
+            ["pending_confirmation"],
+            DialogState(),
+        ),
+        (
+            {"pending_confirmation": {"confirm_id": "cf", "tool": "t", "arguments": [1]}},
+            ["pending_confirmation"],
+            DialogState(),
+        ),
+        ({"pending_confirmation": "cf_1"}, ["pending_confirmation"], DialogState()),
+        (
+            {"pending_confirmation": {"confirm_id": "cf", "tool": "t", "arguments": []}},
+            ["pending_confirmation"],
+            DialogState(),
+        ),
+        ({"v": True, "slots": {"budget": 1}}, ["v", "slots.budget"], DialogState()),
+        ({"slots": {"budget": 1}}, ["slots.budget"], DialogState()),
+    ],
+    ids=[
+        "not-mapping",
+        "slots-list",
+        "facts-string",
+        "facts-mixed",
+        "shown-dict",
+        "scenario-int",
+        "pending-no-id",
+        "pending-bad-arguments",
+        "pending-string",
+        "pending-falsy-arguments",
+        "version-bool",
+        "v1-flat-without-scenario",
+    ],
+)
+def test_damaged_part_is_dropped_others_kept(
+    saved: object, expected_problems: list[str], kept: DialogState
+) -> None:
+    state, problems = DialogState.parse(saved)
+
+    assert problems == expected_problems
+    assert state == kept
+
+
+def test_damage_in_one_part_keeps_the_rest() -> None:
+    saved = {
+        "v": 2,
+        "slots": {"gift": {"budget": 3000}},
+        "facts": ["спешит"],
+        "active_scenario": "gift",
+        "pending_confirmation": {"confirm_id": 7},
+    }
+
+    state, problems = DialogState.parse(saved)
+
+    assert problems == ["pending_confirmation"]
+    assert state == DialogState(
+        slots={"gift": {"budget": 3000}}, facts=("спешит",), active_scenario="gift"
+    )

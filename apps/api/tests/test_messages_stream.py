@@ -11,6 +11,7 @@ import pytest
 import structlog
 from fastapi import FastAPI
 from httpx import AsyncClient, Response
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import ClientDisconnect
 
@@ -48,7 +49,7 @@ from app.modules.chat.domain.entities import (
 )
 from app.modules.chat.domain.ports import TurnAgent
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent, builtin_turn_agent
-from app.modules.chat.infrastructure.models import MessageRecord
+from app.modules.chat.infrastructure.models import ConversationRecord, MessageRecord
 from app.modules.chat.infrastructure.repositories import (
     ConversationRepository,
     MessageRepository,
@@ -1061,6 +1062,27 @@ async def _state(session: AsyncSession, tenant_id: TenantId, conversation_id: UU
     return conversation.state
 
 
+async def test_damaged_state_is_repaired_even_without_tools(
+    db_client: AsyncClient, db_session: AsyncSession, use_agent: Any
+) -> None:
+    """M-3: битый JSONB состояния исправляется в БД первым же ходом, даже без инструментов —
+    иначе он оставался бы и ругался в лог на каждом ходе."""
+    beauty = await _tenant(db_session, "beauty", _config("beauty"))
+    created = await db_client.post(URL, json={"visitor_id": "v-1"}, headers=_key("beauty"))
+    conversation_id = UUID(created.json()["conversation_id"])
+    await db_session.execute(
+        update(ConversationRecord)
+        .where(ConversationRecord.id == conversation_id)
+        .values(state={"facts": ["спешит", 42], "pending_confirmation": {"confirm_id": 7}})
+    )
+    llm = FakeLLM([FakeReply(text="Слушаю.")])
+    use_agent(LoopTurnAgent(lambda _: llm, lambda *_: RegistryToolExecutor(ToolRegistry([]))))
+
+    await _send(db_client, conversation_id, {"type": "text", "text": "Привет"}, slug="beauty")
+
+    assert await _state(db_session, beauty, conversation_id) == {"v": 2, "facts": ["спешит"]}
+
+
 async def test_agent_does_not_reask_known_slot(
     db_client: AsyncClient, db_session: AsyncSession, use_agent: Any
 ) -> None:
@@ -1110,6 +1132,7 @@ async def test_agent_does_not_reask_known_slot(
     known = runtime.split("не переспрашивай):")[1]
     assert '"budget": 3000' in known
     assert await _state(db_session, beauty, conversation_id) == {
+        "v": 2,
         "slots": {"skincare": {"budget": 3000}},
         "active_scenario": "skincare",
     }
@@ -1147,6 +1170,7 @@ async def test_state_is_saved_when_turn_is_cancelled(
     # Состояние в клиент не уходит.
     assert all("budget" not in e.model_dump_json() for _, e in events)
     assert await _state(db_session, shop, conversation_id) == {
+        "v": 2,
         "slots": {"skincare": {"budget": 3000}},
         "facts": ["спешит"],
     }
@@ -1441,7 +1465,10 @@ async def test_turn_does_not_restore_confirmation_claimed_by_other_turn(
 
     assert [e.root.type async for e in turn.events()][-1] == "done"
 
-    assert await _state(db_session, forms_tenant, form_conversation) == {"facts": ["спешит"]}
+    assert await _state(db_session, forms_tenant, form_conversation) == {
+        "v": 2,
+        "facts": ["спешит"],
+    }
 
 
 async def test_retry_of_confirmation_claims_it_before_execution(

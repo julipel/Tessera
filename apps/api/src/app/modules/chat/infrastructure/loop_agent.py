@@ -9,12 +9,15 @@ from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+import structlog
+
 from app.contracts import AgentConfig
 from app.modules.agent.public import (
     AgentEvent,
     AgentLoop,
     AssistantMessage,
     ConfirmationReply,
+    DialogStateUpdated,
     FallbackLLM,
     FallbackModel,
     LLMClient,
@@ -53,6 +56,8 @@ from app.modules.tools.public import (
 type LLMForProvider = Callable[[Provider], LLMClient]
 type ToolsForConfig = Callable[[AgentConfig, Language], ToolExecutor]
 
+logger = structlog.get_logger(__name__)
+
 
 class LoopTurnAgent:
     """`llm_for` — клиент по провайдеру из AgentConfig (в приложении — `LLMClients.for_provider`),
@@ -76,7 +81,17 @@ class LoopTurnAgent:
         config = AgentConfig.model_validate(request.agent_config)
         primary = config.model.primary
         limits = config.limits
-        state = DialogState.from_dict(request.dialog_state)
+        state, problems = DialogState.parse(request.dialog_state)
+        if problems:
+            # Повреждённые части отброшены; исправленное состояние уходит событием в начале
+            # хода и записывается в конце, даже если инструменты состояние не меняли.
+            logger.warning(
+                "dialog_state_invalid",
+                tenant_id=str(request.tenant_id),
+                conversation_id=str(request.conversation_id),
+                turn_id=str(request.turn_id),
+                problems=problems,
+            )
         # Диалог без языка (создан до P6-04) — язык по конфигу, как без locale (ADR-0025).
         language = resolve_language(config.assistant, request.language)
         # Слоты неактивных сценариев модели не нужны (ADR-0026); ожидающий вызов — не знание
@@ -128,6 +143,8 @@ class LoopTurnAgent:
             )
         )
         loop = AgentLoop(self._llm(config, trace), self._tools_for(config, language))
+        if problems:
+            yield DialogStateUpdated(state)
         async for event in traced_turn(loop.run_turn(ctx), trace):
             yield event
 

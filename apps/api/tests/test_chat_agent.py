@@ -1,6 +1,6 @@
 """Подключение агента к chat (P2-08): TurnRequest → TurnContext, история для модели, LLMClients."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -42,6 +42,7 @@ from app.modules.chat.infrastructure.loop_agent import (
     confirmation_reply,
     to_llm_messages,
 )
+from app.modules.memory.public import DialogState
 from app.modules.shared.kernel import TenantId
 from app.modules.tools.public import ToolRegistry
 from test_catalog_tools import CREAM, FakeCatalog
@@ -747,3 +748,24 @@ async def test_after_scenario_switch_prompt_has_no_slots_of_previous_scenario() 
     known = known_state(llm.requests[-1])
     assert '"budget": 6000' in known and '"active_scenario": "gift"' in known
     assert "skin_type" not in known
+
+
+async def test_damaged_dialog_state_does_not_break_turn(
+    debug_logs: list[MutableMapping[str, Any]],
+) -> None:
+    """M-3: битый JSONB состояния — ход идёт с уцелевшими частями, повреждение — в лог."""
+    llm = FakeLLM([FakeReply(text="Подберу подарок.")])
+    damaged = {"facts": ["спешит"], "pending_confirmation": {"tool": "create_lead"}}
+
+    events = [
+        e
+        async for e in builtin_turn_agent(lambda _: llm).run_turn(scenario_request("Ну?", damaged))
+    ]
+
+    assert [e.text for e in events if isinstance(e, AnswerDelta)] == ["Подберу ", "подарок."]
+    # Исправленное состояние — первым событием: chat запишет его и без инструментов.
+    assert events[0] == DialogStateUpdated(DialogState(facts=("спешит",)))
+    assert "спешит" in llm.requests[0].system
+    (logged,) = [log for log in debug_logs if log["event"] == "dialog_state_invalid"]
+    assert logged["problems"] == ["pending_confirmation"]
+    assert "create_lead" not in str(logged)

@@ -1,6 +1,16 @@
 # Вход на сервер (P9-01, ADR-0040): TLS от Let's Encrypt для {$DOMAIN} (localhost —
 # внутренний сертификат Caddy, для проверки стека на машине разработчика).
 {$DOMAIN} {
+	# Заголовки безопасности на весь домен (P9-01v). HSTS — без includeSubDomains: поддомены
+	# могут быть не нашими; срок — HSTS_MAX_AGE (сутки, пока домен не проверен; 0 — для
+	# DOMAIN=localhost: браузер не закрепит https за localhost и сбросит прежний HSTS). X-Frame-Options не ставим: встраивание /widget решает его CSP
+	# (ADR-0022), админке — CSP frame-ancestors 'none' из web (proxy.ts).
+	header {
+		Strict-Transport-Security "max-age={$HSTS_MAX_AGE:86400}"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
 	# API: без сжатия — SSE-ход (text/event-stream) уходит посетителю по событию, без буфера.
 	# X-Forwarded-For Caddy ставит сам; uvicorn берёт из него IP для лимитов (ADR-0030).
 	@api path /v1/* /health

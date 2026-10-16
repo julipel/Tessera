@@ -80,6 +80,11 @@ make deploy-seed       # если менялись config/tenants или data/pi
 - `deploy/.env` — только на сервере, права `600`. В git — только `deploy/.env.example`.
 - Наружу открыты только 80 и 443. Postgres, Redis, Qdrant и порт API не опубликованы.
 - Лимиты частоты (ADR-0030) считаются по IP посетителя из `X-Forwarded-For` Caddy.
+- Caddy ставит на весь домен HSTS (без поддоменов), `nosniff` и `Referrer-Policy`; админка —
+  со своей CSP с nonce и `frame-ancestors 'none'` (ADR-0044). Срок HSTS — `HSTS_MAX_AGE`:
+  по умолчанию сутки; когда домен и HTTPS проверены после выкладки — `31536000` (год) и
+  `make deploy-up`. Браузер запоминает HSTS с первого ответа: домен, переведённый обратно
+  на http, откроется только по истечении срока.
 - Поставьте лимит расходов у провайдера LLM: виджет публичный, каждый ход — платный запрос.
 
 ## Проверка стека локально
@@ -90,7 +95,7 @@ make deploy-seed       # если менялись config/tenants или data/pi
 
 ```bash
 cd deploy
-export DOMAIN=localhost POSTGRES_PASSWORD=local DEPLOY_ENV_FILE=../.env
+export DOMAIN=localhost HSTS_MAX_AGE=0 POSTGRES_PASSWORD=local DEPLOY_ENV_FILE=../.env
 docker compose -f compose.prod.yml up -d --build --wait
 docker compose -f compose.prod.yml run --rm api python -m app.cli seed
 docker compose -f compose.prod.yml run --rm api python -m app.cli sync

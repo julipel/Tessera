@@ -571,6 +571,9 @@ API), порт `RateLimiter` в `shared.kernel`; правила — настро
   своего iframe и origin чата). Десктоп — панель 400×640 в углу, < 640 px — на весь экран.
   `src/proxy.ts` ставит на `/widget` `Content-Security-Policy: frame-ancestors` из
   `GET /v1/public/widget`, при ошибке — `'none'`. Демо-сайт — `/demo/widget?key=…` (только dev).
+- Админка (`/admin/*`): сессия — HttpOnly-cookie API, `src/proxy.ts` ставит nonce-CSP без
+  `'unsafe-inline'` и с `frame-ancestors 'none'`, страницы рендерятся на каждый запрос
+  (`app/admin/layout.tsx`, ADR-0044).
 - Рендер сообщения — список блоков: текст (markdown через react-markdown, без сырого HTML и
   картинок — их приносят только компоненты) + компоненты из discriminated union `type`
   (см. contracts). Неизвестный тип игнорируется. Витрина всех вариантов — `/demo/components`

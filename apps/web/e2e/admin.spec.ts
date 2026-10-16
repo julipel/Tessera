@@ -37,6 +37,64 @@ test("сессия — HttpOnly-cookie API, скрипту страницы то
   await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();
 });
 
+test("CSP админки: nonce на запрос, frame-ancestors 'none', внедрённый обработчик не выполняется", async ({
+  page,
+}) => {
+  const first = await page.goto("/admin/login");
+  const csp = (await first?.headerValue("content-security-policy")) ?? "";
+  expect(csp).toMatch(/script-src 'self' 'nonce-[A-Za-z0-9+/=]+' 'strict-dynamic'/);
+  expect(csp).toContain("frame-ancestors 'none'");
+  expect(csp).toMatch(/script-src [^;]*'strict-dynamic'/);
+  expect(/script-src [^;]*/.exec(csp)?.[0]).not.toContain("unsafe-inline");
+  const nonce = /'nonce-([^']+)'/.exec(csp)?.[1];
+  // Next расставил nonce своим скриптам — страница живая (форма входа работает ниже).
+  expect(await page.locator(`script[nonce]`).count()).toBeGreaterThan(0);
+
+  const again = await page.goto("/admin/login");
+  expect(/'nonce-([^']+)'/.exec((await again?.headerValue("content-security-policy")) ?? "")?.[1]).not.toBe(
+    nonce,
+  );
+
+  // Разметка с inline-обработчиком (типичная XSS через innerHTML): CSP без 'unsafe-inline'
+  // его не выполняет и сообщает о нарушении.
+  const outcome = await page.evaluate(
+    () =>
+      new Promise<{ ran: boolean; violated: string | null }>((resolve) => {
+        const w = window as unknown as { __xss?: boolean };
+        let violated: string | null = null;
+        document.addEventListener("securitypolicyviolation", (e) => {
+          violated = e.effectiveDirective;
+        });
+        const host = document.createElement("div");
+        host.innerHTML = '<img src="data:," onerror="window.__xss = true">';
+        document.body.append(host);
+        setTimeout(() => resolve({ ran: w.__xss === true, violated }), 500);
+      }),
+  );
+  expect(outcome).toEqual({ ran: false, violated: "script-src-attr" });
+
+  await login(page);
+  await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();
+});
+
+test("CSP админки: обычная работа без нарушений политики", async ({ page }) => {
+  // Ловит сторонние скрипты и inline-обработчики в самой админке. e2e идут на next dev, где
+  // style-src ослаблен под его оверлей: inline-стили проверяет только прод-сборка.
+  const violations: string[] = [];
+  page.on("console", (msg) => {
+    if (/Content Security Policy/i.test(msg.text())) violations.push(msg.text());
+  });
+  await login(page);
+  await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();
+  for (const name of ["Конфиг агента", "Источники", "Диалоги"]) {
+    await page.goto("/admin");
+    await page.getByRole("link", { name }).first().click();
+    await expect(page.getByRole("main")).not.toContainText("Загрузка…");
+  }
+
+  expect(violations).toEqual([]);
+});
+
 test("конфиг: ошибка проверки, черновик, активация, откат; выход", async ({ page }) => {
   page.on("dialog", (dialog) => void dialog.accept());
   await login(page);

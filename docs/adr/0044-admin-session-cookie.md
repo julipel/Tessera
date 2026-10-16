@@ -57,6 +57,26 @@
    `SameSite=Strict` не уйдёт). Safari может не принимать `Secure`-cookie по
    `http://localhost` — тогда `ADMIN_COOKIE_SECURE=false` или Chromium/Firefox.
 
+6. **CSP админки (P9-01v).** `src/proxy.ts` на каждый запрос `/admin/*` генерирует nonce и
+   ставит `Content-Security-Policy` в запрос (Next берёт из него nonce для своих скриптов)
+   и в ответ:
+   `default-src 'self'; script-src 'self' 'nonce-…' 'strict-dynamic'; style-src 'self'
+   'nonce-…'; connect-src 'self' <origin API>; img-src 'self' data: blob:; font-src 'self';
+   object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`.
+   - Без `'unsafe-inline'`: inline-обработчики и скрипты без nonce (типичная XSS через
+     разметку) не выполняются. В `next dev` — `'unsafe-eval'` и `style-src 'self'
+     'unsafe-inline'` (его оверлей вставляет `<style>` без nonce); скрипты и там только с
+     nonce. e2e (на `next dev`) требуют, чтобы работа в админке не давала нарушений CSP;
+     inline-стили проверяются только на прод-сборке.
+   - Nonce возможен только при рендере на каждый запрос, поэтому `app/admin/layout.tsx`
+     вызывает `connection()`: админка не собирается статически.
+   - `frame-ancestors 'none'` закрывает clickjacking.
+   - На весь домен Caddy ставит `Strict-Transport-Security` (без `includeSubDomains`, срок —
+     `HSTS_MAX_AGE`, 0 для локальной проверки стека),
+     `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`.
+   - Страница чата и витрины `/demo` CSP со `script-src` пока не получают: чату нужны
+     `style=` для брендинга, витринам — inline-скрипты.
+
 ## Альтернативы
 - **Токен в памяти страницы** (без хранилища). Перезагрузка выбрасывает из админки, а XSS
   всё равно читает токен из памяти.
@@ -67,8 +87,12 @@
   Ради демо — лишняя сложность.
 
 ## Последствия
-- XSS на домене больше не уводит токен админки. Действовать от имени админа скрипт
-  по-прежнему может, пока страница открыта; это закрывает CSP (P9-01v).
+- XSS на домене больше не уводит токен админки, а на страницах админки CSP не даёт
+  выполниться внедрённому скрипту (п. 6). Остаточный риск — XSS на других страницах того же
+  origin (чат, витрины `/demo`): cookie скрипт не прочитает, но запрос к API админки с них —
+  запрос со своего origin, браузер приложит cookie, а проверка `Origin` его пропустит.
+  Действовать так можно, пока cookie жива (срок сессии), а не только пока открыта админка.
+  Закрывается CSP со `script-src` для этих страниц или отдельным origin админки.
 - Разработка по http не с localhost (например, по LAN IP) требует
   `ADMIN_COOKIE_SECURE=false`.
 - Новые клиенты API админки из браузера обязаны слать `credentials: "include"` и

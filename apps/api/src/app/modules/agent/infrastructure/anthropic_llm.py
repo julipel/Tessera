@@ -14,7 +14,7 @@ SDK не оборачивает транспортные ошибки при ч�
 
 import ssl
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import anyio
 import httpx2
@@ -114,11 +114,13 @@ class AnthropicLLM:
                     for item in accumulator.feed(event):
                         yield item
         except APIError as error:
-            raise to_llm_error(error) from error
+            raise to_llm_error(error, accumulator.usage) from error
         except _STREAM_TRANSPORT_ERRORS as error:
             # Обрыв/таймаут чтения посреди стрима SDK пропускает как есть.
             raise LLMError(
-                f"Anthropic: обрыв стрима: {type(error).__name__}: {error}", retryable=True
+                f"Anthropic: обрыв стрима: {type(error).__name__}: {error}",
+                retryable=True,
+                usage=accumulator.usage,
             ) from error
         yield ResponseCompleted(accumulator.response())
 
@@ -182,18 +184,25 @@ def to_anthropic_tool(tool: ToolSchema) -> ToolParam:
     }
 
 
-def to_llm_error(error: APIError) -> LLMError:
+def to_llm_error(error: APIError, usage: Usage | None = None) -> LLMError:
     """Таймаут/соединение, 408/409/429 и 5xx — retryable; прочие 4xx — нет. Событие `error`
-    внутри стрима (HTTP 200) — по типу ошибки: перегрузка/лимит/сбой API — retryable."""
+    внутри стрима (HTTP 200) — по типу ошибки: перегрузка/лимит/сбой API — retryable.
+    `usage` — токены, известные до ошибки."""
     if isinstance(error, APIStatusError):
         status = error.status_code
         if status < 400:
             retryable = error.type is None or error.type in _RETRYABLE_ERROR_TYPES
-            return LLMError(f"Anthropic: ошибка стрима: {error.message}", retryable=retryable)
+            return LLMError(
+                f"Anthropic: ошибка стрима: {error.message}", retryable=retryable, usage=usage
+            )
         retryable = status in _RETRYABLE_STATUSES or status >= 500
-        return LLMError(f"Anthropic: HTTP {status}: {error.message}", retryable=retryable)
+        return LLMError(
+            f"Anthropic: HTTP {status}: {error.message}", retryable=retryable, usage=usage
+        )
     # Соединение/таймаут (APIConnectionError) и обрыв ответа — временные сбои.
-    return LLMError(f"Anthropic: {type(error).__name__}: {error.message}", retryable=True)
+    return LLMError(
+        f"Anthropic: {type(error).__name__}: {error.message}", retryable=True, usage=usage
+    )
 
 
 @dataclass(slots=True)
@@ -209,20 +218,27 @@ class _StreamAccumulator:
         self._calls: dict[int, _PendingCall] = {}
         self._stop_reason: str | None = None
         self._stopped = False  # пришёл message_stop
-        self._input_tokens = 0
-        self._output_tokens = 0
+        self._usage: Usage | None = None  # до message_start провайдер токенов не сообщил
+
+    @property
+    def usage(self) -> Usage | None:
+        return self._usage
 
     def feed(self, event: RawMessageStreamEvent) -> list[LLMChunk]:
         out: list[LLMChunk] = []
         match event.type:
             case "message_start":
+                # input_tokens у Anthropic — только вход вне кэша; наш Usage.input_tokens —
+                # весь вход, кэш — его доли.
                 usage = event.message.usage
-                self._input_tokens = (
-                    usage.input_tokens
-                    + (usage.cache_creation_input_tokens or 0)
-                    + (usage.cache_read_input_tokens or 0)
+                cache_read = usage.cache_read_input_tokens or 0
+                cache_write = usage.cache_creation_input_tokens or 0
+                self._usage = Usage(
+                    input_tokens=usage.input_tokens + cache_read + cache_write,
+                    output_tokens=usage.output_tokens,
+                    cache_read_tokens=cache_read,
+                    cache_write_tokens=cache_write,
                 )
-                self._output_tokens = usage.output_tokens
             case "content_block_start":
                 block = event.content_block
                 if block.type == "tool_use":
@@ -240,7 +256,9 @@ class _StreamAccumulator:
                 if event.delta.stop_reason is not None:
                     self._stop_reason = event.delta.stop_reason
                 # output_tokens в message_delta — накопительный итог, а не приращение.
-                self._output_tokens = event.usage.output_tokens
+                self._usage = replace(
+                    self._usage or Usage(), output_tokens=event.usage.output_tokens
+                )
             case "message_stop":
                 self._stopped = True
             case _:
@@ -253,7 +271,9 @@ class _StreamAccumulator:
 
     def response(self) -> LLMResponse:
         if not self._stopped:
-            raise LLMError("Anthropic: стрим закрыт без message_stop", retryable=True)
+            raise LLMError(
+                "Anthropic: стрим закрыт без message_stop", retryable=True, usage=self._usage
+            )
         calls = tuple(
             ToolCall(
                 id=call.id,
@@ -270,5 +290,5 @@ class _StreamAccumulator:
             text="".join(self._text),
             tool_calls=calls,
             stop_reason=stop_reason,
-            usage=Usage(input_tokens=self._input_tokens, output_tokens=self._output_tokens),
+            usage=self._usage or Usage(),
         )

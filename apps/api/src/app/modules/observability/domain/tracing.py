@@ -23,12 +23,25 @@ class TurnTraceInfo:
 @dataclass(frozen=True, slots=True)
 class GenerationInfo:
     """Вызов модели: `input` — системный промпт и сообщения шага, `parameters` — параметры
-    запроса (temperature, инструменты)."""
+    запроса (temperature, инструменты). `provider` — провайдер модели (`anthropic`, `openai`,
+    …): от него зависят названия корзин токенов, по которым Langfuse считает цену."""
 
     name: str
     model: str
     input: dict[str, Any]
     parameters: dict[str, Any] = field(default_factory=dict)
+    provider: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationUsage:
+    """Токены попытки. `input_tokens` — весь вход, включая кэш промпта; `cache_read_tokens`
+    и `cache_write_tokens` — его доли, прочитанные из кэша и записанные в кэш."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 class GenerationTrace(Protocol):
@@ -36,10 +49,11 @@ class GenerationTrace(Protocol):
         """Пришёл первый чанк стрима: время до первого токена."""
         ...
 
-    def finish(self, output: dict[str, Any], input_tokens: int, output_tokens: int) -> None: ...
+    def finish(self, output: dict[str, Any], usage: GenerationUsage) -> None: ...
 
-    def fail(self, error: str) -> None:
-        """Попытка закончилась ошибкой или отменой."""
+    def fail(self, error: str, usage: GenerationUsage | None = None) -> None:
+        """Попытка закончилась ошибкой или отменой; `usage` — токены, известные до обрыва
+        (при отмене хода их нет)."""
         ...
 
 
@@ -75,10 +89,10 @@ class _NoopGeneration:
     def first_chunk(self) -> None:
         pass
 
-    def finish(self, output: dict[str, Any], input_tokens: int, output_tokens: int) -> None:
+    def finish(self, output: dict[str, Any], usage: GenerationUsage) -> None:
         pass
 
-    def fail(self, error: str) -> None:
+    def fail(self, error: str, usage: GenerationUsage | None = None) -> None:
         pass
 
 

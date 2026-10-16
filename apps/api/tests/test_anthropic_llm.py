@@ -290,7 +290,27 @@ async def test_text_stream_with_usage() -> None:
     assert response.text == "Здравствуйте, чем помочь?"
     assert response.tool_calls == ()
     assert response.stop_reason is StopReason.END_TURN
-    assert response.usage == Usage(input_tokens=112, output_tokens=7)
+    assert response.usage == Usage(input_tokens=112, output_tokens=7, cache_read_tokens=100)
+
+
+async def test_cache_write_counted_in_input_and_reported_separately() -> None:
+    server = Server(
+        sse(
+            message_start(
+                input_tokens=12, cache_read_input_tokens=100, cache_creation_input_tokens=50
+            ),
+            text_start(0),
+            text_delta(0, "ok"),
+            block_stop(0),
+            *message_end(output_tokens=3),
+        )
+    )
+
+    usage = completed(await collect(llm_for(server))).response.usage
+
+    assert usage == Usage(
+        input_tokens=162, output_tokens=3, cache_read_tokens=100, cache_write_tokens=50
+    )
 
 
 async def test_tool_calls_assembled_from_json_fragments() -> None:
@@ -468,6 +488,7 @@ async def test_error_event_mid_stream_skips_completion(error_type: str, retryabl
 
     assert raised.value.retryable is retryable
     assert received == [TextDelta("Начало")]
+    assert raised.value.usage == Usage(input_tokens=10, output_tokens=1)
 
 
 async def test_dropped_temperature_is_logged(debug_logs: list[MutableMapping[str, Any]]) -> None:
@@ -526,21 +547,44 @@ async def test_transport_error_mid_stream_is_retryable(error: Exception) -> None
 
     assert raised.value.retryable
     assert received == [TextDelta("Начало")]
+    # Вход известен из message_start: попытка тарифицирована и до обрыва (REVIEW.md: O-7).
+    assert raised.value.usage == Usage(input_tokens=10, output_tokens=1)
+
+
+async def test_api_error_before_message_start_has_no_usage() -> None:
+    with pytest.raises(LLMError) as raised:
+        await collect(llm_for(Server(status=529)))
+
+    assert raised.value.usage is None
 
 
 @pytest.mark.parametrize(
-    "events",
+    ("events", "usage"),
     [
-        # Соединение закрыто посреди текста.
-        (message_start(), text_start(0), text_delta(0, "Оборван")),
-        # message_delta с причиной остановки пришёл, а message_stop — нет.
-        (message_start(), text_start(0), text_delta(0, "Почти"), block_stop(0), message_end()[0]),
+        # Соединение закрыто посреди текста: известен только message_start.
+        (
+            (message_start(), text_start(0), text_delta(0, "Оборван")),
+            Usage(input_tokens=10, output_tokens=1),
+        ),
+        # message_delta с причиной остановки пришёл, а message_stop — нет: output_tokens из него.
+        (
+            (
+                message_start(),
+                text_start(0),
+                text_delta(0, "Почти"),
+                block_stop(0),
+                message_end()[0],
+            ),
+            Usage(input_tokens=10, output_tokens=5),
+        ),
         # Пустое тело.
-        (),
+        ((), None),
     ],
     ids=["cut_text", "no_message_stop", "empty"],
 )
-async def test_stream_without_message_stop_is_retryable(events: tuple[Event, ...]) -> None:
+async def test_stream_without_message_stop_is_retryable(
+    events: tuple[Event, ...], usage: Usage | None
+) -> None:
     received: list[LLMChunk] = []
 
     with pytest.raises(LLMError) as raised:
@@ -549,6 +593,7 @@ async def test_stream_without_message_stop_is_retryable(events: tuple[Event, ...
 
     assert raised.value.retryable
     assert not any(isinstance(item, ResponseCompleted) for item in received)
+    assert raised.value.usage == usage
 
 
 @pytest.mark.parametrize("text", ["\n\n", " ", ""], ids=["newlines", "space", "empty"])

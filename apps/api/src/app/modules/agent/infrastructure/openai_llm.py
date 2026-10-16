@@ -98,7 +98,7 @@ class OpenAILLM:
                     for item in accumulator.feed(chunk):
                         yield item
         except APIError as error:
-            raise to_llm_error(error) from error
+            raise to_llm_error(error, accumulator.usage) from error
         yield ResponseCompleted(accumulator.response())
 
     async def _open(self, request: LLMRequest) -> AsyncStream[ChatCompletionChunk]:
@@ -198,16 +198,19 @@ def to_openai_tool(tool: ToolSchema) -> ChatCompletionFunctionToolParam:
     }
 
 
-def to_llm_error(error: APIError) -> LLMError:
-    """Таймаут/соединение/обрыв стрима, 408/409/429 и 5xx — retryable; прочие 4xx — нет."""
+def to_llm_error(error: APIError, usage: Usage | None = None) -> LLMError:
+    """Таймаут/соединение/обрыв стрима, 408/409/429 и 5xx — retryable; прочие 4xx — нет.
+    `usage` — токены, известные до ошибки."""
     if isinstance(error, APIStatusError):
         status = error.status_code
         retryable = status in _RETRYABLE_STATUSES or status >= 500
-        return LLMError(f"OpenAI: HTTP {status}: {error.message}", retryable=retryable)
+        return LLMError(f"OpenAI: HTTP {status}: {error.message}", retryable=retryable, usage=usage)
     if isinstance(error, APIConnectionError):
-        return LLMError(f"OpenAI: {type(error).__name__}: {error.message}", retryable=True)
+        return LLMError(
+            f"OpenAI: {type(error).__name__}: {error.message}", retryable=True, usage=usage
+        )
     # Ошибка, пришедшая событием внутри уже открытого стрима, — сбой на стороне провайдера.
-    return LLMError(f"OpenAI: ошибка стрима: {error.message}", retryable=True)
+    return LLMError(f"OpenAI: ошибка стрима: {error.message}", retryable=True, usage=usage)
 
 
 @dataclass(slots=True)
@@ -223,13 +226,21 @@ class _StreamAccumulator:
         self._text: list[str] = []
         self._calls: dict[int, _PendingCall] = {}
         self._finish_reason: str | None = None
-        self._usage = Usage()
+        self._usage: Usage | None = None  # приходит последним чанком (include_usage)
+
+    @property
+    def usage(self) -> Usage | None:
+        return self._usage
 
     def feed(self, chunk: ChatCompletionChunk) -> list[LLMChunk]:
         if chunk.usage is not None:
+            # prompt_tokens включает кэшированные; запись в кэш OpenAI отдельно не тарифицирует.
+            # SDK ответ не валидирует: у совместимых API details может не быть.
+            details = getattr(chunk.usage, "prompt_tokens_details", None)
             self._usage = Usage(
                 input_tokens=chunk.usage.prompt_tokens,
                 output_tokens=chunk.usage.completion_tokens,
+                cache_read_tokens=getattr(details, "cached_tokens", None) or 0,
             )
         out: list[LLMChunk] = []
         for choice in chunk.choices:
@@ -259,7 +270,9 @@ class _StreamAccumulator:
 
     def response(self) -> LLMResponse:
         if self._finish_reason is None:
-            raise LLMError("OpenAI: стрим закрыт без finish_reason", retryable=True)
+            raise LLMError(
+                "OpenAI: стрим закрыт без finish_reason", retryable=True, usage=self._usage
+            )
         calls = tuple(
             ToolCall(
                 id=call.id,
@@ -274,7 +287,10 @@ class _StreamAccumulator:
             # Некоторые совместимые API отвечают finish_reason="stop" и при вызове инструментов.
             stop_reason = StopReason.TOOL_CALLS
         return LLMResponse(
-            text="".join(self._text), tool_calls=calls, stop_reason=stop_reason, usage=self._usage
+            text="".join(self._text),
+            tool_calls=calls,
+            stop_reason=stop_reason,
+            usage=self._usage or Usage(),
         )
 
 

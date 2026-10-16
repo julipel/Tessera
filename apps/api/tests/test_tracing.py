@@ -42,8 +42,13 @@ from app.modules.agent.public import (
 )
 from app.modules.chat.domain.entities import TurnRequest
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent
-from app.modules.observability.infrastructure.langfuse_tracer import _guard
-from app.modules.observability.kernel import GenerationInfo, GenerationTrace, TurnTraceInfo
+from app.modules.observability.infrastructure.langfuse_tracer import _guard, usage_details
+from app.modules.observability.kernel import (
+    GenerationInfo,
+    GenerationTrace,
+    GenerationUsage,
+    TurnTraceInfo,
+)
 from app.modules.observability.public import LangfuseTracer, NoopTracer, build_tracer
 from app.modules.observability.public import langfuse_trace_id as lf_trace_id
 from app.modules.shared.kernel import TenantId
@@ -58,17 +63,17 @@ class FakeGeneration:
     info: GenerationInfo
     first_chunks: int = 0
     output: dict[str, Any] | None = None
-    usage: tuple[int, int] | None = None
+    usage: GenerationUsage | None = None
     error: str | None = None
 
     def first_chunk(self) -> None:
         self.first_chunks += 1
 
-    def finish(self, output: dict[str, Any], input_tokens: int, output_tokens: int) -> None:
-        self.output, self.usage = output, (input_tokens, output_tokens)
+    def finish(self, output: dict[str, Any], usage: GenerationUsage) -> None:
+        self.output, self.usage = output, usage
 
-    def fail(self, error: str) -> None:
-        self.error = error
+    def fail(self, error: str, usage: GenerationUsage | None = None) -> None:
+        self.error, self.usage = error, usage
 
 
 @dataclass
@@ -138,20 +143,66 @@ async def _drain(llm: Any, request: LLMRequest = REQUEST) -> None:
 
 async def test_traced_llm_records_generation_with_usage_and_first_chunk() -> None:
     turn = FakeTurn(_info())
-    llm = TracedLLM(FakeLLM([FakeReply("Добрый день", usage=Usage(30, 2))]), turn)
+    usage = Usage(30, 2, cache_read_tokens=20, cache_write_tokens=5)
+    llm = TracedLLM(FakeLLM([FakeReply("Добрый день", usage=usage)]), turn, "anthropic")
 
     await _drain(llm, REQUEST)
 
     [generation] = turn.generations
-    assert generation.info.model == "main"
+    assert (generation.info.model, generation.info.provider) == ("main", "anthropic")
     assert generation.info.input == {
         "system": "Ты — консультант.",
         "messages": [{"role": "user", "content": "Привет"}],
     }
     assert generation.first_chunks >= 1
     assert generation.output == {"text": "Добрый день", "tool_calls": [], "stop_reason": "end_turn"}
-    assert generation.usage == (30, 2)
+    assert generation.usage == GenerationUsage(30, 2, cache_read_tokens=20, cache_write_tokens=5)
     assert generation.error is None
+
+
+async def test_llm_error_usage_reaches_failed_generation() -> None:
+    """Токены до обрыва провайдер тарифицирует — они в трейсе и у неудачной попытки (O-7)."""
+    turn = FakeTurn(_info())
+    error = LLMError("обрыв", retryable=True, usage=Usage(40, 3))
+    llm = TracedLLM(FakeLLM([error]), turn, "anthropic")
+
+    with pytest.raises(LLMError):
+        await _drain(llm)
+
+    [generation] = turn.generations
+    assert generation.error == "LLMError: обрыв"
+    assert generation.usage == GenerationUsage(40, 3)
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        (
+            "anthropic",
+            {
+                "input": 25,
+                "cache_read_input_tokens": 60,
+                "cache_creation_input_tokens": 15,
+                "output": 7,
+            },
+        ),
+        ("openai", {"input": 25, "input_cached_tokens": 75, "output": 7}),
+        ("openai_compatible", {"input": 25, "input_cached_tokens": 75, "output": 7}),
+    ],
+)
+def test_usage_details_are_disjoint_buckets(provider: str, expected: dict[str, int]) -> None:
+    """Langfuse складывает корзины: вход без кэша + кэш = весь вход шага, без двойного счёта."""
+    usage = GenerationUsage(100, 7, cache_read_tokens=60, cache_write_tokens=15)
+
+    details = usage_details(provider, usage)
+
+    assert details == expected
+    assert sum(v for k, v in details.items() if k != "output") == usage.input_tokens
+
+
+def test_usage_details_without_cache_are_input_and_output() -> None:
+    assert usage_details("anthropic", GenerationUsage(12, 3)) == {"input": 12, "output": 3}
+    assert usage_details("openai", GenerationUsage(12, 3)) == {"input": 12, "output": 3}
 
 
 async def test_each_retry_and_fallback_attempt_is_a_generation(
@@ -160,16 +211,16 @@ async def test_each_retry_and_fallback_attempt_is_a_generation(
     monkeypatch.setattr(fallback_llm, "RETRY_DELAY_S", 0)
     turn = FakeTurn(_info())
     flaky = LLMError("503", retryable=True)
-    primary = TracedLLM(FakeLLM([flaky, flaky]), turn)
-    backup = TracedLLM(FakeLLM([FakeReply("Ответ")]), turn)
+    primary = TracedLLM(FakeLLM([flaky, flaky]), turn, "anthropic")
+    backup = TracedLLM(FakeLLM([FakeReply("Ответ")]), turn, "openai")
     llm = FallbackLLM(primary, FallbackModel(client=lambda: backup, model="backup"))
 
     await _drain(llm)
 
-    assert [(g.info.model, g.error is None) for g in turn.generations] == [
-        ("main", False),
-        ("main", False),
-        ("backup", True),
+    assert [(g.info.model, g.info.provider, g.error is None) for g in turn.generations] == [
+        ("main", "anthropic", False),
+        ("main", "anthropic", False),
+        ("backup", "openai", True),
     ]
     assert turn.generations[0].error == "LLMError: 503"
 
@@ -177,7 +228,7 @@ async def test_each_retry_and_fallback_attempt_is_a_generation(
 async def test_stream_failure_after_first_chunk_fails_generation() -> None:
     turn = FakeTurn(_info())
     broken = FakeReply("раз два три", fail_after_chunks=1)
-    llm = TracedLLM(FakeLLM([broken]), turn)
+    llm = TracedLLM(FakeLLM([broken]), turn, "openai")
 
     with pytest.raises(LLMError):
         await _drain(llm)
@@ -284,12 +335,42 @@ async def test_loop_agent_traces_turn_with_trace_id_and_prompt_versions() -> Non
         "platform_prompt": PLATFORM_PROMPT_VERSION,
         "agent_config": str(request.agent_config_id),
     }
-    assert [g.info.model for g in turn.generations] == ["main-model", "main-model"]
+    assert [(g.info.model, g.info.provider) for g in turn.generations] == [
+        ("main-model", "openai"),
+        ("main-model", "openai"),
+    ]
     # Неизвестный инструмент — ошибка вызова в трейсе, ход продолжается.
     assert turn.tools[0] == ("started", "c1", "nope")
     assert turn.tools[1][:3] == ("finished", "c1", "nope") and turn.tools[1][5] is not None
     assert turn.output is not None and turn.output["answer"] == "Готово."
     assert isinstance(events[-1], TurnCompleted)
+
+
+async def test_loop_agent_passes_fallback_provider_to_its_generations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Провайдер резервной модели — свой: от него зависят корзины токенов (O-7)."""
+    monkeypatch.setattr(fallback_llm, "RETRY_DELAY_S", 0)
+    tracer = FakeTracer()
+    flaky = LLMError("503", retryable=True)
+    clients = {"anthropic": FakeLLM([flaky, flaky, flaky]), "openai": FakeLLM([FakeReply("Да")])}
+    agent = LoopTurnAgent(
+        lambda provider: clients[provider],
+        lambda *_: RegistryToolExecutor(ToolRegistry([])),
+        tracer=tracer,
+    )
+    request = _request("trace-fallback")
+    request.agent_config["model"] = {
+        "primary": {"provider": "anthropic", "name": "main-model"},
+        "fallback": {"provider": "openai", "name": "backup-model"},
+    }
+
+    [e async for e in agent.run_turn(request)]
+
+    [turn] = tracer.turns
+    providers = [(g.info.model, g.info.provider) for g in turn.generations]
+    assert providers[-1] == ("backup-model", "openai")
+    assert set(providers[:-1]) == {("main-model", "anthropic")}
 
 
 def test_build_tracer_without_keys_is_noop() -> None:
@@ -328,7 +409,7 @@ def test_langfuse_tracer_exports_turn_generation_and_tool_spans() -> None:
         GenerationInfo(name="llm", model="main", input={"system": "s", "messages": []})
     )
     generation.first_chunk()
-    generation.finish({"text": "Да"}, 12, 3)
+    generation.finish({"text": "Да"}, GenerationUsage(12, 3))
     turn.tool_started("c1", "search_catalog")
     turn.tool_finished("c1", "search_catalog", {"q": "крем"}, {"n": 1}, None, 5)
     turn.finish({"answer": "Да"})
@@ -385,6 +466,54 @@ def _langfuse(exporter: InMemorySpanExporter) -> Langfuse:
     )
 
 
+def test_prompt_versions_do_not_overwrite_trace_metadata() -> None:
+    """O-11: версии промпта — одним ключом, `tenant_id` слоя версий не затирает тенанта."""
+    exporter = InMemorySpanExporter()
+    client = _langfuse(exporter)
+    info = TurnTraceInfo(
+        trace_id="",
+        tenant_id=TENANT,
+        conversation_id=uuid4(),
+        turn_id=uuid4(),
+        input={},
+        prompt_versions={"tenant_id": "чужой", "turn_id": "x", "platform_prompt": "1"},
+    )
+    turn = LangfuseTracer(client).start_turn(info)
+    turn.finish({"answer": ""})
+    client.flush()
+
+    [root] = exporter.get_finished_spans()
+    attrs = _attrs(root)
+    assert attrs["langfuse.trace.metadata.tenant_id"] == str(TENANT)
+    assert attrs["langfuse.trace.metadata.turn_id"] == str(info.turn_id)
+    assert json.loads(str(attrs["langfuse.trace.metadata.prompt_versions"])) == (
+        info.prompt_versions
+    )
+    client.shutdown()
+
+
+def test_failed_generation_exports_usage_known_before_failure() -> None:
+    exporter = InMemorySpanExporter()
+    client = _langfuse(exporter)
+    turn = LangfuseTracer(client).start_turn(_info(uuid4().hex))
+    generation = turn.generation(
+        GenerationInfo(name="llm", model="main", input={}, provider="anthropic")
+    )
+
+    generation.fail("обрыв", GenerationUsage(10, 1, cache_read_tokens=4))
+    turn.finish({"answer": ""})
+    client.flush()
+
+    llm = _attrs(next(s for s in exporter.get_finished_spans() if s.name == "llm"))
+    assert json.loads(str(llm["langfuse.observation.usage_details"])) == {
+        "input": 6,
+        "cache_read_input_tokens": 4,
+        "output": 1,
+    }
+    assert llm["langfuse.observation.level"] == "ERROR"
+    client.shutdown()
+
+
 def test_error_messages_are_masked_before_export() -> None:
     """status_message SDK не маскирует, а сообщения валидации несут значения (O-3)."""
     exporter = InMemorySpanExporter()
@@ -431,7 +560,7 @@ async def test_sdk_failures_mid_turn_do_not_break_the_turn(
     monkeypatch.setattr(root, "update", _BrokenObservation().update)
     monkeypatch.setattr(root, "end", _BrokenObservation().end)
 
-    llm = TracedLLM(FakeLLM([FakeReply("Да")]), turn)
+    llm = TracedLLM(FakeLLM([FakeReply("Да")]), turn, "openai")
     chunks = [
         c
         async for c in llm.stream(LLMRequest(model="main", system="", messages=(UserMessage("?"),)))
@@ -463,7 +592,7 @@ def test_failed_update_still_ends_observations(monkeypatch: pytest.MonkeyPatch) 
         monkeypatch.setattr(observation, "update", _BrokenObservation().update)
 
     generation.first_chunk()
-    generation.finish({"text": "Да"}, 1, 1)
+    generation.finish({"text": "Да"}, GenerationUsage(1, 1))
     turn.tool_finished("c1", "search_catalog", {}, {}, None, 1)
     turn.finish({"answer": "Да"}, error="сбой")
     client.flush()

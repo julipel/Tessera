@@ -229,6 +229,19 @@ async def test_text_stream_with_usage() -> None:
     assert response_.provider_items == ()
 
 
+async def test_cached_input_tokens_reported_inside_input() -> None:
+    usage = {
+        "input_tokens": 1200,
+        "output_tokens": 3,
+        "input_tokens_details": {"cached_tokens": 1024},
+    }
+    body = sse(text_delta("ok"), {"type": "response.completed", "response": response(usage=usage)})
+
+    response_ = completed(await collect(llm_for(Server(body)))).response
+
+    assert response_.usage == Usage(input_tokens=1200, output_tokens=3, cache_read_tokens=1024)
+
+
 async def test_refusal_is_streamed_as_text() -> None:
     body = sse({"type": "response.refusal.delta", "item_id": "msg_1", "delta": "Не могу."})
 
@@ -357,6 +370,25 @@ async def test_failure_mid_stream_is_retryable_and_skips_completion(event: dict[
     assert raised.value.retryable
     assert "overloaded" in str(raised.value)
     assert received == [TextDelta("Начало")]
+    assert raised.value.usage is None
+
+
+async def test_failed_response_usage_attached_to_error() -> None:
+    failed = response(
+        "failed",
+        error={"code": "server_error", "message": "overloaded"},
+        usage={
+            "input_tokens": 40,
+            "output_tokens": 2,
+            "input_tokens_details": {"cached_tokens": 0},
+        },
+    )
+    body = sse(text_delta("Начало"), {"type": "response.failed", "response": failed})
+
+    with pytest.raises(LLMError) as raised:
+        await collect(llm_for(Server(body)))
+
+    assert raised.value.usage == Usage(input_tokens=40, output_tokens=2)
 
 
 @pytest.mark.parametrize(

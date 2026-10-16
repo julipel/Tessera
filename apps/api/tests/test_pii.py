@@ -11,7 +11,7 @@ import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from app.modules.observability.domain.pii import HIDDEN, _LuhnPrefix, has_contact, mask_pii
-from app.modules.observability.kernel import GenerationInfo, TurnTraceInfo
+from app.modules.observability.kernel import GenerationInfo, GenerationUsage, TurnTraceInfo
 from app.modules.observability.public import LangfuseTracer
 
 
@@ -189,7 +189,8 @@ def test_langfuse_export_contains_no_contacts() -> None:
         )
     )
     generation.finish(
-        {"tool_calls": [{"arguments": json.dumps({"fields": {"email": email}})}]}, 10, 2
+        {"tool_calls": [{"arguments": json.dumps({"fields": {"email": email}})}]},
+        GenerationUsage(10, 2),
     )
     turn.tool_started("c1", "create_lead")
     turn.tool_finished("c1", "create_lead", {"fields": {"name": "Анна"}}, "ok", None, 3)

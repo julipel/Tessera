@@ -5,6 +5,7 @@ from app.modules.observability.domain.pii import has_contact
 from app.modules.observability.domain.tracing import (
     GenerationInfo,
     GenerationTrace,
+    GenerationUsage,
     NoopTracer,
     Tracer,
     TurnTrace,
@@ -15,6 +16,7 @@ __all__ = [
     "AgentEventEntry",
     "GenerationInfo",
     "GenerationTrace",
+    "GenerationUsage",
     "NoopTracer",
     "Tracer",
     "TurnTrace",

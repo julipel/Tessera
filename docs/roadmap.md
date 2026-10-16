@@ -823,6 +823,16 @@
     `ADMIN_MAX_SESSIONS_PER_USER` сессий, истёкшие — в ежедневной чистке; `_me` одним запросом;
     NFKC пароля (старые хэши проверяются как есть), максимум 1024, подменённые параметры хэша —
     отказ, не 500; `InvalidEmailError` без значения. Дальше по плану — Langfuse (O-7, O-11, O-12).
+  - [x] **P9-01ab Langfuse** (`REVIEW.md`: O-7, O-11, O-12). Кэш промпта в `Usage`
+    (`cache_read_tokens`, `cache_write_tokens` — доли `input_tokens`) из трёх адаптеров;
+    в Langfuse — непересекающиеся корзины по провайдеру (Anthropic: `cache_read_input_tokens`,
+    `cache_creation_input_tokens`; OpenAI: `input_cached_tokens`), стоимость кэша больше не
+    по полной цене; `LLMError.usage` — токены оборванной попытки в `generation.fail`; версии
+    промпта — одним ключом metadata `prompt_versions`; `--timeout-graceful-shutdown 15` и
+    `stop_grace_period: 60s`, lifespan до 3 с ждёт прерванные ходы (`TurnRegistry.wait_idle`)
+    перед закрытием трейсера, Redis и БД — хвост трейсов успевает уйти при остановке
+    (при недоступном Langfuse — ограничение, см. ADR). Дополнение ADR-0029.
+    Дальше по плану — журнал (O-8).
   - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
     образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
 - [ ] **P9-02 Пилот и разбор.** Реальные диалоги → новые эталоны в evals → итерации P6-03.

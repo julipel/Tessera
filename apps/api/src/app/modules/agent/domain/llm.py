@@ -86,8 +86,14 @@ class StopReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Usage:
+    """`input_tokens` — весь вход шага, включая кэш промпта: на нём бюджет хода и журнал.
+    `cache_read_tokens` / `cache_write_tokens` — доли входа, прочитанные из кэша и записанные
+    в него (цена у провайдера другая; нужны для стоимости в Langfuse, ADR-0029)."""
+
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,11 +138,13 @@ type LLMChunk = TextDelta | ToolCallStarted | ResponseCompleted
 
 class LLMError(DomainError):
     """Ошибка провайдера. `retryable` — таймаут, 429, 5xx: можно повторить или уйти на
-    резервную модель."""
+    резервную модель. `usage` — токены, известные до обрыва стрима (для стоимости попытки
+    в трейсе); None — провайдер их не сообщил."""
 
-    def __init__(self, message: str, *, retryable: bool) -> None:
+    def __init__(self, message: str, *, retryable: bool, usage: Usage | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.usage = usage
 
 
 class LLMClient(Protocol):

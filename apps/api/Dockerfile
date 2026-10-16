@@ -40,4 +40,8 @@ EXPOSE 8000
 # Доверенные прокси — FORWARDED_ALLOW_IPS (подсеть compose, задаёт compose.prod.yml; без неё
 # uvicorn доверяет только 127.0.0.1 и ::1 — тогда все посетители в одной корзине лимитов),
 # не «*» (REVIEW.md: S-5).
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# При остановке открытые SSE-стримы ждут не дольше 15 с, затем закрываются: иначе lifespan
+# не дойдёт до отправки хвоста трейсов Langfuse до SIGKILL (stop_grace_period в
+# compose.prod.yml — с запасом на неё; REVIEW.md: O-12).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", \
+     "--timeout-graceful-shutdown", "15"]

@@ -80,6 +80,11 @@ services:
 
   api:
     <<: *app
+    # Остановка: до 15 с uvicorn дожидается ходов (--timeout-graceful-shutdown в Dockerfile),
+    # до 3 с lifespan ждёт прерванные ходы, затем отправляет хвост трейсов Langfuse
+    # (LANGFUSE_TIMEOUT_S — на каждую пачку, общего предела у SDK нет; 60 с — потолок, дальше
+    # SIGKILL). По умолчанию Docker ждёт 10 с — трейсы последних ходов терялись (O-12).
+    stop_grace_period: 60s
     volumes:
       - knowledge-files:/srv/data/knowledge
     depends_on:

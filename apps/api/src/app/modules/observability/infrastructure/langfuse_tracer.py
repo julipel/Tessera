@@ -10,6 +10,7 @@ Observation создаются явно (`start_observation` от корня х�
 маскируем сами (O-3, ADR-0032): сообщения валидации содержат значения полей.
 """
 
+import json
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -31,6 +32,7 @@ from app.modules.observability.domain.pii import mask_pii
 from app.modules.observability.domain.tracing import (
     GenerationInfo,
     GenerationTrace,
+    GenerationUsage,
     NoopTracer,
     Tracer,
     TurnTrace,
@@ -71,9 +73,27 @@ def langfuse_trace_id(trace_id: str) -> str:
     return Langfuse.create_trace_id(seed=trace_id) if trace_id else Langfuse.create_trace_id()
 
 
+def usage_details(provider: str, usage: GenerationUsage) -> dict[str, int]:
+    """Корзины токенов для Langfuse (REVIEW.md: O-7). Корзины не пересекаются: Langfuse
+    суммирует их и умножает каждую на свою цену из модели, поэтому `input` — вход без кэша,
+    а кэш — отдельными ключами с именами из цен моделей Langfuse (у Anthropic и OpenAI они
+    разные). Сумма корзин входа равна `usage.input_tokens`."""
+    cached = usage.cache_read_tokens + usage.cache_write_tokens
+    details = {"input": max(usage.input_tokens - cached, 0), "output": usage.output_tokens}
+    if provider == "anthropic":
+        if usage.cache_read_tokens:
+            details["cache_read_input_tokens"] = usage.cache_read_tokens
+        if usage.cache_write_tokens:
+            details["cache_creation_input_tokens"] = usage.cache_write_tokens
+    elif cached:  # OpenAI и совместимые: запись в кэш отдельно не тарифицируется
+        details["input_cached_tokens"] = cached
+    return details
+
+
 class _Generation:
-    def __init__(self, observation: LangfuseGeneration) -> None:
+    def __init__(self, observation: LangfuseGeneration, provider: str) -> None:
         self._observation = observation
+        self._provider = provider
         self._started = False
 
     def first_chunk(self) -> None:
@@ -82,16 +102,18 @@ class _Generation:
             with _guard("generation.first_chunk"):
                 self._observation.update(completion_start_time=datetime.now(UTC))
 
-    def finish(self, output: dict[str, Any], input_tokens: int, output_tokens: int) -> None:
+    def finish(self, output: dict[str, Any], usage: GenerationUsage) -> None:
         with _guard("generation.finish"):
             self._observation.update(
-                output=output, usage_details={"input": input_tokens, "output": output_tokens}
+                output=output, usage_details=usage_details(self._provider, usage)
             )
         _end(self._observation, "generation.end")
 
-    def fail(self, error: str) -> None:
+    def fail(self, error: str, usage: GenerationUsage | None = None) -> None:
         with _guard("generation.fail"):
             self._observation.update(level="ERROR", status_message=_masked(error))
+            if usage is not None:  # токены до обрыва провайдер тоже тарифицирует
+                self._observation.update(usage_details=usage_details(self._provider, usage))
         _end(self._observation, "generation.end")
 
 
@@ -106,7 +128,14 @@ class _Turn:
                 "tenant_id": str(info.tenant_id),
                 "turn_id": str(info.turn_id),
                 **({"trace_id": info.trace_id} if info.trace_id else {}),
-                **info.prompt_versions,
+                # Одним ключом (O-11): ключи версий не затирают tenant_id/turn_id. SDK
+                # приводит значения metadata к строкам и значение длиннее 200 символов
+                # отбрасывает целиком — отдаём компактный JSON (сейчас ~80 символов).
+                **(
+                    {"prompt_versions": json.dumps(info.prompt_versions, separators=(",", ":"))}
+                    if info.prompt_versions
+                    else {}
+                ),
             },
             "tags": [f"tenant:{info.tenant_id}"],
         }
@@ -130,7 +159,8 @@ class _Turn:
                     input=info.input,
                     model_parameters=info.parameters,
                     version=self._version,
-                )
+                ),
+                info.provider,
             )
         # Не создалась — попытка модели идёт без своего observation.
         return NoopTracer().start_turn(self._info).generation(info)

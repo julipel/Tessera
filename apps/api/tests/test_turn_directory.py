@@ -113,6 +113,29 @@ async def test_without_directory_cancel_stays_in_process() -> None:
     assert await _cancel(owner, turn)
 
 
+async def test_wait_idle_returns_when_turns_are_removed() -> None:
+    """Остановка (O-12): lifespan ждёт, пока прерванные ходы снимутся с реестра."""
+    registry = TurnRegistry()
+    turn = _turn()
+    await registry.add(_stream(turn))
+
+    async def finish_later() -> None:
+        await asyncio.sleep(0.1)
+        await registry.remove(_stream(turn))
+
+    task = asyncio.create_task(finish_later())
+    assert await registry.wait_idle(WAIT)
+    await task
+    assert await TurnRegistry().wait_idle(0)
+
+
+async def test_wait_idle_gives_up_after_timeout() -> None:
+    registry = TurnRegistry()
+    await registry.add(_stream(_turn()))
+
+    assert not await registry.wait_idle(0.1)
+
+
 # --- Один ход на диалог (ADR-0041) ---
 
 

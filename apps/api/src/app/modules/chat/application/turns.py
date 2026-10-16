@@ -782,6 +782,17 @@ class TurnRegistry:
         logger.info("turn_cancel_requested", turn_id=str(turn_id))
         return True
 
+    async def wait_idle(self, timeout_s: float) -> bool:
+        """Дождаться, пока ходы процесса сняты с реестра (остановка приложения: прерванный
+        ход дописывает журнал и трейс до того, как закроются БД, Redis и трейсер). Ход
+        снимается с реестра после завершения задачи агента. False — не дождались."""
+        deadline = time.monotonic() + timeout_s
+        while self._turns:
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.05)
+        return True
+
     def cancel_local(self, turn_id: UUID) -> None:
         """Отмена, переданная другим процессом (владелец хода уже проверен им)."""
         if (turn := self._turns.get(turn_id)) is not None:

@@ -20,21 +20,26 @@ from app.modules.agent.domain.llm import (
     AssistantMessage,
     LLMChunk,
     LLMClient,
+    LLMError,
     LLMMessage,
     LLMRequest,
     ResponseCompleted,
     ToolResultMessage,
+    Usage,
     UserMessage,
 )
-from app.modules.observability.kernel import GenerationInfo, TurnTrace
+from app.modules.observability.kernel import GenerationInfo, GenerationUsage, TurnTrace
 
 
 class TracedLLM:
-    """`LLMClient`, который пишет каждый вызов `stream` в трейс хода как generation."""
+    """`LLMClient`, который пишет каждый вызов `stream` в трейс хода как generation.
+    `provider` — провайдер модели: от него зависят корзины токенов в трейсе (обязателен —
+    Anthropic в корзинах OpenAI молча исказил бы стоимость)."""
 
-    def __init__(self, inner: LLMClient, trace: TurnTrace) -> None:
+    def __init__(self, inner: LLMClient, trace: TurnTrace, provider: str) -> None:
         self._inner = inner
         self._trace = trace
+        self._provider = provider
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
         generation = self._trace.generation(
@@ -47,6 +52,7 @@ class TracedLLM:
                     "max_output_tokens": request.max_output_tokens,
                     "tools": [t.name for t in request.tools],
                 },
+                provider=self._provider,
             )
         )
         finished = False
@@ -64,14 +70,14 @@ class TracedLLM:
                             ],
                             "stop_reason": response.stop_reason.value,
                         },
-                        response.usage.input_tokens,
-                        response.usage.output_tokens,
+                        _usage(response.usage),
                     )
                     finished = True
                 yield chunk
         except BaseException as e:  # в т.ч. отмена хода и закрытие генератора
             if not finished:
-                generation.fail(_reason(e))
+                usage = e.usage if isinstance(e, LLMError) else None
+                generation.fail(_reason(e), _usage(usage) if usage is not None else None)
                 finished = True
             raise
         finally:
@@ -115,6 +121,15 @@ async def traced_turn(
         trace.finish({"answer": "".join(answer), **output}, _reason(e))
         raise
     trace.finish({"answer": "".join(answer), **output})
+
+
+def _usage(usage: Usage) -> GenerationUsage:
+    return GenerationUsage(
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+    )
 
 
 def _reason(error: BaseException) -> str:

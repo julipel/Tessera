@@ -151,7 +151,8 @@ class LoopTurnAgent:
     def _llm(self, config: AgentConfig, trace: TurnTrace) -> LLMClient:
         """Основная модель с ретраями и резервной из `model.fallback` (ADR-0027); клиент
         резервной создаётся, только когда понадобится. Каждая попытка — generation в трейсе."""
-        primary = TracedLLM(self._llm_for(config.model.primary.provider), trace)
+        primary_provider = config.model.primary.provider
+        primary = TracedLLM(self._llm_for(primary_provider), trace, primary_provider)
         fallback = config.model.fallback
         if fallback is None:
             return FallbackLLM(primary)
@@ -159,7 +160,7 @@ class LoopTurnAgent:
         return FallbackLLM(
             primary,
             FallbackModel(
-                client=lambda: TracedLLM(self._llm_for(provider), trace),
+                client=lambda: TracedLLM(self._llm_for(provider), trace, provider),
                 model=fallback.name,
                 temperature=fallback.temperature,
             ),

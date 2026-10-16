@@ -57,3 +57,29 @@ P7-03, architecture.md §13: трейсы LLM-вызовов, версия пр�
   маскирование (`mask` SDK) — отдельной задачей до пилота с реальными клиентами.
 - Сводки истории (фоновый вызов LLM) и эвалы пока не трейсятся.
 - Клиент SDK кэшируется по `public_key` внутри SDK — один на процесс.
+
+## Дополнение (P9-01ab, 2026-10-16): кэш промпта в стоимости, metadata, остановка
+- **Корзины токенов** (`REVIEW.md`: O-7). Langfuse считает `usage_details` непересекающимися
+  корзинами: сумма корзин — весь вход, каждая умножается на свою цену модели. Раньше кэш
+  промпта входил в `input` и оценивался по полной цене (чтение из кэша у Anthropic — 0,1x).
+  Теперь `Usage` несёт `cache_read_tokens` и `cache_write_tokens` — доли `input_tokens`, сам
+  `input_tokens` по-прежнему весь вход (бюджет хода, журнал, `TurnCompleted` не меняются).
+  Трейсер раскладывает их по провайдеру (`GenerationInfo.provider`): Anthropic — `input` (вне
+  кэша), `cache_read_input_tokens`, `cache_creation_input_tokens`, `output`; OpenAI и
+  `openai_compatible` — `input`, `input_cached_tokens`, `output` (запись в кэш OpenAI отдельно
+  не тарифицирует). Имена — как в ценах моделей Langfuse; для custom models прокси задавать
+  цены с теми же ключами.
+- **Оборванные попытки.** `LLMError.usage` — токены, известные до ошибки (у Anthropic вход
+  известен с `message_start`, у OpenAI usage приходит в конце стрима или в `response.failed`);
+  `generation.fail` отправляет их. При отмене хода usage нет — ограничение.
+- **Metadata трейса** (O-11): версии слоёв промпта — одним ключом `prompt_versions` (JSON:
+  SDK приводит значения metadata к строкам), чтобы не затирать `tenant_id`/`turn_id`.
+  `version` observation не меняется.
+- **Остановка** (O-12): uvicorn ждёт ходы не дольше 15 с (`--timeout-graceful-shutdown`),
+  затем отменяет их и сразу зовёт lifespan. Lifespan до 3 с ждёт, пока прерванные ходы
+  снимутся с реестра (`TurnRegistry.wait_idle`: журнал и трейс дописаны), и только потом
+  закрывает трейсер, Redis и БД. `stop_grace_period: 60s` у `api` в `compose.prod.yml`
+  (по умолчанию Docker ждёт 10 с и шлёт SIGKILL). Ограничение: `shutdown` SDK не имеет
+  общего таймаута — `LANGFUSE_TIMEOUT_S` действует на каждую пачку (OTel `force_flush`
+  выгружает всю очередь), поэтому при недоступном Langfuse остановку обрывает SIGKILL на 60 с,
+  а хвост трейсов теряется; при доступном отправка укладывается в секунды.

@@ -39,7 +39,7 @@ def chunk(
     delta: dict[str, Any] | None = None,
     *,
     finish: str | None = None,
-    usage: dict[str, int] | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     choices = [] if delta is None else [{"index": 0, "delta": delta, "finish_reason": finish}]
     return {
@@ -207,6 +207,30 @@ async def test_text_stream_with_usage() -> None:
     assert response.tool_calls == ()
     assert response.stop_reason is StopReason.END_TURN
     assert response.usage == Usage(input_tokens=12, output_tokens=5)
+
+
+async def test_cached_prompt_tokens_reported_inside_input() -> None:
+    usage = {
+        "prompt_tokens": 1200,
+        "completion_tokens": 5,
+        "total_tokens": 1205,
+        "prompt_tokens_details": {"cached_tokens": 1024},
+    }
+    server = Server(sse(chunk({"content": "ok"}, finish="stop"), chunk(usage=usage)))
+
+    response = completed(await collect(llm_for(server))).response
+
+    assert response.usage == Usage(input_tokens=1200, output_tokens=5, cache_read_tokens=1024)
+
+
+async def test_stream_without_finish_reason_keeps_known_usage() -> None:
+    usage = {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}
+    server = Server(sse(chunk({"content": "Обрыв"}), chunk(usage=usage)))
+
+    with pytest.raises(LLMError) as raised:
+        await collect(llm_for(server))
+
+    assert raised.value.usage == Usage(input_tokens=12, output_tokens=5)
 
 
 async def test_parallel_tool_calls_assembled_from_fragments() -> None:

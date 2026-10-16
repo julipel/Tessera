@@ -94,7 +94,7 @@ class OpenAIResponsesLLM:
                     for item in accumulator.feed(event):
                         yield item
         except APIError as error:
-            raise to_llm_error(error) from error
+            raise to_llm_error(error, accumulator.usage) from error
         yield ResponseCompleted(accumulator.response())
 
     async def _open(self, request: LLMRequest) -> AsyncStream[ResponseStreamEvent]:
@@ -185,7 +185,7 @@ class _StreamAccumulator:
         self._text: list[str] = []
         self._calls: dict[int, _PendingCall] = {}  # по output_index
         self._provider_items: list[tuple[int, ProviderItem]] = []
-        self._usage = Usage()
+        self._usage: Usage | None = None  # приходит в response.completed/incomplete/failed
         self._stop_reason = StopReason.END_TURN
         self._finished = False  # пришёл response.completed или response.incomplete
 
@@ -225,20 +225,40 @@ class _StreamAccumulator:
                     # content_filter и прочее: текст уже ушёл в стрим — завершаем шаг как есть.
                     logger.warning("llm.response_incomplete", provider="openai", reason=reason)
             case ResponseFailedEvent(response=response):
+                self._set_usage(response.usage)
                 error = response.error
                 message = f"{error.code}: {error.message}" if error else "unknown"
-                raise LLMError(f"OpenAI: ответ не получен: {message}", retryable=True)
+                raise LLMError(
+                    f"OpenAI: ответ не получен: {message}", retryable=True, usage=self._usage
+                )
             case ResponseErrorEvent(code=code, message=message):
-                raise LLMError(f"OpenAI: ошибка стрима: {code}: {message}", retryable=True)
+                raise LLMError(
+                    f"OpenAI: ошибка стрима: {code}: {message}", retryable=True, usage=self._usage
+                )
         return []
 
+    @property
+    def usage(self) -> Usage | None:
+        return self._usage
+
     def _set_usage(self, usage: ResponseUsage | None) -> None:
+        # input_tokens включает кэшированные (input_tokens_details.cached_tokens). SDK ответ
+        # не валидирует: у совместимых API details может не быть.
         if usage is not None:
-            self._usage = Usage(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
+            details = getattr(usage, "input_tokens_details", None)
+            self._usage = Usage(
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cache_read_tokens=getattr(details, "cached_tokens", None) or 0,
+            )
 
     def response(self) -> LLMResponse:
         if not self._finished:
-            raise LLMError("OpenAI: стрим закрыт без response.completed/incomplete", retryable=True)
+            raise LLMError(
+                "OpenAI: стрим закрыт без response.completed/incomplete",
+                retryable=True,
+                usage=self._usage,
+            )
         calls = tuple(
             ToolCall(
                 id=call.call_id,
@@ -255,7 +275,7 @@ class _StreamAccumulator:
             text="".join(self._text),
             tool_calls=calls,
             stop_reason=stop_reason,
-            usage=self._usage,
+            usage=self._usage or Usage(),
             provider_items=tuple(
                 item for _, item in sorted(self._provider_items, key=lambda pair: pair[0])
             ),

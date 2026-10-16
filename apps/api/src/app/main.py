@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
+import structlog
 from arq.connections import ArqRedis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +45,12 @@ from app.modules.tenants.public import admin_router as tenants_admin_router
 from app.modules.tenants.public import public_router as tenants_public_router
 from app.settings import Settings
 
+logger = structlog.get_logger(__name__)
+
+# Сколько lifespan ждёт прерванные ходы при остановке (stop_grace_period в compose.prod.yml
+# учитывает это время).
+SHUTDOWN_TURNS_WAIT_S = 3.0
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -57,6 +64,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cancel_listener.cancel()
     with suppress(asyncio.CancelledError):
         await cancel_listener
+    # Uvicorn по --timeout-graceful-shutdown отменяет ходы и сразу зовёт lifespan: даём
+    # прерванным ходам дописать журнал и трейс до закрытия БД, Redis и трейсера (O-12).
+    if not await turns.wait_idle(SHUTDOWN_TURNS_WAIT_S):
+        logger.warning("shutdown.turns_pending")
     summaries: SummaryScheduler = app.state.summary_scheduler
     await summaries.aclose()
     knowledge: KnowledgeServices | None = app.state.knowledge

@@ -56,6 +56,7 @@ class FakeConnector:
     discover_delay_s: float = 0.0
     discover_started: asyncio.Event = field(default_factory=asyncio.Event)
     calls: list[tuple[str, Any]] = field(default_factory=list)
+    released: list[SourceSpec] = field(default_factory=list)
 
     async def discover(self, source: SourceSpec) -> Listing:
         self.calls.append(("discover", source.config))
@@ -74,6 +75,9 @@ class FakeConnector:
     async def changed_since(self, source: SourceSpec, cursor: str) -> Listing:
         self.calls.append(("changed_since", cursor))
         return Listing([RawItemRef(ext) for ext in self.changes], self.cursor)
+
+    def release(self, source: SourceSpec) -> None:
+        self.released.append(source)
 
     def put(self, *items: RawItem) -> None:
         for item in items:
@@ -329,6 +333,22 @@ async def test_failed_item_does_not_stop_sync_and_is_not_deleted(env: Env) -> No
     assert record.stats["errors"] == ["flaky: FetchError: источник не ответил"]
     assert set(await env.documents()) == {"faq", "flaky"}
     assert await env.chunk_texts("faq") == ["Обновлено."]
+    # Записи источника освобождаются после каждой синхронизации (REVIEW.md: K-13).
+    released = [(s.tenant_id, s.source_id) for s in env.connector.released]
+    assert released == [(env.tenant_id, env.source_id)] * 2
+
+
+async def test_release_failure_does_not_change_sync_result(env: Env) -> None:
+    def broken_release(source: SourceSpec) -> None:
+        raise RuntimeError("release упал")
+
+    env.connector.put(doc("faq"))
+    env.connector.release = broken_release  # type: ignore[method-assign]
+
+    record = await env.sync_record(await env.sync())
+
+    assert record.status is SyncStatus.SUCCEEDED
+    assert set(await env.documents()) == {"faq"}
 
 
 async def test_discover_error_marks_sync_failed(env: Env) -> None:
@@ -340,6 +360,7 @@ async def test_discover_error_marks_sync_failed(env: Env) -> None:
     assert record.error == "RuntimeError: sitemap недоступен"
     assert record.finished_at is not None
     assert record.cursor is None
+    assert len(env.connector.released) == 1
 
 
 async def test_sync_deadline_marks_sync_failed(env: Env) -> None:
@@ -353,6 +374,7 @@ async def test_sync_deadline_marks_sync_failed(env: Env) -> None:
     assert record.status is SyncStatus.FAILED
     assert record.error == "TimeoutError: синхронизация не уложилась в 0.05 с"
     assert record.finished_at is not None
+    assert len(env.connector.released) == 1
 
 
 async def test_cancelled_sync_stays_running_and_is_rerun(env: Env) -> None:
@@ -367,6 +389,7 @@ async def test_cancelled_sync_stays_running_and_is_rerun(env: Env) -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert (await env.sync_record(sync_id)).status is SyncStatus.RUNNING
+    assert len(env.connector.released) == 1
 
     env.connector.discover_delay_s = 0
     await env.run(sync_id, {SourceKind.FILE: env.connector})

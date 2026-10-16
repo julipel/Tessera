@@ -40,6 +40,11 @@ class SourceConnector(Protocol):
         """Элементы, изменённые после `cursor`. Удалений не сообщает."""
         ...
 
+    def release(self, source: SourceSpec) -> None:
+        """Синхронизация источника закончилась (в том числе ошибкой): освободить данные,
+        которые коннектор запомнил для `fetch`."""
+        ...
+
 
 class Chunker(Protocol):
     def chunk(self, text: str) -> list[ChunkDraft]: ...

@@ -198,6 +198,7 @@ class SourceConnector(Protocol):  # knowledge/domain/ports.py
     async def discover(self, source: SourceSpec) -> Listing: ...               # полный список + курсор
     async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem: ...  # DocumentItem | EntityItem
     async def changed_since(self, source: SourceSpec, cursor) -> Listing: ...  # инкрементально
+    def release(self, source: SourceSpec) -> None: ...                          # синхронизация закончена
 ```
 `SourceSpec = (tenant_id, source_id, config)` — коннектор знает владельца источника (ADR-0012).
 `Listing = (refs, cursor)`: курсор для следующего `changed_since`. Коннектор отдаёт уже
@@ -213,6 +214,21 @@ class SourceConnector(Protocol):  # knowledge/domain/ports.py
   `failed`, удалить можно полной синхронизацией (REVIEW.md: K-6).
 - Каждый элемент коммитится отдельно; ошибка элемента считается в `stats.failed`,
   синхронизация продолжается. Ошибка листинга или нет коннектора — `SourceSync.failed`.
+- Записи или страницы, полученные в `discover`, коннектор держит для `fetch` до конца
+  синхронизации, без вытеснения (`SyncCache`): `fetch` не идёт в источник на каждый элемент.
+  `run_sync` в конце, в том числе при ошибке, дедлайне и отмене, вызывает `release`, и данные
+  источника не живут в воркере дольше синхронизации (REVIEW.md: K-5, K-13). У источника одна
+  синхронизация за раз (`open_sync`). Разбор недоверенных данных (HTML, sitemap, JSON,
+  маппинг записей и строк) — в потоке (`asyncio.to_thread`), не в event loop (K-7).
+  - Кэш таблиц `table` читается и пишется в event loop, а не в потоке разбора. Иначе поток,
+    который дочитывает таблицу после отмены, положил бы её в кэш уже после `release`.
+  - Сбой `release` логируется (`ingestion.release_failed`) и исход синхронизации не меняет.
+  - Потолок памяти воркера — число параллельных задач (`max_jobs`), умноженное на лимит
+    источника: строки `database`, записи `http_api`, страницы `website`. Раньше его держал
+    LRU на 4 источника, ценой N² запросов к источнику.
+  - Поток нужен ради отзывчивости loop (heartbeat arq, соседние задачи), а не ради
+    параллельности: разбор держит GIL. Пул потоков общий с `getaddrinfo`. Если разборы
+    начнут задерживать DNS, понадобится отдельный ограниченный executor.
 Реализации: `website` (краулер + sitemap), `file` (PDF/DOCX/MD/TXT; файлы в
 `<KNOWLEDGE_FILES_DIR>/<tenant_id>/<source_id>/`, приводятся к markdown: DOCX — заголовки
 по стилям `Heading N`/`Title`, списки, таблицы; PDF — текст постранично, без заголовков
@@ -326,7 +342,9 @@ config:
 URL остаётся в листинге без кэша: `fetch` повторит запрос, при неудаче — ошибка элемента
 (не удаляется). Ошибка синхронизации: неверный конфиг, недоступен robots.txt, стартовая
 страница недоступна или запрещена, явный sitemap недоступен, вышло `max_duration_s`.
-Курсора нет — каждая синхронизация полная; страницы обхода кэшируются для `fetch`.
+Курсора нет — каждая синхронизация полная; страницы обхода, robots.txt и пауза хранятся до
+конца синхронизации: страницу, которой нет в обходе, `fetch` запрашивает с теми же правилами
+и паузой, не скачивая robots.txt заново (REVIEW.md: K-11).
 
 ### Источники тенанта в YAML (ADR-0019)
 `config/tenants/<slug>.yaml` → `sources: [{name, kind, config, files?}]`. `make seed` создаёт/

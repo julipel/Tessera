@@ -49,6 +49,9 @@ class OneDocConnector:
     async def changed_since(self, source: SourceSpec, cursor: str) -> Listing:
         return Listing([], cursor)
 
+    def release(self, source: SourceSpec) -> None:
+        pass
+
 
 @dataclass
 class FakeSyncQueue:

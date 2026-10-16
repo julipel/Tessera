@@ -15,13 +15,13 @@ Read-only и изоляция от сети платформы (ADR-0018):
 синхронизации: неверный конфиг, DSN или адрес, ошибка запроса или подключения, таймаут,
 больше `max_rows` строк, нет колонки из маппинга. Ошибки строк (пустой или повторяющийся id,
 нескалярное значение) — ошибки элементов. Курсора нет: каждая синхронизация полная, записи
-discover кэшируются для `fetch`.
+discover хранятся для `fetch` до конца
+синхронизации (`release`).
 """
 
 import asyncio
 import ipaddress
 import ssl
-from collections import OrderedDict
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
@@ -51,19 +51,18 @@ from app.modules.knowledge.infrastructure.record_mapping import (
     map_records,
 )
 from app.modules.knowledge.infrastructure.source_secrets import SourceSecretError, SourceSecrets
+from app.modules.knowledge.infrastructure.sync_cache import SyncCache
 from app.modules.knowledge.infrastructure.web_guard import (
     Resolver,
     is_public_address,
     resolve_host,
 )
-from app.modules.shared.kernel import TenantId
 
 type Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 MAX_ROWS_CAP = 200_000
 MAX_TIMEOUT_S = 600.0
 DEFAULT_CONNECT_TIMEOUT_S = 10.0
-DEFAULT_CACHE_SIZE = 4
 FETCH_BATCH = 1000
 
 
@@ -169,38 +168,34 @@ class DatabaseConnector:
         allowed_networks: Sequence[Network] = (),
         resolver: Resolver = resolve_host,
         connect_timeout_s: float = DEFAULT_CONNECT_TIMEOUT_S,
-        cache_size: int = DEFAULT_CACHE_SIZE,
     ) -> None:
         self.secrets = secrets
         self.allowed_networks = list(allowed_networks)
         self.resolver = resolver
         self.connect_timeout_s = connect_timeout_s
-        self.cache_size = cache_size
-        # Записи последнего discover источника: fetch берёт их, не выполняя запрос заново.
-        self._cache: OrderedDict[tuple[TenantId, UUID], dict[str, MappedRecord]] = OrderedDict()
+        # Записи discover источника на время синхронизации: fetch не выполняет запрос заново.
+        self._cache: SyncCache[dict[str, MappedRecord]] = SyncCache()
 
     async def discover(self, source: SourceSpec) -> Listing:
-        records = await self._load(source)
-        key = (source.tenant_id, source.source_id)
-        self._cache[key] = records
-        self._cache.move_to_end(key)
-        while len(self._cache) > self.cache_size:
-            self._cache.popitem(last=False)
+        records = self._cache.put(source, await self._load(source))
         return Listing([RawItemRef(external_id) for external_id in records])
 
     async def changed_since(self, source: SourceSpec, cursor: str) -> Listing:
         return await self.discover(source)
 
     async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem:
-        records = self._cache.get((source.tenant_id, source.source_id))
-        if records is None or ref.external_id not in records:
-            records = await self._load(source)
+        records = self._cache.get(source)
+        if records is None:
+            records = self._cache.put(source, await self._load(source))
         record = records.get(ref.external_id)
         if record is None:
             raise DatabaseSourceError(f"запись не найдена: {ref.external_id}")
         if record.item is None:
             raise DatabaseSourceError(record.error)
         return record.item
+
+    def release(self, source: SourceSpec) -> None:
+        self._cache.release(source)
 
     async def _load(self, source: SourceSpec) -> dict[str, MappedRecord]:
         config = _parse_config(source.config)
@@ -220,7 +215,10 @@ class DatabaseConnector:
             ) from e
         except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError) as e:
             raise DatabaseSourceError(f"{dsn.host}: {type(e).__name__}: {e}") from e
-        return map_records((_row_record(row) for row in rows), mapping)
+        # До max_rows строк — в потоке, не в event loop (REVIEW.md: K-7).
+        return await asyncio.to_thread(
+            lambda: map_records((_row_record(row) for row in rows), mapping)
+        )
 
     async def _checked_address(self, host: str, port: int) -> str:
         try:

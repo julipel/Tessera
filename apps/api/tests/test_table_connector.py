@@ -1,6 +1,8 @@
 """Коннектор `table`: CSV/XLSX → Entity по маппингу колонок, ошибки строк, курсор, кэш."""
 
+import asyncio
 import os
+import threading
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -263,6 +265,57 @@ async def test_changed_file_is_parsed_again(
 
     write(base / "t.csv", CSV_HEADER + "A;Стало;1;;;;\n", mtime_ns=2_000)
     assert (await connector.fetch(source, RawItemRef("A"))).title == "Стало"
+
+
+async def test_table_is_parsed_once_per_sync(
+    connector: TableConnector, source: SourceSpec, base: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """K-5: таблица разбирается раз на синхронизацию, а не на строку; release её освобождает."""
+    write(base / "t.csv", CSV_HEADER + "A;Крем;1;;;;\nB;Гель;1;;;;\n", mtime_ns=1_000)
+    parses: list[int] = []
+    parse = connector._parse
+
+    def spy(*args: Any) -> Any:
+        parses.append(1)
+        return parse(*args)
+
+    monkeypatch.setattr(connector, "_parse", spy)
+    assert set(await fetch_all(connector, source)) == {"A", "B"}
+    assert len(parses) == 1
+
+    connector.release(source)
+    await connector.fetch(source, RawItemRef("A"))
+    assert len(parses) == 2
+
+
+async def test_cancelled_load_does_not_cache_after_release(
+    connector: TableConnector, source: SourceSpec, base: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """K-13: поток дочитывает таблицу после отмены, но в кэш она уже не попадает."""
+    write(base / "t.csv", CSV_HEADER + "A;Крем;1;;;;\n", mtime_ns=1_000)
+    started, finish, done = threading.Event(), threading.Event(), threading.Event()
+    parse = connector._parse
+
+    def slow(*args: Any) -> Any:
+        started.set()
+        finish.wait(5)
+        try:
+            return parse(*args)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(connector, "_parse", slow)
+    task = asyncio.create_task(connector.discover(source))
+    await asyncio.to_thread(started.wait, 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    connector.release(source)
+    finish.set()
+    assert await asyncio.to_thread(done.wait, 5)
+    await asyncio.sleep(0.01)  # поток вернул таблицу; дать loop шанс положить её в кэш
+
+    assert len(connector._cache) == 0
 
 
 async def test_symlinked_tables_are_ignored(

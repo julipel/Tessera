@@ -17,17 +17,19 @@ robots.txt у каждого origin свой (RFC 9309: схема, хост, п
 до обхода, для остальных origin хостов источника (http↔https после редиректа, ссылки с другой
 схемой) — при первом обращении. Недоступный robots такого origin запрещает его страницы.
 
-Разобранные при обходе страницы кэшируются для `fetch`. Курсора нет: каждая синхронизация —
-полный обход, неизменённые страницы отсекает `content_hash`.
+Разобранные при обходе страницы и правила сайта (robots.txt, пауза) хранятся до конца
+синхронизации (`release`): `fetch` берёт страницу из обхода, а страницу, которой там нет
+(временная ошибка при обходе), запрашивает с теми же правилами и паузой. Разбор HTML и
+sitemap — в потоке, не в event loop. Курсора нет: каждая синхронизация — полный обход,
+неизменённые страницы отсекает `content_hash`.
 """
 
 import asyncio
-from collections import OrderedDict, deque
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
-from uuid import UUID
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -40,7 +42,11 @@ from app.modules.knowledge.domain.ingestion import (
     RawItemRef,
     SourceSpec,
 )
-from app.modules.knowledge.infrastructure.html_extract import decode_html, extract_page
+from app.modules.knowledge.infrastructure.html_extract import (
+    ExtractedPage,
+    decode_html,
+    extract_page,
+)
 from app.modules.knowledge.infrastructure.robots import (
     DISALLOW_ALL,
     RobotsRules,
@@ -51,6 +57,7 @@ from app.modules.knowledge.infrastructure.sitemap import (
     DEFAULT_MAX_BYTES as SITEMAP_MAX_BYTES,
 )
 from app.modules.knowledge.infrastructure.sitemap import SitemapError, parse_sitemap
+from app.modules.knowledge.infrastructure.sync_cache import SyncCache
 from app.modules.knowledge.infrastructure.web_client import (
     WebClient,
     WebFetchError,
@@ -58,7 +65,6 @@ from app.modules.knowledge.infrastructure.web_client import (
     WebResponse,
 )
 from app.modules.knowledge.infrastructure.web_urls import normalize_url
-from app.modules.shared.kernel import TenantId
 
 logger = structlog.get_logger(__name__)
 
@@ -67,7 +73,6 @@ MAX_ROBOTS_DELAY_S = 10.0
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_SITEMAP_FILES = 50
 MAX_SITEMAP_NESTING = 2
-DEFAULT_CACHE_SIZE = 4
 
 _HTML = frozenset({"text/html", "application/xhtml+xml"})
 
@@ -125,6 +130,14 @@ class _Site:
             self.delay_s = max(self.delay_s, min(rules.crawl_delay, MAX_ROBOTS_DELAY_S))
 
 
+@dataclass(slots=True)
+class _Crawl:
+    """Обход источника на время синхронизации: правила сайта и разобранные страницы."""
+
+    site: _Site
+    pages: dict[str, DocumentItem] = field(default_factory=dict)
+
+
 class WebsiteConnector:
     kind = SourceKind.WEBSITE
 
@@ -134,14 +147,11 @@ class WebsiteConnector:
         *,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         max_pages_cap: int = MAX_PAGES_CAP,
-        cache_size: int = DEFAULT_CACHE_SIZE,
     ) -> None:
         self.client = client
         self.sleep = sleep
         self.max_pages_cap = max_pages_cap
-        self.cache_size = cache_size
-        # Страницы последнего обхода источника: fetch берёт их, не скачивая заново.
-        self._cache: OrderedDict[tuple[TenantId, UUID], dict[str, DocumentItem]] = OrderedDict()
+        self._crawls: SyncCache[_Crawl] = SyncCache()
 
     async def discover(self, source: SourceSpec) -> Listing:
         site = await self._open(source)
@@ -150,27 +160,30 @@ class WebsiteConnector:
                 refs, pages = await self._crawl(site)
         except TimeoutError as e:
             raise WebsiteSourceError(f"обход не уложился в {site.config.max_duration_s} с") from e
-        key = (source.tenant_id, source.source_id)
-        self._cache[key] = pages
-        self._cache.move_to_end(key)
-        while len(self._cache) > self.cache_size:
-            self._cache.popitem(last=False)
+        self._crawls.put(source, _Crawl(site, pages))
         return Listing(refs)
 
     async def changed_since(self, source: SourceSpec, cursor: str) -> Listing:
         return await self.discover(source)
 
     async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem:
-        cached = self._cache.get((source.tenant_id, source.source_id), {})
-        if ref.external_id in cached:
-            return cached[ref.external_id]
-        site = await self._open(source)
+        crawl = self._crawls.get(source)
+        if crawl is None:
+            crawl = self._crawls.put(source, _Crawl(await self._open(source)))
+        if ref.external_id in crawl.pages:
+            return crawl.pages[ref.external_id]
+        # Правила и счётчик запросов обхода: robots.txt не качается заново, пауза между
+        # запросами соблюдается и здесь (REVIEW.md: K-11).
+        site = crawl.site
         if not await self._allowed(site, ref.external_id):
             raise WebsiteSourceError(f"{ref.external_id}: вне источника или запрещено robots.txt")
         try:
             return await self._page(site, ref.external_id)
         except (WebFetchError, _PageGoneError) as e:
             raise WebsiteSourceError(str(e)) from e
+
+    def release(self, source: SourceSpec) -> None:
+        self._crawls.release(source)
 
     async def _open(self, source: SourceSpec) -> _Site:
         config = _parse_config(source.config)
@@ -257,7 +270,7 @@ class WebsiteConnector:
             raise _PageGoneError(f"{url}: HTTP {response.status}")
         if not await self._allowed(site, response.url):
             raise _PageGoneError(f"{url}: редирект на запрещённый адрес {response.url}")
-        extracted = extract_page(decode_html(response.body, response.charset), response.url)
+        extracted = await asyncio.to_thread(_extract, response)
         if extracted.noindex or not extracted.text.strip():
             return None, extracted.links
         page = DocumentItem(
@@ -289,7 +302,7 @@ class WebsiteConnector:
                 response = await self._get(site, url, max_bytes=SITEMAP_MAX_BYTES)
                 if not 200 <= response.status < 300:
                     raise WebFetchError(f"{url}: HTTP {response.status}")
-                sitemap = parse_sitemap(response.body)
+                sitemap = await asyncio.to_thread(parse_sitemap, response.body)
             except (WebFetchError, SitemapError) as e:
                 if required:
                     raise WebsiteSourceError(f"sitemap недоступен: {e}") from e
@@ -307,6 +320,11 @@ class WebsiteConnector:
             await self.sleep(site.delay_s)
         site.requests += 1
         return await self.client.get(url, allowed_hosts=site.hosts, **kwargs)
+
+
+def _extract(response: WebResponse) -> ExtractedPage:
+    """До MAX_PAGE_BYTES недоверенного HTML: вызывается в потоке (REVIEW.md: K-7)."""
+    return extract_page(decode_html(response.body, response.charset), response.url)
 
 
 def _origin(url: str) -> str:

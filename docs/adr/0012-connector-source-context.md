@@ -14,6 +14,9 @@ P4-03 вводит коннектор `file` (PDF/DOCX/MD/TXT). Хранилищ
 - Методы `SourceConnector` (`discover`, `fetch`, `changed_since`) принимают
   `SourceSpec(tenant_id, source_id, config)` вместо голого `config`. `run_sync` собирает
   его из `SyncJob`.
+- Дополнение (P9-01z): `release(source)` — `run_sync` сообщает коннектору, что
+  синхронизация закончилась (и при ошибке), и тот освобождает данные, запомненные для
+  `fetch` (architecture.md §8).
 - Коннектор `file` читает только каталог `<KNOWLEDGE_FILES_DIR>/<tenant_id>/<source_id>/`.
   Каталог вычисляет коннектор, конфиг на путь не влияет. Симлинки и `..` в `external_id`
   отклоняются, скрытые файлы не читаются.

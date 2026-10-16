@@ -11,15 +11,15 @@
 синхронизации: неверный конфиг или секрет, не-2xx или не-JSON ответ любой страницы, нет
 массива по пути `records`, больше `max_pages` страниц или `max_records` записей, зацикленный
 курсор. Пустой или повторяющийся id, пустое название, неразбираемая цена — ошибки элементов.
-Курсора синхронизации нет: каждая — полная, записи discover кэшируются для `fetch`.
+Курсора синхронизации нет: каждая — полная, записи discover хранятся для `fetch` до конца
+синхронизации (`release`).
 """
 
+import asyncio
 import base64
 import json
-from collections import OrderedDict
 from typing import Any, Literal, Self, cast
 from urllib.parse import urlsplit
-from uuid import UUID
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -48,14 +48,13 @@ from app.modules.knowledge.infrastructure.record_mapping import (
     map_records,
 )
 from app.modules.knowledge.infrastructure.source_secrets import SourceSecretError, SourceSecrets
+from app.modules.knowledge.infrastructure.sync_cache import SyncCache
 from app.modules.knowledge.infrastructure.web_client import WebClient, WebFetchError
 from app.modules.knowledge.infrastructure.web_urls import normalize_url
-from app.modules.shared.kernel import TenantId
 
 MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 MAX_PAGES_CAP = 1000
 MAX_RECORDS_CAP = 100_000
-DEFAULT_CACHE_SIZE = 4
 
 # Заголовки, которые задаёт клиент или которые несут секреты (секреты — только через `auth`).
 _RESERVED_HEADERS = frozenset(
@@ -175,41 +174,32 @@ class HttpApiSourceConfig(_Config):
 class HttpApiConnector:
     kind = SourceKind.HTTP_API
 
-    def __init__(
-        self,
-        client: WebClient,
-        secrets: SourceSecrets,
-        *,
-        cache_size: int = DEFAULT_CACHE_SIZE,
-    ) -> None:
+    def __init__(self, client: WebClient, secrets: SourceSecrets) -> None:
         self.client = client
         self.secrets = secrets
-        self.cache_size = cache_size
-        # Записи последнего discover источника: fetch берёт их, не запрашивая API заново.
-        self._cache: OrderedDict[tuple[TenantId, UUID], dict[str, MappedRecord]] = OrderedDict()
+        # Записи discover источника на время синхронизации: fetch не запрашивает API заново.
+        self._cache: SyncCache[dict[str, MappedRecord]] = SyncCache()
 
     async def discover(self, source: SourceSpec) -> Listing:
-        records = await self._load(source)
-        key = (source.tenant_id, source.source_id)
-        self._cache[key] = records
-        self._cache.move_to_end(key)
-        while len(self._cache) > self.cache_size:
-            self._cache.popitem(last=False)
+        records = self._cache.put(source, await self._load(source))
         return Listing([RawItemRef(external_id) for external_id in records])
 
     async def changed_since(self, source: SourceSpec, cursor: str) -> Listing:
         return await self.discover(source)
 
     async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem:
-        records = self._cache.get((source.tenant_id, source.source_id))
-        if records is None or ref.external_id not in records:
-            records = await self._load(source)
+        records = self._cache.get(source)
+        if records is None:
+            records = self._cache.put(source, await self._load(source))
         record = records.get(ref.external_id)
         if record is None:
             raise HttpApiSourceError(f"запись не найдена: {ref.external_id}")
         if record.item is None:
             raise HttpApiSourceError(record.error)
         return record.item
+
+    def release(self, source: SourceSpec) -> None:
+        self._cache.release(source)
 
     async def _load(self, source: SourceSpec) -> dict[str, MappedRecord]:
         config = _parse_config(source.config)
@@ -242,7 +232,11 @@ class HttpApiConnector:
             raise HttpApiSourceError(
                 f"больше max_pages={config.pagination.max_pages} страниц: листинг неполный"
             )
-        return map_records((_json_record(r) for r in records), config.mapping())
+        mapping = config.mapping()
+        # Разбор до max_records записей — в потоке, не в event loop (REVIEW.md: K-7).
+        return await asyncio.to_thread(
+            lambda: map_records((_json_record(r) for r in records), mapping)
+        )
 
     def _auth_headers(self, auth: HttpAuth | None) -> dict[str, str]:
         if auth is None:
@@ -268,7 +262,7 @@ class HttpApiConnector:
         if not 200 <= response.status < 300:
             raise HttpApiSourceError(f"{response.url}: HTTP {response.status}")
         try:
-            return response.url, json.loads(response.body)
+            return response.url, await asyncio.to_thread(json.loads, response.body)
         except ValueError as e:
             raise HttpApiSourceError(f"{response.url}: ответ не JSON: {e}") from e
 

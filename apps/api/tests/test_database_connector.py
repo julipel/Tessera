@@ -4,6 +4,7 @@
 allowlist подсетей, как при `SOURCE_DB_ALLOWED_NETWORKS=["127.0.0.0/8"]`.
 """
 
+import threading
 from collections.abc import AsyncIterator
 from decimal import Decimal
 from typing import Any
@@ -14,6 +15,7 @@ import pytest
 from sqlalchemy import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.knowledge.infrastructure.record_mapping import map_records
 from app.modules.knowledge.public import (
     DatabaseConnector,
     DatabaseSourceError,
@@ -256,7 +258,7 @@ async def test_bad_config_or_secret_is_source_error(config: dict[str, Any]) -> N
         await connector("postgresql://u:p@h/db").discover(spec("s", **config))
 
 
-async def test_fetch_reloads_without_cache(client_db: tuple[str, str]) -> None:
+async def test_fetch_without_discover_loads_records(client_db: tuple[str, str]) -> None:
     dsn, schema = client_db
     source = spec(schema)
 
@@ -265,6 +267,35 @@ async def test_fetch_reloads_without_cache(client_db: tuple[str, str]) -> None:
     assert item.title == "Крем"
     with pytest.raises(DatabaseSourceError, match="не найдена"):
         await connector(dsn).fetch(source, RawItemRef("Z"))
+
+
+async def test_records_load_once_per_sync_off_event_loop(
+    client_db: tuple[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """K-5, K-7: запрос — раз на синхронизацию, а не на элемент; маппинг строк — в потоке;
+    release освобождает записи."""
+    dsn, schema = client_db
+    loads: list[int] = []
+
+    def spy(*args: Any) -> Any:
+        loads.append(threading.get_ident())
+        return map_records(*args)
+
+    monkeypatch.setattr("app.modules.knowledge.infrastructure.database_connector.map_records", spy)
+    db = connector(dsn)
+    source = spec(schema)
+
+    listing = await db.discover(source)
+    for ref in listing.refs:
+        await db.fetch(source, ref)
+    with pytest.raises(DatabaseSourceError, match="не найдена"):
+        await db.fetch(source, RawItemRef("Z"))
+    assert len(loads) == 1
+    assert threading.get_ident() not in loads
+
+    db.release(source)
+    await db.fetch(source, RawItemRef("A-1"))
+    assert len(loads) == 2
 
 
 def test_satisfies_protocol() -> None:

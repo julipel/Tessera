@@ -2,6 +2,7 @@
 
 import base64
 import json
+import threading
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -10,6 +11,7 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.knowledge.infrastructure.record_mapping import map_records
 from app.modules.knowledge.public import (
     DocumentItem,
     DocumentRepository,
@@ -432,6 +434,49 @@ async def test_fetch_uses_discover_cache_and_reloads_without_it() -> None:
     assert (await other.fetch(source, RawItemRef("A"))).title == "Крем"
     with pytest.raises(HttpApiSourceError, match="не найдена"):
         await other.fetch(source, RawItemRef("Z"))
+    assert len(api.requests) == 2  # записи загружены один раз на синхронизацию
+
+
+async def test_parallel_syncs_keep_records_until_release() -> None:
+    """K-5: сколько бы синхронизаций ни шло разом, API запрашивается раз на источник, а не
+    на каждый элемент; release освобождает записи источника."""
+    api = Api(static([product("A"), product("B")]))
+    connector = api.connector()
+    sources = [spec() for _ in range(12)]
+
+    for source in sources:
+        await connector.discover(source)
+    for source in sources:
+        for external_id in ("A", "B"):
+            await connector.fetch(source, RawItemRef(external_id))
+    assert len(api.requests) == len(sources)
+
+    connector.release(sources[0])
+    await connector.fetch(sources[0], RawItemRef("A"))
+    await connector.fetch(sources[1], RawItemRef("A"))
+    assert len(api.requests) == len(sources) + 1
+
+
+async def test_parsing_runs_off_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """K-7: json.loads и маппинг до 20 МБ ответа не блокируют event loop."""
+    threads: dict[str, int] = {}
+
+    def spy(name: str, func: Any) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            threads[name] = threading.get_ident()
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(json, "loads", spy("json", json.loads))
+    monkeypatch.setattr(
+        "app.modules.knowledge.infrastructure.http_api_connector.map_records",
+        spy("map", map_records),
+    )
+
+    assert set(await items(Api(static([product("A")])))) == {"A"}
+    assert set(threads) == {"json", "map"}
+    assert threading.get_ident() not in threads.values()
 
 
 def test_source_secrets_only_prefixed_names() -> None:

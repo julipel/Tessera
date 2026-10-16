@@ -132,6 +132,30 @@ async def _ingest(
         raise NoConnectorError(f"нет коннектора для источника вида {job.kind}")
 
     source = SourceSpec(tenant_id, job.source_id, job.config)
+    try:
+        return await _process(tenant_id, job, store, connector, source, indexing, stats, full=full)
+    finally:
+        # И при ошибке или дедлайне: записи источника не должны жить в воркере после
+        # синхронизации (REVIEW.md: K-13). Сбой release не подменяет исход синхронизации.
+        try:
+            connector.release(source)
+        except Exception:
+            logger.exception(
+                "ingestion.release_failed", tenant_id=str(tenant_id), source_id=str(job.source_id)
+            )
+
+
+async def _process(
+    tenant_id: TenantId,
+    job: SyncJob,
+    store: SyncStore,
+    connector: SourceConnector,
+    source: SourceSpec,
+    indexing: "_Indexing",
+    stats: SyncStats,
+    *,
+    full: bool,
+) -> str | None:
     previous = None if full else await store.last_cursor(tenant_id, job.source_id)
     if previous is not None:
         stats.incremental = True

@@ -1,12 +1,15 @@
 """Коннектор `website`: обход по sitemap и ссылкам, robots, что попадает в листинг, кэш."""
 
 import asyncio
+import threading
 from typing import Any
 from uuid import uuid4
 
 import httpx
 import pytest
 
+from app.modules.knowledge.infrastructure.html_extract import extract_page
+from app.modules.knowledge.infrastructure.sitemap import parse_sitemap
 from app.modules.knowledge.public import (
     DocumentItem,
     RawItemRef,
@@ -239,7 +242,7 @@ async def test_fetch_uses_crawl_cache_then_network() -> None:
     assert (item.url, item.text) == (f"{SITE}/a", "Страница А")
     assert len(site.requests) == requests
 
-    # Без кэша (другой источник или вытеснен) — скачивается заново, с проверкой robots.
+    # Без кэша (другой источник или после release) — скачивается заново, с проверкой robots.
     other = spec()
     fresh = await connector.fetch(other, RawItemRef(f"{SITE}/a"))
     assert fresh == item
@@ -256,6 +259,77 @@ async def test_crawl_delay_from_config_and_robots() -> None:
     site = Site({"/robots.txt": (200, "text/plain", "User-agent: *\nCrawl-delay: 60"), "/": page()})
     await site.connector().discover(spec())
     assert set(site.sleeps) == {10.0}  # Crawl-delay из robots ограничен сверху
+
+
+async def test_fetch_miss_keeps_crawl_robots_and_delay() -> None:
+    """K-11: страница с временной ошибкой обхода запрашивается в fetch без повторного
+    robots.txt и с паузой между запросами."""
+    robots = "User-agent: *\nCrawl-delay: 2"
+    site = Site(
+        {
+            "/robots.txt": (200, "text/plain", robots),
+            "/": page("/down", "/busy"),
+            "/down": (503, "text/html", ""),
+            "/busy": (503, "text/html", ""),
+        }
+    )
+    connector = site.connector()
+    source = spec(crawl_delay_s=0.1)
+    await connector.discover(source)
+    requests, sleeps = len(site.requests), len(site.sleeps)
+    site.routes["/down"] = site.routes["/busy"] = page(text="Ожила")
+
+    for path in ("/down", "/busy"):
+        item = await connector.fetch(source, RawItemRef(f"{SITE}{path}"))
+        assert isinstance(item, DocumentItem) and item.text == "Ожила"
+    assert site.requests[requests:] == ["/down", "/busy"]
+    assert site.sleeps[sleeps:] == [2.0, 2.0]
+
+
+async def test_release_forgets_crawl_of_source() -> None:
+    """K-5, K-13: обход источника живёт до release, без вытеснения другими источниками."""
+    site = Site({"/": page("/a"), "/a": page(text="Страница А")})
+    connector = site.connector()
+    sources = [spec() for _ in range(6)]
+    for source in sources:
+        await connector.discover(source)
+    requests = len(site.requests)
+
+    for source in sources:
+        await connector.fetch(source, RawItemRef(f"{SITE}/a"))
+    assert len(site.requests) == requests
+
+    connector.release(sources[0])
+    await connector.fetch(sources[0], RawItemRef(f"{SITE}/a"))
+    await connector.fetch(sources[0], RawItemRef(f"{SITE}/a"))
+    # Без обхода robots.txt читается один раз до release.
+    assert site.requests[requests:] == ["/robots.txt", "/a", "/a"]
+
+
+async def test_parsing_runs_off_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """K-7: разбор HTML (до 5 МБ) и sitemap (до 50 МБ) не блокирует event loop."""
+    threads: dict[str, int] = {}
+
+    def spy(name: str, func: Any) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            threads[name] = threading.get_ident()
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(
+        "app.modules.knowledge.infrastructure.website_connector.extract_page",
+        spy("html", extract_page),
+    )
+    monkeypatch.setattr(
+        "app.modules.knowledge.infrastructure.website_connector.parse_sitemap",
+        spy("sitemap", parse_sitemap),
+    )
+    site = Site({"/sitemap.xml": urlset("/a"), "/": page(), "/a": page()})
+
+    assert await listed(site) == ["/", "/a"]
+    assert set(threads) == {"html", "sitemap"}
+    assert threading.get_ident() not in threads.values()
 
 
 def test_satisfies_protocol() -> None:

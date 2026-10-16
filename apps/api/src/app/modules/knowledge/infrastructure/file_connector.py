@@ -60,6 +60,9 @@ class FileConnector:
     async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem:
         return await asyncio.to_thread(self._read, source, ref.external_id)
 
+    def release(self, source: SourceSpec) -> None:
+        """Файл читается на каждый fetch: запоминать нечего."""
+
     def _read(self, source: SourceSpec, external_id: str) -> DocumentItem:
         path = self.files.resolve(source, external_id)
         parser = self.parsers[path.suffix.lower()]

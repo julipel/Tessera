@@ -34,8 +34,22 @@ from app.modules.observability.public import LangfuseTracer
         ),
         ("8 999 111 22 33 8 999 444 55 66", "[phone] [phone]"),
         ("4111 1111 1111 1111 89991112233", "[card] [phone]"),
-        # Похоже на карту, но сумма Луна не сходится: намеренно частично (докстринг pii.py).
-        ("1234 5678 9012 3456", "[phone] 3456"),
+        # Четыре группы по 4 — карта, хотя сумма Луна не сходится (опечатка; O-10).
+        ("1234 5678 9012 3456", "[card]"),
+        ("карта 1234-5678-9012-3456.", "карта [card]."),
+        # Тонкие пробелы, неразрывный дефис и тире как разделители (O-10).
+        ("+7\u2009999\u2009111\u201122\u201133", "[phone]"),
+        ("8\u202f999\u202f111\u202f22\u202f33", "[phone]"),
+        ("4111\u20091111\u20091111\u20091111", "[card]"),
+        # Телефон вплотную к русскому слову (O-10).
+        ("звони89991112233", "звони[phone]"),
+        ("89991112233позвоните", "[phone]позвоните"),
+        ("тел:+79991112233", "тел:[phone]"),
+        # Ссылки на Telegram (O-10).
+        ("пишите в t.me/anna_k", "пишите в [handle]"),
+        ("https://t.me/anna_k_shop?start=1", "[handle]?start=1"),
+        ("TELEGRAM.ME/Anna_K", "[handle]"),
+        ("чат t.me/+AbCdEf12 и t.me/joinchat/abc", "чат [handle] и [handle]"),
     ],
 )
 def test_contacts_are_masked(text: str, masked: str) -> None:
@@ -55,6 +69,16 @@ def test_contacts_are_masked(text: str, masked: str) -> None:
         "скидка 15% на второй товар",
         "Доставка 15.10.2026 10.11.2026",
         "8 999 123 45 67x",
+        "Артикул AB89991112233",
+        "сорт Snow\u2009White, высота 40\u201360 см",
+        "номер заказа 1234567890123456",
+        "https://example.ru/t.me/x",
+        # Диапазоны через тире — не телефоны (тире не разделитель номера).
+        "бюджет 10 000\u201315 000 \u20bd",
+        "бюджет 50 000\u2013100 000",
+        "300 000\u2014500 000 \u20bd",
+        "бюджет 9\u202f000\u202f000\u201312\u202f000\u202f000",
+        "диапазон 1000\u20132000\u20133000\u20134000",
     ],
 )
 def test_ordinary_texts_are_unchanged(text: str) -> None:
@@ -63,7 +87,21 @@ def test_ordinary_texts_are_unchanged(text: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "text", ["a" * 20_000, "1." * 10_000, "a@" * 10_000, "1 " * 10_000, "anna" + "." * 20_000]
+    "text",
+    [
+        "a" * 20_000,
+        "1." * 10_000,
+        "a@" * 10_000,
+        "1 " * 10_000,
+        "anna" + "." * 20_000,
+        "1\u2009" * 10_000,
+        "1234 " * 5_000,
+        "t.me/" * 5_000,
+        "https://t.me" * 2_000,
+        '"slots": {' * 5_000,
+        '"slots": {"a": [' * 3_000,
+        '"facts": [1, ' * 20_000,
+    ],
 )
 def test_masking_time_is_linear(text: str) -> None:
     """Маскирование синхронно в корутине хода: длинный текст не должен её блокировать.
@@ -225,4 +263,92 @@ def test_facts_are_hidden_in_arguments_and_in_prompt_state() -> None:
     masked = mask_pii({"system": prompt})["system"]
     assert "Юлия" not in masked and "Тверской" not in masked
     assert f'"facts": ["{HIDDEN}", "{HIDDEN}"]' in masked
-    assert '"budget": "3000"' in masked and masked.endswith("Сводка ранней части диалога: нет")
+    assert f'"budget": "{HIDDEN}"' in masked and masked.endswith("Сводка ранней части диалога: нет")
+
+
+def test_slot_values_are_hidden_with_names_kept() -> None:
+    """Слоты — адреса, имена получателей (O-10): значения скрыты, названия видны."""
+    arguments = {"slots": {"location": "Мытищи, ул. Лесная 5", "plot_size_sotki": 6, "goal": ""}}
+    state = {"slots": {"landscape_visit": {"location": "Мытищи", "tags": ["газон", "сад"]}}}
+    prompt = "Состояние:\n" + json.dumps(
+        {"slots": {"location": "ул. Лесная }5"}, "active_scenario": "landscape_visit"},
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    assert mask_pii(arguments) == {
+        "slots": {"location": HIDDEN, "plot_size_sotki": HIDDEN, "goal": ""}
+    }
+    assert mask_pii(state) == {
+        "slots": {"landscape_visit": {"location": HIDDEN, "tags": [HIDDEN] * 2}}
+    }
+    masked = mask_pii(prompt)
+    assert "Лесная" not in masked
+    assert f'"slots": {{"location": "{HIDDEN}"}}' in masked
+    assert '"active_scenario": "landscape_visit"' in masked
+    assert mask_pii(json.dumps(arguments, ensure_ascii=False)) == json.dumps(
+        mask_pii(arguments), ensure_ascii=False
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "masked"),
+    [(89991112233, "[phone]"), (4111111111111111, "[card]"), (79991112233, "[phone]")],
+)
+def test_contacts_as_numbers_are_masked(value: int, masked: str) -> None:
+    """Модель присылает телефон числом в аргументах инструмента (O-10)."""
+    assert mask_pii({"phone": value}) == {"phone": masked}
+    assert mask_pii(json.dumps({"phone": value})) == json.dumps({"phone": masked})
+
+
+@pytest.mark.parametrize("value", [3990, 123456789, 1234567890123456, -89991112233, True])
+def test_other_numbers_are_unchanged(value: int) -> None:
+    """Короткие числа, 16 цифр без суммы Луна (номер заказа), отрицательные и bool — как есть."""
+    assert mask_pii(value) == value
+
+
+def test_json_array_in_string_is_masked() -> None:
+    text = json.dumps(
+        [{"fields": {"name": "Анна"}}, "звоните +7 999 111 22 33"], ensure_ascii=False
+    )
+
+    masked = json.loads(mask_pii(text))
+
+    assert masked == [{"fields": {"name": HIDDEN}}, "звоните [phone]"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'Состояние: "slots": {"x": 1, "facts": ["Юлия, Тверская 5"]',
+        '{"slots": {"addr": "Тверская 5", "facts": ["Юлия"]...',
+        'Состояние: "facts": ["Юлия", "Тверская 5"\nСводка: нет',
+    ],
+)
+def test_broken_state_json_is_hidden(text: str) -> None:
+    """Битый или обрезанный JSON состояния скрывается, а не пропускается (O-10)."""
+    masked = mask_pii(text)
+
+    assert "Юлия" not in masked and "Тверская" not in masked
+    assert HIDDEN in masked
+
+
+def test_many_broken_state_parts_hide_the_rest() -> None:
+    text = '"facts": [1, ' * 30 + "Юлия"
+
+    masked = mask_pii(text)
+
+    assert "Юлия" not in masked and masked.endswith(f'"{HIDDEN}"')
+
+
+def test_too_deep_state_json_hides_the_rest() -> None:
+    text = 'Состояние: "slots": ' + '{"a": ' * 100_000 + '"Лесная 5"' + "}" * 100_000
+
+    assert mask_pii(text) == f'Состояние: "slots": "{HIDDEN}"'
+    deep = '{"a": ' * 100_000 + '{"fields": {"name": "Анна"}}' + "}" * 100_000
+    assert mask_pii(deep) == HIDDEN
+
+
+def test_tuple_stays_tuple() -> None:
+    """Докстринг обещает копию: тип контейнера сохраняется (O-15)."""
+    assert mask_pii(("+7 999 111 22 33", 1)) == ("[phone]", 1)

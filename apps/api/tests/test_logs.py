@@ -1,6 +1,8 @@
-"""Структурированные логи: трейсбек в JSON без значений локальных переменных."""
+"""Структурированные логи: трейсбек в JSON без значений локальных переменных, логи stdlib
+через structlog."""
 
 import json
+import logging
 import re
 from collections.abc import MutableMapping
 from typing import Any
@@ -35,6 +37,81 @@ def test_exception_log_has_traceback_without_locals(capsys: pytest.CaptureFixtur
     assert any(frame["name"] == "_fail_with_contact" for frame in error["frames"])
     assert "111-22-33" not in output
     assert all("locals" not in frame for frame in error["frames"])
+
+
+# --- Логи stdlib через structlog (REVIEW.md: O-13) ---
+
+
+@pytest.fixture
+def production_logs() -> Any:
+    configure_logging(Settings(_env_file=None, app_env="production"))
+    try:
+        yield
+    finally:
+        configure_logging(Settings(_env_file=None, app_env="test"))
+
+
+@pytest.mark.usefixtures("production_logs")
+def test_stdlib_log_is_json_with_context(capsys: pytest.CaptureFixture[str]) -> None:
+    capsys.readouterr()
+    with structlog.contextvars.bound_contextvars(tenant_id="t-1", trace_id="tr-1"):
+        logging.getLogger("uvicorn.error").warning("Invalid HTTP request received.")
+    entry = json.loads(capsys.readouterr().out)
+
+    assert entry["event"] == "Invalid HTTP request received."
+    assert entry["level"] == "warning"
+    assert entry["logger"] == "uvicorn.error"
+    assert entry["tenant_id"] == "t-1"
+    assert entry["trace_id"] == "tr-1"
+    assert "timestamp" in entry
+    assert "_record" not in entry and "_from_structlog" not in entry
+
+
+@pytest.mark.usefixtures("production_logs")
+def test_stdlib_exception_is_traceback_dict(capsys: pytest.CaptureFixture[str]) -> None:
+    capsys.readouterr()
+    try:
+        _fail_with_contact()
+    except ValueError:
+        logging.getLogger("langfuse").exception("export failed")
+    output = capsys.readouterr().out
+    entry = json.loads(output)
+
+    [error] = entry["exception"]
+    assert error["exc_type"] == "ValueError"
+    assert "111-22-33" not in output
+
+
+def test_library_handlers_are_replaced_once() -> None:
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_access.addHandler(logging.StreamHandler())
+    uvicorn_access.propagate = False
+    uvicorn_access.setLevel(logging.INFO)
+    arq = logging.getLogger("arq")
+    arq.addHandler(logging.StreamHandler())
+    # Langfuse SDK при импорте вешает свой обработчик на httpx: вывод шёл бы дважды.
+    httpx = logging.getLogger("httpx")
+    httpx.addHandler(logging.StreamHandler())
+
+    configure_logging(Settings(_env_file=None, app_env="test", log_level="WARNING"))
+    configure_logging(Settings(_env_file=None, app_env="test", log_level="WARNING"))
+
+    assert uvicorn_access.handlers == [] and uvicorn_access.propagate
+    # LOG_LEVEL действует и на access-лог uvicorn (у него был свой INFO).
+    assert not uvicorn_access.isEnabledFor(logging.INFO)
+    assert arq.handlers == [] and httpx.handlers == []
+    ours = [h for h in logging.getLogger().handlers if type(h).__name__ == "_StdoutHandler"]
+    assert len(ours) == 1
+
+
+@pytest.mark.usefixtures("production_logs")
+def test_httpx_requests_are_not_logged(capsys: pytest.CaptureFixture[str]) -> None:
+    capsys.readouterr()
+    logging.getLogger("httpx").info("HTTP Request: POST https://api.example/v1?key=secret")
+    logging.getLogger("httpx").warning("retrying")
+
+    lines = capsys.readouterr().out.splitlines()
+    assert [json.loads(line)["event"] for line in lines] == ["retrying"]
 
 
 # --- X-Trace-Id (REVIEW.md: O-6) ---

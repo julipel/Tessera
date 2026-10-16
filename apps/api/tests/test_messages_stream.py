@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator, Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -1334,6 +1335,50 @@ async def test_form_submit_then_confirmed_lead_through_agent_loop(
     assert "pending_confirmation" not in await _state(db_session, forms_tenant, form_conversation)
 
 
+async def test_confirmation_pressed_after_ttl_creates_no_lead(
+    db_session: AsyncSession,
+    db_client: AsyncClient,
+    forms_tenant: TenantId,
+    form_conversation: UUID,
+    use_agent: Any,
+) -> None:
+    """M-4, дополнение к ADR-0021: кнопку нажали позже CONFIRMATION_TTL — заявки нет,
+    модель узнаёт, что подтверждение устарело, ожидание из состояния убрано."""
+    create = ToolCall(
+        id="call_1",
+        name="create_lead",
+        arguments={"form_key": "contact", "fields": {"phone": "+7900"}},
+        raw_arguments="{}",
+    )
+    llm = FakeLLM(
+        [
+            FakeReply(text="Проверьте заявку.", tool_calls=(create,)),
+            FakeReply(),
+            FakeReply(text="Оформим заново?"),
+        ]
+    )
+    use_agent(builtin_turn_agent(lambda _: llm, leads=SessionLeads(db_session)))
+    submit = {"type": "form_submit", "form_id": "contact", "values": {"phone": "+7900"}}
+    first = await _events(await _send(db_client, form_conversation, submit, slug="forms"))
+    [confirm] = [e["data"]["component"] for e in first if e["type"] == "component"]
+    # Кнопку показали два часа назад.
+    state = await _state(db_session, forms_tenant, form_conversation)
+    created = datetime.fromisoformat(state["pending_confirmation"]["created_at"])
+    state["pending_confirmation"]["created_at"] = (created - timedelta(hours=2)).isoformat()
+    await ConversationRepository(db_session).update_state(forms_tenant, form_conversation, state)
+    await db_session.commit()
+
+    action = confirm["confirm_action"]
+    press = {"type": "action", "action_id": action["action_id"], "payload": action["payload"]}
+    second = await _events(await _send(db_client, form_conversation, press, slug="forms"))
+
+    leads = LeadRepository(db_session)
+    assert await leads.list_for_conversation(forms_tenant, form_conversation) == []
+    assert "tool_started" not in [e["type"] for e in second]
+    assert "Подтверждение устарело" in str(llm.requests[-1].messages[-1])
+    assert "pending_confirmation" not in await _state(db_session, forms_tenant, form_conversation)
+
+
 class FrozenConversations(ConversationRepository):
     """Диалог читается таким, каким был до снятия ожидания другим ходом: гонка двух ходов,
     прочитавших состояние раньше, чем один из них снял ожидание."""
@@ -1469,6 +1514,36 @@ async def test_turn_does_not_restore_confirmation_claimed_by_other_turn(
         "v": 2,
         "facts": ["спешит"],
     }
+
+
+@pytest.mark.parametrize(
+    "age", [timedelta(hours=2), timedelta(minutes=5)], ids=["expired", "fresh"]
+)
+async def test_text_turn_writes_expired_confirmation_away(
+    db_session: AsyncSession,
+    db_client: AsyncClient,
+    forms_tenant: TenantId,
+    form_conversation: UUID,
+    use_agent: Any,
+    age: timedelta,
+) -> None:
+    """M-4: ход без инструментов записывает состояние без просроченного ожидания (остальное
+    сохраняется); свежее ожидание ход не трогает."""
+    created = (datetime.now(UTC) - age).isoformat()
+    pending = {"confirm_id": "c-1", "tool": "create_lead", "arguments": {}, "created_at": created}
+    saved = {"v": 2, "facts": ["спешит"], "pending_confirmation": pending}
+    await ConversationRepository(db_session).update_state(forms_tenant, form_conversation, saved)
+    await db_session.commit()
+    use_agent(builtin_turn_agent(lambda _: FakeLLM([FakeReply(text="Слушаю.")])))
+
+    events = await _events(await _send(db_client, form_conversation, TEXT, slug="forms"))
+
+    assert events[-1]["type"] == "done"
+    state = await _state(db_session, forms_tenant, form_conversation)
+    if age > timedelta(hours=1):
+        assert state == {"v": 2, "facts": ["спешит"]}
+    else:
+        assert state == saved
 
 
 async def test_retry_of_confirmation_claims_it_before_execution(

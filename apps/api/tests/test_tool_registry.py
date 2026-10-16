@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -385,7 +386,10 @@ def booking(handler: ToolHandler, **overrides: Any) -> ToolDefinition:
 
 async def test_call_requiring_confirmation_returns_confirm_instead_of_running() -> None:
     handler = Recorder()
-    registry = ToolRegistry([booking(handler)], ConfirmLabels(confirm="Да", cancel="Нет"))
+    now = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
+    registry = ToolRegistry(
+        [booking(handler)], ConfirmLabels(confirm="Да", cancel="Нет"), now=lambda: now
+    )
 
     [result] = await registry.execute_many([inv("c1", "book", **VALID)], CTX)
 
@@ -404,7 +408,13 @@ async def test_call_requiring_confirmation_returns_confirm_instead_of_running() 
     )
     assert confirm["confirm_action"]["payload"] == {"confirm_id": confirm_id}
     assert result.state_patch == {
-        "pending_confirmation": {"confirm_id": confirm_id, "tool": "book", "arguments": VALID}
+        "pending_confirmation": {
+            "confirm_id": confirm_id,
+            "tool": "book",
+            "arguments": VALID,
+            # Срок жизни ожидания считается от него (дополнение к ADR-0021).
+            "created_at": "2026-10-16T12:00:00+00:00",
+        }
     }
     assert isinstance(result.content, str) and "не вызывай инструмент повторно" in result.content
 

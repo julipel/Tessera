@@ -7,15 +7,28 @@
 Хранимый JSON несёт версию схемы `v` (REVIEW.md: M-3): без неё — формат до P6-05 (слоты
 могут быть плоскими). Разбор терпимый: повреждённая часть отбрасывается и попадает в список
 проблем, а не роняет ход — `from_dict` вызывается в начале каждого хода.
+
+Состояние неизменяемо: словари слотов и аргументов копируются в read-only `MappingProxyType`
+(значения внутри — как пришли из JSON). Хэша у состояния нет — в словари и множества его
+не кладут.
 """
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any
+from datetime import datetime, timedelta
+from types import MappingProxyType
+from typing import Any, ClassVar
 
 # Больше фактов в состоянии не держим: самые старые отбрасываются (Runtime-слой промпта
 # не растёт без конца, ADR-0039).
 MAX_FACTS = 20
+# Показанных сущностей — тоже не больше (три карусели по 8): модели нужны недавние, а каждый
+# id — ~15 токенов на каждом ходе (дополнение к ADR-0039).
+MAX_SHOWN_ENTITIES = 24
+# Срок жизни ожидающего подтверждения (дополнение к ADR-0021): проигнорированная кнопка
+# не исполнит устаревшие аргументы через несколько дней.
+CONFIRMATION_TTL = timedelta(hours=1)
+_CLOCK_SKEW = timedelta(minutes=1)
 # Версия схемы хранимого JSON: 2 — слоты всегда по сценариям (P6-05); без `v` — 1.
 STATE_VERSION = 2
 
@@ -23,19 +36,44 @@ STATE_VERSION = 2
 @dataclass(frozen=True, slots=True)
 class PendingConfirmation:
     """Вызов инструмента с `requires_confirmation`, ждущий ответа пользователя (ADR-0021):
-    исполняется с этими аргументами, когда пользователь подтвердит `confirm_id`."""
+    исполняется с этими аргументами, когда пользователь подтвердит `confirm_id`, если с
+    `created_at` (UTC) прошло меньше `CONFIRMATION_TTL`. Без `created_at` — создано до срока
+    жизни (P9-01ad) и считается просроченным."""
+
+    __hash__: ClassVar[None] = None  # type: ignore[assignment]
 
     confirm_id: str
     tool: str
     arguments: Mapping[str, Any]
+    created_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.created_at is not None and self.created_at.tzinfo is None:
+            raise ValueError("created_at без часового пояса")
+        object.__setattr__(self, "arguments", MappingProxyType(dict(self.arguments)))
+
+    def expired(self, now: datetime) -> bool:
+        """Старше срока, без времени создания или из будущего (больше минуты — часы
+        сбиты, срок не продлевается)."""
+        if self.created_at is None:
+            return True
+        age = now - self.created_at
+        return age >= CONFIRMATION_TTL or age < -_CLOCK_SKEW
 
     def to_dict(self) -> dict[str, Any]:
-        return {"confirm_id": self.confirm_id, "tool": self.tool, "arguments": dict(self.arguments)}
+        data = {"confirm_id": self.confirm_id, "tool": self.tool, "arguments": dict(self.arguments)}
+        if self.created_at is not None:
+            data["created_at"] = self.created_at.isoformat()
+        return data
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "PendingConfirmation":
+        """Из JSON; `created_at` — строка ISO 8601 с часовым поясом, иначе `ValueError`."""
         return cls(
-            confirm_id=data["confirm_id"], tool=data["tool"], arguments=data.get("arguments") or {}
+            confirm_id=data["confirm_id"],
+            tool=data["tool"],
+            arguments=data.get("arguments") or {},
+            created_at=_timestamp(data.get("created_at")),
         )
 
 
@@ -43,7 +81,8 @@ class PendingConfirmation:
 class DialogState:
     """`slots` — значения слотов по сценариям (`{сценарий: {слот: значение}}`, ADR-0026);
     `facts` — что пользователь сообщил вне слотов (не больше `MAX_FACTS`); `shown_entities` —
-    id уже показанных сущностей; `active_scenario` — ключ сценария; `pending_confirmation` —
+    id уже показанных сущностей (не больше `MAX_SHOWN_ENTITIES`, последние показанные —
+    в конце); `active_scenario` — ключ сценария; `pending_confirmation` —
     вызов, ждущий подтверждения пользователя."""
 
     slots: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
@@ -52,21 +91,28 @@ class DialogState:
     active_scenario: str | None = None
     pending_confirmation: PendingConfirmation | None = None
 
+    __hash__: ClassVar[None] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        frozen = {key: MappingProxyType(dict(values)) for key, values in self.slots.items()}
+        object.__setattr__(self, "slots", MappingProxyType(frozen))
+
     def apply(self, patch: Mapping[str, Any]) -> "DialogState":
         """Новое состояние с патчем: слоты патча (плоские) сливаются со слотами сценария
         патча — `active_scenario` патча, если он есть, иначе текущего; без сценария слоты
         не записываются (`null` удаляет слот). Факты из `forget_facts` (точный текст)
-        убираются, затем факты и показанные сущности дописываются без повторов; сверх
-        `MAX_FACTS` отбрасываются самые старые факты (ADR-0039). `active_scenario`
-        и `pending_confirmation` заменяются (`null` в `pending_confirmation` снимает
-        ожидание). Неизвестные ключи патча игнорируются."""
+        убираются, затем факты дописываются без повторов; сверх `MAX_FACTS` отбрасываются
+        самые старые (ADR-0039). Показанные сущности переносятся в конец (повторно
+        показанная — снова свежая), сверх `MAX_SHOWN_ENTITIES` самые старые отбрасываются.
+        `active_scenario` и `pending_confirmation` заменяются (`null` в `pending_confirmation`
+        снимает ожидание). Неизвестные ключи патча игнорируются."""
         active = patch.get("active_scenario", self.active_scenario)
         return DialogState(
             slots=_merge_slots(self.slots, active, patch.get("slots") or {}),
             facts=_append_unique(
                 _without(self.facts, patch.get("forget_facts")), patch.get("facts")
             )[-MAX_FACTS:],
-            shown_entities=_append_unique(self.shown_entities, patch.get("shown_entities")),
+            shown_entities=_append_recent(self.shown_entities, patch.get("shown_entities")),
             active_scenario=active,
             pending_confirmation=_pending(patch, self.pending_confirmation),
         )
@@ -137,7 +183,9 @@ class DialogState:
         state = cls(
             slots=slots,
             facts=_strings(data.get("facts"), "facts", problems)[-MAX_FACTS:],
-            shown_entities=_strings(data.get("shown_entities"), "shown_entities", problems),
+            shown_entities=_strings(data.get("shown_entities"), "shown_entities", problems)[
+                -MAX_SHOWN_ENTITIES:
+            ],
             active_scenario=active,
             pending_confirmation=_parse_pending(data.get("pending_confirmation"), problems),
         )
@@ -183,8 +231,9 @@ def _strings(raw: Any, name: str, problems: list[str]) -> tuple[str, ...]:
 
 
 def _parse_pending(raw: Any, problems: list[str]) -> PendingConfirmation | None:
-    """Ожидание без `confirm_id`/`tool` строками или с `arguments` не словарём снимается:
-    нажатие кнопки получит ответ «подтверждение устарело» (ADR-0041)."""
+    """Ожидание без `confirm_id`/`tool` строками, с `arguments` не словарём или с `created_at`
+    не временем ISO 8601 снимается: нажатие кнопки получит ответ «подтверждение устарело»
+    (ADR-0041)."""
     if raw is None:
         return None
     valid = (
@@ -200,7 +249,19 @@ def _parse_pending(raw: Any, problems: list[str]) -> PendingConfirmation | None:
     if not valid:
         problems.append("pending_confirmation")
         return None
-    return PendingConfirmation.from_dict(raw)
+    try:
+        return PendingConfirmation.from_dict(raw)
+    except ValueError:  # created_at — не время ISO 8601 с поясом
+        problems.append("pending_confirmation")
+        return None
+
+
+def _timestamp(raw: Any) -> datetime | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError("created_at — не строка")
+    return datetime.fromisoformat(raw)
 
 
 def _merge_slots(
@@ -235,6 +296,12 @@ def _without(current: tuple[str, ...], forget: Sequence[Any] | None) -> tuple[st
     if not forget:
         return current
     return tuple(item for item in current if item not in forget)
+
+
+def _append_recent(current: tuple[str, ...], new: Sequence[Any] | None) -> tuple[str, ...]:
+    added = _append_unique((), new)
+    kept = tuple(item for item in current if item not in added)
+    return (kept + added)[-MAX_SHOWN_ENTITIES:]
 
 
 def _append_unique(current: tuple[str, ...], new: Sequence[Any] | None) -> tuple[str, ...]:

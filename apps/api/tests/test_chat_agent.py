@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping, MutableMapping
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -769,3 +769,59 @@ async def test_damaged_dialog_state_does_not_break_turn(
     (logged,) = [log for log in debug_logs if log["event"] == "dialog_state_invalid"]
     assert logged["problems"] == ["pending_confirmation"]
     assert "create_lead" not in str(logged)
+
+
+@pytest.mark.parametrize(
+    ("created_at", "expired"),
+    [
+        (None, True),
+        ((NOW - timedelta(hours=1)).isoformat(), True),
+        ((NOW - timedelta(minutes=59)).isoformat(), False),
+    ],
+    ids=["before-ttl-existed", "ttl-passed", "fresh"],
+)
+async def test_expired_confirmation_is_dropped_at_turn_start(
+    debug_logs: list[MutableMapping[str, Any]], created_at: str | None, expired: bool
+) -> None:
+    """M-4: проигнорированная кнопка не живёт вечно — через CONFIRMATION_TTL ожидание
+    снимается в начале хода (и пишется в БД), нажатие получит «подтверждение устарело»."""
+    llm = FakeLLM([FakeReply(text="Чем помочь?")])
+    pending = {"confirm_id": "cf_1", "tool": "create_lead", "arguments": {"form_key": "c"}}
+    if created_at is not None:
+        pending["created_at"] = created_at
+    state = {"v": 2, "facts": ["спешит"], "pending_confirmation": pending}
+    agent = LoopTurnAgent(
+        lambda _: llm, lambda *_: RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW
+    )
+
+    events = [e async for e in agent.run_turn(scenario_request("Ну?", state))]
+
+    updates = [e for e in events if isinstance(e, DialogStateUpdated)]
+    logged = [log for log in debug_logs if log["event"] == "confirmation_expired"]
+    if expired:
+        assert events[0] == DialogStateUpdated(DialogState(facts=("спешит",)))
+        assert [(log["confirm_id"], log["tool"]) for log in logged] == [("cf_1", "create_lead")]
+    else:
+        assert updates == [] and logged == []
+
+
+async def test_pressing_expired_confirmation_does_not_execute() -> None:
+    """M-4: кнопка нажата через CONFIRMATION_TTL — действие не выполняется, модель узнаёт,
+    что подтверждение устарело."""
+    llm = FakeLLM([FakeReply(text="Оформим заново?")])
+    created = (NOW - timedelta(days=3)).isoformat()
+    pending = {"confirm_id": "cf_1", "tool": "create_lead", "arguments": {}, "created_at": created}
+    press = {"type": "action", "action_id": "confirm", "payload": {"confirm_id": "cf_1"}}
+    request = replace(
+        scenario_request("", {"v": 2, "pending_confirmation": pending}),
+        input=press,
+        history=(message(MessageRole.USER, "Да", press),),
+    )
+    agent = LoopTurnAgent(
+        lambda _: llm, lambda *_: RegistryToolExecutor(ToolRegistry([])), now=lambda: NOW
+    )
+
+    events = [e async for e in agent.run_turn(request)]
+
+    assert not any(isinstance(e, ToolStarted) for e in events)
+    assert "Подтверждение устарело" in str(llm.requests[0].messages[-1])

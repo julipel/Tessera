@@ -231,14 +231,17 @@ class ToolError(BaseModel):
 { "slots": { "budget": 3000, "skin_type": null }, "facts": ["аллергия на отдушки"],
   "forget_facts": ["аллергия"],
   "shown_entities": ["e_1"], "active_scenario": "skincare",
-  "pending_confirmation": { "confirm_id": "cf_1", "tool": "create_lead", "arguments": {} } }
+  "pending_confirmation": { "confirm_id": "cf_1", "tool": "create_lead", "arguments": {},
+                            "created_at": "2026-10-16T12:00:00+00:00" } }
 ```
 Все ключи необязательны. `slots` сливаются со слотами сценария патча (`active_scenario` патча,
 иначе текущего; без сценария не пишутся; хранятся по сценариям, ADR-0026), `null` удаляет слот;
 `forget_facts` убирает факты с точно таким текстом (уточнённый факт — новая строка в `facts`,
-прежняя — в `forget_facts`, ADR-0039), затем `facts` и `shown_entities` дописываются без
-повторов; фактов в состоянии не больше 20 (старые отбрасываются); `active_scenario` и
-`pending_confirmation` заменяются (`null` снимает ожидание; ставит его только Registry). Патчи
+прежняя — в `forget_facts`, ADR-0039), затем `facts` дописываются без повторов, а
+`shown_entities` — в конец (повторно показанный id переносится); фактов в состоянии не больше
+20, показанных сущностей — не больше 24 (старые отбрасываются); `active_scenario` и
+`pending_confirmation` заменяются (`null` снимает ожидание; ставит его только Registry, с
+`created_at` — через час ожидание снимается в начале хода, дополнение к ADR-0021). Патчи
 неуспешных вызовов не применяются. Аргументы `update_dialog_state` — по слотам сценариев
 AgentConfig (лишний слот или неверный тип — `validation_error`); слот с одним именем и разными
 определениями в разных сценариях принимает значение по любому из них. Слоты не из сценария

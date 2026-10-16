@@ -1,10 +1,21 @@
 """DialogState (P2-09, P6-05, P6-06): слияние патчей, слоты по сценариям, замена фактов,
-JSON для хранения и промпта."""
+JSON для хранения и промпта; лимит показанных сущностей и срок жизни подтверждения
+(P9-01ad)."""
+
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
-from app.modules.memory.domain.dialog_state import MAX_FACTS
-from app.modules.memory.public import DialogState, PendingConfirmation
+from app.modules.memory.public import (
+    CONFIRMATION_TTL,
+    MAX_FACTS,
+    MAX_SHOWN_ENTITIES,
+    DialogState,
+    PendingConfirmation,
+)
+
+NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 
 
 def test_apply_merges_slots_of_active_scenario_and_appends_unique_lists() -> None:
@@ -245,3 +256,151 @@ def test_damage_in_one_part_keeps_the_rest() -> None:
     assert state == DialogState(
         slots={"gift": {"budget": 3000}}, facts=("спешит",), active_scenario="gift"
     )
+
+
+def test_facts_over_limit_are_trimmed_on_load() -> None:
+    saved = {"v": 2, "facts": [f"факт {i}" for i in range(MAX_FACTS + 5)]}
+
+    state, problems = DialogState.parse(saved)
+
+    assert problems == []
+    assert state.facts == tuple(f"факт {i}" for i in range(5, MAX_FACTS + 5))
+
+
+# --- показанные сущности (REVIEW.md: M-2) ---
+
+
+def test_shown_entities_over_limit_drop_oldest() -> None:
+    state = DialogState()
+    for carousel in range(5):
+        state = state.apply({"shown_entities": [f"e_{carousel}_{i}" for i in range(8)]})
+
+    assert len(state.shown_entities) == MAX_SHOWN_ENTITIES == 24
+    assert state.shown_entities[0] == "e_2_0"
+    assert state.shown_entities[-1] == "e_4_7"
+
+
+def test_shown_again_entity_becomes_recent() -> None:
+    state = DialogState(shown_entities=("e_1", "e_2", "e_3"))
+
+    assert state.apply({"shown_entities": ["e_1", "e_4"]}).shown_entities == (
+        "e_2",
+        "e_3",
+        "e_1",
+        "e_4",
+    )
+
+
+def test_shown_entities_over_limit_are_trimmed_on_load() -> None:
+    saved = {"v": 2, "shown_entities": [f"e_{i}" for i in range(80)]}
+
+    state, problems = DialogState.parse(saved)
+
+    assert problems == []
+    assert state.shown_entities == tuple(f"e_{i}" for i in range(56, 80))
+    assert state.prompt_dict() == {"shown_entities": list(state.shown_entities)}
+
+
+# --- срок жизни подтверждения (REVIEW.md: M-4) ---
+
+
+def _pending(**extra: Any) -> dict[str, Any]:
+    return {"confirm_id": "cf_1", "tool": "create_lead", "arguments": {"form_key": "c"}, **extra}
+
+
+def test_pending_confirmation_keeps_created_at_in_json() -> None:
+    created = NOW.isoformat()
+
+    state = DialogState().apply({"pending_confirmation": _pending(created_at=created)})
+
+    assert state.pending_confirmation is not None
+    assert state.pending_confirmation.created_at == NOW
+    assert state.to_dict()["pending_confirmation"] == _pending(created_at=created)
+    assert DialogState.from_dict(state.to_dict()) == state
+
+
+def test_pending_confirmation_expires_after_ttl() -> None:
+    pending = PendingConfirmation("cf_1", "create_lead", {}, created_at=NOW)
+
+    assert not pending.expired(NOW)
+    assert not pending.expired(NOW + CONFIRMATION_TTL - timedelta(seconds=1))
+    assert pending.expired(NOW + CONFIRMATION_TTL)
+    # Из будущего (часы сбиты) — срок не продлевается.
+    assert not pending.expired(NOW - timedelta(seconds=30))
+    assert pending.expired(NOW - timedelta(minutes=5))
+
+
+def test_pending_confirmation_requires_aware_created_at() -> None:
+    with pytest.raises(ValueError):
+        PendingConfirmation("cf_1", "create_lead", {}, created_at=datetime(2026, 10, 16, 12))
+
+
+def test_registry_timestamp_survives_roundtrip_unchanged() -> None:
+    # chat сравнивает ожидание до и после хода по JSON (keep_pending_confirmation):
+    # формат Registry — datetime.now(UTC).isoformat() — должен вернуться той же строкой.
+    for created in (NOW, NOW.replace(microsecond=123456)):
+        saved = {"v": 2, "pending_confirmation": _pending(created_at=created.isoformat())}
+
+        assert DialogState.from_dict(saved).to_dict() == saved
+    assert timedelta(hours=1) == CONFIRMATION_TTL
+
+
+def test_pending_confirmation_without_created_at_is_expired() -> None:
+    # Сохранено до срока жизни (P9-01ad): возраст неизвестен — может быть несколько дней.
+    state, problems = DialogState.parse({"v": 2, "pending_confirmation": _pending()})
+
+    assert problems == []
+    assert state.pending_confirmation is not None
+    assert state.pending_confirmation.expired(NOW)
+
+
+def test_pending_confirmation_without_arguments() -> None:
+    state, problems = DialogState.parse(
+        {"pending_confirmation": {"confirm_id": "cf_1", "tool": "create_lead"}}
+    )
+
+    assert problems == []
+    assert state.pending_confirmation == PendingConfirmation("cf_1", "create_lead", {})
+    assert state.to_dict()["pending_confirmation"]["arguments"] == {}
+
+
+@pytest.mark.parametrize(
+    "created_at",
+    ["вчера", "2026-10-16T12:00:00", 1760000000, {"at": "x"}],
+    ids=["not-iso", "naive", "number", "object"],
+)
+def test_pending_confirmation_with_bad_created_at_is_dropped(created_at: object) -> None:
+    saved = {"v": 2, "facts": ["спешит"], "pending_confirmation": _pending(created_at=created_at)}
+
+    state, problems = DialogState.parse(saved)
+
+    assert problems == ["pending_confirmation"]
+    assert state == DialogState(facts=("спешит",))
+
+
+# --- неизменяемость (REVIEW.md: M-8) ---
+
+
+def test_state_does_not_share_dicts_with_caller() -> None:
+    slots = {"gift": {"budget": 3000}}
+    arguments = {"form_key": "c"}
+    state = DialogState(
+        slots=slots,
+        pending_confirmation=PendingConfirmation("cf_1", "create_lead", arguments, NOW),
+    )
+
+    slots["gift"]["budget"] = 1
+    arguments["form_key"] = "x"
+
+    assert state.slots == {"gift": {"budget": 3000}}
+    assert state.pending_confirmation is not None
+    assert state.pending_confirmation.arguments == {"form_key": "c"}
+    with pytest.raises(TypeError):
+        state.slots["gift"]["budget"] = 1  # type: ignore[index]
+
+
+def test_state_is_explicitly_unhashable() -> None:
+    with pytest.raises(TypeError, match="unhashable"):
+        hash(DialogState())
+    with pytest.raises(TypeError, match="unhashable"):
+        hash(PendingConfirmation("cf_1", "create_lead", {}))

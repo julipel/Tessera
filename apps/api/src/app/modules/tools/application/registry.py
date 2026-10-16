@@ -4,8 +4,9 @@
 import asyncio
 import re
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -48,14 +49,17 @@ class ToolRegistry:
 
     Вызов инструмента с `requires_confirmation` не исполняется, а возвращает компонент
     confirm и ожидающий вызов в `state_patch` (ADR-0021); исполняет его `execute_confirmed`,
-    когда пользователь подтвердил. `confirm_labels` — подписи кнопок confirm."""
+    когда пользователь подтвердил. `confirm_labels` — подписи кнопок confirm, `now` — часы
+    для времени создания ожидающего вызова (его срок жизни, дополнение к ADR-0021)."""
 
     def __init__(
         self,
         definitions: Iterable[ToolDefinition],
         confirm_labels: ConfirmLabels | None = None,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._labels = confirm_labels or ConfirmLabels()
+        self._now = now
         self._tools: dict[str, tuple[ToolDefinition, Draft202012Validator]] = {}
         for definition in definitions:
             name = definition.name
@@ -210,6 +214,7 @@ class ToolRegistry:
                     "confirm_id": confirm_id,
                     "tool": invocation.name,
                     "arguments": dict(invocation.arguments),
+                    "created_at": self._now().isoformat(),
                 }
             },
         )

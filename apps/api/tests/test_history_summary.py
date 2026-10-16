@@ -88,15 +88,53 @@ def bot(text: str) -> HistoryItem:
 
 
 def test_estimate_tokens_by_length() -> None:
+    # ~2,5 символа на токен с округлением вверх: кириллица у токенизаторов дробится мельче
+    # 3 символов, порог лучше занизить (REVIEW.md: M-7).
     assert estimate_tokens("") == 0
-    assert estimate_tokens("абв") == 1
-    assert estimate_tokens("a" * 30) == 10
+    assert estimate_tokens("а") == 1
+    assert estimate_tokens("абвгд") == 2
+    assert estimate_tokens("a" * 30) == 12
+
+
+def test_fold_point_rejects_keep_recent_turns_below_one() -> None:
+    with pytest.raises(ValueError):
+        fold_point([user(LONG), bot(LONG)], threshold_tokens=500, keep_recent_turns=0)
+
+
+def test_fold_point_empty_history() -> None:
+    assert fold_point([], threshold_tokens=500, keep_recent_turns=1) is None
+
+
+def test_fold_at_exact_threshold_is_not_needed() -> None:
+    items = [user("a" * 25), bot("b" * 25), user("c" * 25), bot("d" * 25)]  # по 10 токенов
+
+    assert fold_point(items, threshold_tokens=40, keep_recent_turns=1) is None
+    assert fold_point(items, threshold_tokens=39, keep_recent_turns=1) == 2
+
+
+def test_fold_history_starting_with_assistant() -> None:
+    # Приветствие ассистента до первого ввода сворачивается вместе с первым ходом.
+    items = [bot(LONG), user(LONG), bot(LONG), user(LONG), bot(LONG)]
+
+    assert fold_point(items, threshold_tokens=500, keep_recent_turns=1) == 3
+    assert fold_point(items, threshold_tokens=500, keep_recent_turns=2) is None
+
+
+def test_no_fold_when_old_part_is_below_half_threshold() -> None:
+    # Последний ход сам длиннее порога: свернуть одно короткое сообщение — сводка на каждом
+    # ходе (REVIEW.md: M-6). Ждём, пока старая часть наберёт половину порога.
+    short = [user("a" * 100), bot("b" * 100)]  # 80 токенов
+    recent = [user(LONG), bot(LONG)]
+
+    assert fold_point([*short, *recent], threshold_tokens=500, keep_recent_turns=1) is None
+    assert fold_point([*short * 3, *recent], threshold_tokens=500, keep_recent_turns=1) is None
+    assert fold_point([*short * 4, *recent], threshold_tokens=500, keep_recent_turns=1) == 8
 
 
 def test_no_fold_below_threshold() -> None:
     items = [user("a" * 30), bot("b" * 30), user("c" * 30), bot("d" * 30)]
 
-    assert fold_point(items, threshold_tokens=40, keep_recent_turns=1) is None
+    assert fold_point(items, threshold_tokens=48, keep_recent_turns=1) is None
 
 
 def test_no_fold_when_only_recent_turns() -> None:
@@ -318,11 +356,12 @@ async def test_next_summary_extends_previous_and_short_history_is_kept(
     db_session: AsyncSession,
 ) -> None:
     tenant_id, conversation_id = await _conversation(db_session, "shop", _config(SMALL_MEMORY))
-    ids = await _add(db_session, tenant_id, conversation_id, "Q1 " + LONG, "A1", "Q2", "A2")
+    # Второй ход длинный: свернуть его позже — не меньше половины порога (REVIEW.md: M-6).
+    ids = await _add(db_session, tenant_id, conversation_id, "Q1 " + LONG, "A1", "Q2 " + LONG, "A2")
     llm = FakeLLM([FakeReply(text="- сводка 1"), FakeReply(text="- сводка 2")])
     await _summarize(db_session, tenant_id, conversation_id, llm)
 
-    # После сводки история короткая — модель не вызывается.
+    # После сводки остался один ход (keep_recent_turns) — модель не вызывается.
     assert not await _summarize(db_session, tenant_id, conversation_id, llm)
     assert len(llm.requests) == 1
 

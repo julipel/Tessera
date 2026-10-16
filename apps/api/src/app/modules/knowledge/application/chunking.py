@@ -14,8 +14,9 @@ _FENCE = re.compile(r"^\s*(```|~~~)")
 SECTION_SEPARATOR = " > "
 
 
-def estimate_tokens(text: str) -> int:
-    """Приблизительно — число слов; точный подсчёт придёт с токенизатором эмбеддингов (P4-06)."""
+def word_tokens(text: str) -> int:
+    """Размер в «токенах» — число слов (не `memory.estimate_tokens`: та считает по символам);
+    точный подсчёт придёт с токенизатором эмбеддингов (P4-06)."""
     return len(text.split())
 
 
@@ -53,7 +54,7 @@ class MarkdownChunker:
                     ChunkDraft(
                         ord=len(drafts),
                         text=piece,
-                        token_count=estimate_tokens(piece),
+                        token_count=word_tokens(piece),
                         section=section.path,
                     )
                 )
@@ -64,13 +65,13 @@ class MarkdownChunker:
         current = ""
         for block in self._fit(blocks):
             candidate = f"{current}\n\n{block}" if current else block
-            if estimate_tokens(candidate) <= self.max_tokens:
+            if word_tokens(candidate) <= self.max_tokens:
                 current = candidate
                 continue
             pieces.append(current)
             tail = self._tail(current)
             with_overlap = f"{tail}\n\n{block}" if tail else block
-            current = with_overlap if estimate_tokens(with_overlap) <= self.max_tokens else block
+            current = with_overlap if word_tokens(with_overlap) <= self.max_tokens else block
         if current:
             pieces.append(current)
         return pieces

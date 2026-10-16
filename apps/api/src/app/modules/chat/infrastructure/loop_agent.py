@@ -62,8 +62,8 @@ logger = structlog.get_logger(__name__)
 class LoopTurnAgent:
     """`llm_for` — клиент по провайдеру из AgentConfig (в приложении — `LLMClients.for_provider`),
     `tools_for` — инструменты хода по AgentConfig и языку диалога, `now` — часы для
-    Runtime-слоя промпта (в тестах фиксированные), `tracer` — трейсы ходов (Langfuse,
-    ADR-0029; по умолчанию выключены)."""
+    Runtime-слоя промпта и срока жизни подтверждения (в тестах фиксированные), `tracer` —
+    трейсы ходов (Langfuse, ADR-0029; по умолчанию выключены)."""
 
     def __init__(
         self,
@@ -92,13 +92,29 @@ class LoopTurnAgent:
                 turn_id=str(request.turn_id),
                 problems=problems,
             )
+        now = self._now()
+        pending = state.pending_confirmation
+        expired = False
+        if pending is not None and pending.expired(now):
+            expired = True
+            # Проигнорированная кнопка не исполнит устаревшие аргументы (дополнение к ADR-0021):
+            # нажатие получит «подтверждение устарело», состояние без ожидания запишется.
+            logger.info(
+                "confirmation_expired",
+                tenant_id=str(request.tenant_id),
+                conversation_id=str(request.conversation_id),
+                turn_id=str(request.turn_id),
+                confirm_id=pending.confirm_id,
+                tool=pending.tool,
+            )
+            state = state.apply({"pending_confirmation": None})
         # Диалог без языка (создан до P6-04) — язык по конфигу, как без locale (ADR-0025).
         language = resolve_language(config.assistant, request.language)
         # Слоты неактивных сценариев модели не нужны (ADR-0026); ожидающий вызов — не знание
         # о пользователе: о нём модель узнаёт из результата инструмента и пометки к ответу.
         known = state.prompt_dict()
         runtime = RuntimeContext(
-            now=self._now(),
+            now=now,
             dialog_state=known,
             active_scenario=state.active_scenario,
             history_summary=request.history_summary,
@@ -143,7 +159,7 @@ class LoopTurnAgent:
             )
         )
         loop = AgentLoop(self._llm(config, trace), self._tools_for(config, language))
-        if problems:
+        if problems or expired:
             yield DialogStateUpdated(state)
         async for event in traced_turn(loop.run_turn(ctx), trace):
             yield event
@@ -173,12 +189,14 @@ def builtin_turn_agent(
     catalog: Catalog | None = None,
     leads: LeadStore | None = None,
     tracer: Tracer | None = None,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> LoopTurnAgent:
     """Агентный цикл со встроенными инструментами из `tools.builtin` конфига — так ход
     собирают chat API и раннер эвалов (ADR-0011). Без `knowledge` не подключается
     `search_knowledge`, без `catalog` — `search_catalog` и `get_entity`, без `leads` —
     `create_lead`. Формы и подписи каталога — на языке диалога (ADR-0025). Без `tracer`
-    ходы не трейсятся."""
+    ходы не трейсятся. `now` — одни часы для промпта, времени создания подтверждения
+    и его срока жизни."""
     return LoopTurnAgent(
         llm_for,
         lambda config, language: RegistryToolExecutor(
@@ -191,8 +209,10 @@ def builtin_turn_agent(
                     language=language,
                 ),
                 _confirm_labels(config, language),
+                now,
             )
         ),
+        now=now,
         tracer=tracer,
     )
 

@@ -34,6 +34,10 @@ export const E2E_ENV: Record<string, string> = {
   RATE_TURNS_PER_IP_PER_MIN: "0",
   RATE_TURNS_PER_TENANT_PER_MIN: "0",
   RATE_CONVERSATIONS_PER_IP_PER_HOUR: "0",
+  // Входы в админку тоже: в admin.spec.ts несколько входов за прогон, и два прогона подряд
+  // упирались в 10 входов в минуту с IP (счётчик живёт в Redis между прогонами).
+  RATE_ADMIN_LOGIN_PER_IP_PER_MIN: "0",
+  RATE_ADMIN_LOGIN_PER_EMAIL_PER_HOUR: "0",
   // Трейсинг выключен (ADR-0029): иначе ключи Langfuse из корневого .env отправили бы
   // трейсы e2e-диалогов в проект Langfuse.
   LANGFUSE_PUBLIC_KEY: "",

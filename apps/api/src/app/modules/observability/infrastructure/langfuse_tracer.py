@@ -4,9 +4,15 @@ Observation создаются явно (`start_observation` от корня х�
 контекста: ход идёт в async-генераторах и отдельной задаче. Атрибуты трейса (сессия, имя,
 метаданные) ставятся через `propagate_attributes` на время создания каждого observation —
 в v4 они должны быть на каждом observation. Отправка — фоновым экспортёром SDK.
+
+Сбой SDK не ломает ход (REVIEW.md: O-5): каждый вызов observation — под `_guard`, ошибка
+логируется `langfuse_trace_failed`. Тексты ошибок (`status_message`) SDK не маскирует —
+маскируем сами (O-3, ADR-0032): сообщения валидации содержат значения полей.
 """
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -36,6 +42,27 @@ logger = structlog.get_logger(__name__)
 _OTEL_TRACE_ID = re.compile(r"[0-9a-f]{32}")
 
 
+@contextmanager
+def _guard(operation: str) -> Iterator[None]:
+    """Глотает Exception SDK (не BaseException: отмена хода проходит). В лог — только тип:
+    текст исключения сериализации может содержать данные observation, то есть ПДн."""
+    try:
+        yield
+    except Exception as e:
+        logger.error("langfuse_trace_failed", operation=operation, error_type=type(e).__name__)
+
+
+def _end(observation: Any, operation: str) -> None:
+    """Закрыть observation, даже если обновление перед этим упало: незакрытый span не
+    уходит в экспорт (корень хода — трейс без корня)."""
+    with _guard(operation):
+        observation.end()
+
+
+def _masked(error: str) -> str:
+    return str(mask_pii(error))
+
+
 def langfuse_trace_id(trace_id: str) -> str:
     """id трейса Langfuse (32 hex): наш `X-Trace-Id`, если он такой (его генерирует
     TraceIdMiddleware), иначе — детерминированно из него; пусто — новый."""
@@ -52,17 +79,20 @@ class _Generation:
     def first_chunk(self) -> None:
         if not self._started:
             self._started = True
-            self._observation.update(completion_start_time=datetime.now(UTC))
+            with _guard("generation.first_chunk"):
+                self._observation.update(completion_start_time=datetime.now(UTC))
 
     def finish(self, output: dict[str, Any], input_tokens: int, output_tokens: int) -> None:
-        self._observation.update(
-            output=output, usage_details={"input": input_tokens, "output": output_tokens}
-        )
-        self._observation.end()
+        with _guard("generation.finish"):
+            self._observation.update(
+                output=output, usage_details={"input": input_tokens, "output": output_tokens}
+            )
+        _end(self._observation, "generation.end")
 
     def fail(self, error: str) -> None:
-        self._observation.update(level="ERROR", status_message=error)
-        self._observation.end()
+        with _guard("generation.fail"):
+            self._observation.update(level="ERROR", status_message=_masked(error))
+        _end(self._observation, "generation.end")
 
 
 class _Turn:
@@ -91,7 +121,7 @@ class _Turn:
             )
 
     def generation(self, info: GenerationInfo) -> GenerationTrace:
-        with propagate_attributes(**self._attributes):
+        with _guard("generation"), propagate_attributes(**self._attributes):
             return _Generation(
                 self._root.start_observation(
                     name=info.name,
@@ -102,13 +132,16 @@ class _Turn:
                     version=self._version,
                 )
             )
+        # Не создалась — попытка модели идёт без своего observation.
+        return NoopTracer().start_turn(self._info).generation(info)
 
     def _tool(self, name: str) -> LangfuseTool:
         with propagate_attributes(**self._attributes):
             return self._root.start_observation(name=name, as_type="tool", version=self._version)
 
     def tool_started(self, call_id: str, name: str) -> None:
-        self._tools[call_id] = self._tool(name)
+        with _guard("tool_started"):
+            self._tools[call_id] = self._tool(name)
 
     def tool_finished(
         self,
@@ -119,27 +152,32 @@ class _Turn:
         error: str | None,
         duration_ms: int,
     ) -> None:
-        tool = self._tools.pop(call_id, None) or self._tool(name)
-        tool.update(input=arguments, output=output, metadata={"duration_ms": duration_ms})
-        if error is not None:
-            tool.update(level="ERROR", status_message=error)
-        tool.end()
+        tool = self._tools.pop(call_id, None)
+        with _guard("tool_finished"):
+            tool = tool or self._tool(name)
+            tool.update(input=arguments, output=output, metadata={"duration_ms": duration_ms})
+            if error is not None:
+                tool.update(level="ERROR", status_message=_masked(error))
+        if tool is not None:
+            _end(tool, "tool.end")
 
     def finish(self, output: dict[str, Any], error: str | None = None) -> None:
         for tool in self._tools.values():  # вызовы, прерванные отменой хода
-            tool.update(level="WARNING", status_message="не завершён")
-            tool.end()
+            with _guard("tool_interrupted"):
+                tool.update(level="WARNING", status_message="не завершён")
+            _end(tool, "tool.end")
         self._tools.clear()
-        self._root.update(output=output)
-        if error is not None:
-            self._root.update(level="ERROR", status_message=error)
-        self._root.end()
+        with _guard("finish"):
+            self._root.update(output=output)
+            if error is not None:
+                self._root.update(level="ERROR", status_message=_masked(error))
+        _end(self._root, "turn.end")
 
 
 class LangfuseTracer:
     """`Tracer` поверх клиента Langfuse. Сбой трейсинга не должен ломать ход: ошибка SDK
-    при старте трейса логируется, и ход идёт без трейса. Сетевые ошибки отправки SDK
-    обрабатывает сам в фоновом экспортёре."""
+    при старте трейса логируется, и ход идёт без трейса; дальше — `_guard` на каждом вызове.
+    Сетевые ошибки отправки SDK обрабатывает сам в фоновом экспортёре."""
 
     def __init__(self, client: Langfuse) -> None:
         self._client = client

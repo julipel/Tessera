@@ -1,6 +1,7 @@
 """Структурированные логи (structlog) и привязка trace_id к запросу."""
 
 import logging
+import re
 import uuid
 
 import structlog
@@ -9,6 +10,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.settings import Settings
 
 TRACE_ID_HEADER = "X-Trace-Id"
+
+logger = structlog.get_logger(__name__)
 
 # Трейсбек в JSON без локальных переменных фреймов: `dict_tracebacks` по умолчанию пишет их
 # (`show_locals=True`), а там контакты из форм, токены, ключи API — мимо маскирования ADR-0032.
@@ -44,12 +47,17 @@ def configure_logging(settings: Settings) -> None:
     )
 
 
+_TRACE_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
 class TraceIdMiddleware:
     """Чистое ASGI-middleware: не ломает стриминг (SSE) и contextvars.
 
     Берёт trace_id из заголовка запроса или генерирует новый, кладёт в контекст
     structlog на время запроса и в `request.state.trace_id` (журнал хода, P7-02)
-    и возвращает в заголовке ответа.
+    и возвращает в заголовке ответа. Заголовок клиента недоверенный (REVIEW.md: O-6):
+    принимается только `[A-Za-z0-9._-]{1,64}` — длинное значение не влезло бы в журнал
+    (`String(128)`) и уронило бы запись хода, а мусор попал бы в логи и Langfuse.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -62,7 +70,11 @@ class TraceIdMiddleware:
 
         header = TRACE_ID_HEADER.lower().encode()
         incoming = dict(scope["headers"]).get(header)
-        trace_id = incoming.decode("latin-1") if incoming else uuid.uuid4().hex
+        trace_id = incoming.decode("latin-1") if incoming else ""
+        if not _TRACE_ID.fullmatch(trace_id):
+            if trace_id:
+                logger.debug("trace_id_rejected", length=len(trace_id))
+            trace_id = uuid.uuid4().hex
         scope.setdefault("state", {})["trace_id"] = trace_id
 
         async def send_with_trace_id(message: Message) -> None:

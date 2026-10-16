@@ -1,6 +1,7 @@
 """Трейсинг ходов (P7-03, ADR-0029): generation на каждую попытку модели, инструменты,
 итог хода; адаптер Langfuse — на in-memory экспортёре OpenTelemetry."""
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -41,6 +42,7 @@ from app.modules.agent.public import (
 )
 from app.modules.chat.domain.entities import TurnRequest
 from app.modules.chat.infrastructure.loop_agent import LoopTurnAgent
+from app.modules.observability.infrastructure.langfuse_tracer import _guard
 from app.modules.observability.kernel import GenerationInfo, GenerationTrace, TurnTraceInfo
 from app.modules.observability.public import LangfuseTracer, NoopTracer, build_tracer
 from app.modules.observability.public import langfuse_trace_id as lf_trace_id
@@ -369,3 +371,142 @@ async def test_http_turn_is_traced_with_request_trace_id(
     [turn] = tracer.turns
     assert (turn.info.trace_id, str(turn.info.conversation_id)) == ("trace-http", conversation_id)
     assert turn.output is not None and turn.output["answer"] == "Здравствуйте!"
+
+
+def _langfuse(exporter: InMemorySpanExporter) -> Langfuse:
+    return Langfuse(
+        public_key=f"pk-lf-test-{uuid4().hex}",
+        secret_key="sk-lf-test",
+        base_url="http://localhost:9",
+        tracer_provider=TracerProvider(),
+        span_exporter=exporter,
+        environment="test",
+        mask=lambda *, data, **_: data,
+    )
+
+
+def test_error_messages_are_masked_before_export() -> None:
+    """status_message SDK не маскирует, а сообщения валидации несут значения (O-3)."""
+    exporter = InMemorySpanExporter()
+    client = _langfuse(exporter)
+    turn = LangfuseTracer(client).start_turn(_info(uuid4().hex))
+    phone = "+7 999 111-22-33"
+
+    generation = turn.generation(GenerationInfo(name="llm", model="main", input={}))
+    generation.fail(f"ответ модели: позвоните {phone}")
+    turn.tool_finished(
+        "c1", "create_lead", {}, None, f"$.fields.phone: '{phone}' does not match", 3
+    )
+    turn.finish({"answer": ""}, error=f"ход упал на {phone}")
+    client.flush()
+
+    messages = [
+        str(_attrs(s).get("langfuse.observation.status_message", ""))
+        for s in exporter.get_finished_spans()
+    ]
+    assert len([m for m in messages if m]) == 3
+    assert all("999" not in m for m in messages)
+    client.shutdown()
+
+
+class _BrokenObservation:
+    """Observation, у которого падает любой вызов SDK."""
+
+    def __getattr__(self, name: str) -> Any:
+        def broken(*_: Any, **__: Any) -> Any:
+            raise RuntimeError(f"SDK: {name}")
+
+        return broken
+
+
+async def test_sdk_failures_mid_turn_do_not_break_the_turn(
+    monkeypatch: pytest.MonkeyPatch, debug_logs: list[Any]
+) -> None:
+    """O-5: трейс создан, дальше SDK падает на каждом вызове — ход и модель отрабатывают."""
+    exporter = InMemorySpanExporter()
+    client = _langfuse(exporter)
+    turn = LangfuseTracer(client).start_turn(_info(uuid4().hex))
+    root = turn._root  # type: ignore[attr-defined]
+    monkeypatch.setattr(root, "start_observation", _BrokenObservation().start_observation)
+    monkeypatch.setattr(root, "update", _BrokenObservation().update)
+    monkeypatch.setattr(root, "end", _BrokenObservation().end)
+
+    llm = TracedLLM(FakeLLM([FakeReply("Да")]), turn)
+    chunks = [
+        c
+        async for c in llm.stream(LLMRequest(model="main", system="", messages=(UserMessage("?"),)))
+    ]
+    turn.tool_started("c1", "search_catalog")
+    turn.tool_finished("c1", "search_catalog", {}, {}, "ошибка", 1)
+    turn.finish({"answer": "Да"}, error="сбой")
+
+    assert any(getattr(c, "text", None) == "Да" for c in chunks)
+    operations = {log["operation"] for log in debug_logs if log["event"] == "langfuse_trace_failed"}
+    assert operations >= {"generation", "tool_started", "tool_finished", "finish"}
+    client.shutdown()
+
+
+def test_failed_update_still_ends_observations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Упал update — span всё равно закрыт и ушёл в экспорт; корень хода — тоже."""
+    exporter = InMemorySpanExporter()
+    client = _langfuse(exporter)
+    turn = LangfuseTracer(client).start_turn(_info(uuid4().hex))
+    generation = turn.generation(GenerationInfo(name="llm", model="main", input={}))
+    turn.tool_started("c1", "search_catalog")
+    turn.tool_started("c2", "get_entity")  # останется прерванным
+    for observation in (
+        generation._observation,  # type: ignore[attr-defined]
+        turn._tools["c1"],  # type: ignore[attr-defined]
+        turn._tools["c2"],  # type: ignore[attr-defined]
+        turn._root,  # type: ignore[attr-defined]
+    ):
+        monkeypatch.setattr(observation, "update", _BrokenObservation().update)
+
+    generation.first_chunk()
+    generation.finish({"text": "Да"}, 1, 1)
+    turn.tool_finished("c1", "search_catalog", {}, {}, None, 1)
+    turn.finish({"answer": "Да"}, error="сбой")
+    client.flush()
+
+    assert {s.name for s in exporter.get_finished_spans()} == {
+        "turn",
+        "llm",
+        "search_catalog",
+        "get_entity",
+    }
+    client.shutdown()
+
+
+async def test_sdk_failures_on_real_observations_are_logged_by_operation(
+    monkeypatch: pytest.MonkeyPatch, debug_logs: list[Any]
+) -> None:
+    exporter = InMemorySpanExporter()
+    client = _langfuse(exporter)
+    turn = LangfuseTracer(client).start_turn(_info(uuid4().hex))
+    generation = turn.generation(GenerationInfo(name="llm", model="main", input={}))
+    turn.tool_started("c1", "search_catalog")
+    broken = _BrokenObservation()
+    for observation in (generation._observation, turn._tools["c1"]):  # type: ignore[attr-defined]
+        monkeypatch.setattr(observation, "update", broken.update)
+        monkeypatch.setattr(observation, "end", broken.end)
+
+    generation.first_chunk()
+    generation.fail("ошибка модели")
+    turn.finish({"answer": ""})
+
+    failed = [log for log in debug_logs if log["event"] == "langfuse_trace_failed"]
+    assert {log["operation"] for log in failed} == {
+        "generation.first_chunk",
+        "generation.fail",
+        "generation.end",
+        "tool_interrupted",
+        "tool.end",
+    }
+    # Текст исключения SDK в лог не попадает (мог бы нести данные observation).
+    assert all(log["error_type"] == "RuntimeError" and "exc_info" not in log for log in failed)
+    client.shutdown()
+
+
+async def test_guard_lets_cancellation_through() -> None:
+    with pytest.raises(asyncio.CancelledError), _guard("x"):
+        raise asyncio.CancelledError

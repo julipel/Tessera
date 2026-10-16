@@ -796,6 +796,10 @@
     `/admin/*` в `proxy.ts` (`'strict-dynamic'`, без `'unsafe-inline'`, `frame-ancestors
     'none'`), админка рендерится на каждый запрос (`connection()` в `app/admin/layout.tsx`);
     HSTS, `X-Content-Type-Options`, `Referrer-Policy` в Caddy.
+  - [x] **P9-01w Наблюдаемость: маскирование ошибок, устойчивость трейсинга, X-Trace-Id**
+    (`REVIEW.md`: O-3, O-5, O-6). `status_message` в Langfuse — через `mask_pii`; каждый вызов
+    SDK под `_guard` (лог `langfuse_trace_failed`, generation — no-op при сбое создания);
+    `X-Trace-Id` клиента — только `[A-Za-z0-9._-]{1,64}`, иначе новый.
   - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
     образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
 - [ ] **P9-02 Пилот и разбор.** Реальные диалоги → новые эталоны в evals → итерации P6-03.

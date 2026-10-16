@@ -2,7 +2,8 @@
 
 Подходит и для OpenAI-совместимых API через `base_url`. Чанки стрима собираются вручную:
 фрагменты tool_calls приходят по `index` — первый несёт id и имя, следующие дописывают
-аргументы. Ошибки SDK переводятся в `LLMError` с признаком `retryable`.
+аргументы. Ошибки SDK переводятся в `LLMError` с признаком `retryable`. Стрим без
+`finish_reason` (соединение закрыто раньше) — retryable `LLMError`, а не оборванный ответ.
 
 Параметры сэмплинга (ADR-0009): передаёт `temperature`, если она задана. Поддержка зависит от
 модели (reasoning-модели принимают только значение по умолчанию), поэтому таблицы моделей нет:
@@ -221,11 +222,14 @@ class _StreamAccumulator:
                 if not call.announced and call.id and call.name:
                     call.announced = True
                     out.append(ToolCallStarted(id=call.id, name=call.name))
-            if choice.finish_reason is not None:
+            # Некоторые совместимые API шлют finish_reason="" в промежуточных чанках.
+            if choice.finish_reason:
                 self._finish_reason = choice.finish_reason
         return out
 
     def response(self) -> LLMResponse:
+        if self._finish_reason is None:
+            raise LLMError("OpenAI: стрим закрыт без finish_reason", retryable=True)
         calls = tuple(
             ToolCall(
                 id=call.id,
@@ -235,7 +239,7 @@ class _StreamAccumulator:
             )
             for _, call in sorted(self._calls.items())
         )
-        stop_reason = _STOP_REASONS.get(self._finish_reason or "", StopReason.END_TURN)
+        stop_reason = _STOP_REASONS.get(self._finish_reason, StopReason.END_TURN)
         if calls and stop_reason is StopReason.END_TURN:
             # Некоторые совместимые API отвечают finish_reason="stop" и при вызове инструментов.
             stop_reason = StopReason.TOOL_CALLS

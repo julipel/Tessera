@@ -10,7 +10,9 @@
 `response.output_item.added` с function_call → ранний ToolCallStarted; готовые элементы
 (аргументы вызова, reasoning целиком) — из `response.output_item.done`; usage — из
 `response.completed`/`response.incomplete` (лимит токенов → MAX_TOKENS); `response.failed` и
-событие `error` → LLMError.
+событие `error` → LLMError. Стрим без `response.completed`/`response.incomplete` (соединение
+закрыто раньше) — retryable LLMError; вызов без `output_item.done` получает `arguments=None`
+(цикл вернёт модели ошибку разбора, а не выполнит инструмент с пустыми аргументами).
 
 Передаваемые параметры (ADR-0009): `instructions`, `input`, `tools`, `max_output_tokens`,
 `temperature`, если задана. Temperature отбрасывается адаптивно, как в OpenAILLM: на 400 с
@@ -185,6 +187,7 @@ class _StreamAccumulator:
         self._provider_items: list[tuple[int, ProviderItem]] = []
         self._usage = Usage()
         self._stop_reason = StopReason.END_TURN
+        self._finished = False  # пришёл response.completed или response.incomplete
 
     def feed(self, event: ResponseStreamEvent) -> list[LLMChunk]:
         match event:
@@ -209,8 +212,10 @@ class _StreamAccumulator:
             ):
                 self._provider_items.append((index, to_provider_item(reasoning)))
             case ResponseCompletedEvent(response=response):
+                self._finished = True
                 self._set_usage(response.usage)
             case ResponseIncompleteEvent(response=response):
+                self._finished = True
                 self._set_usage(response.usage)
                 details = response.incomplete_details
                 reason = details.reason if details else None
@@ -232,11 +237,13 @@ class _StreamAccumulator:
             self._usage = Usage(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
 
     def response(self) -> LLMResponse:
+        if not self._finished:
+            raise LLMError("OpenAI: стрим закрыт без response.completed/incomplete", retryable=True)
         calls = tuple(
             ToolCall(
                 id=call.call_id,
                 name=call.name,
-                arguments=parse_arguments(call.arguments or ""),
+                arguments=None if call.arguments is None else parse_arguments(call.arguments),
                 raw_arguments=call.arguments or "",
             )
             for _, call in sorted(self._calls.items())

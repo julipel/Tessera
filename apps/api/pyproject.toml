@@ -11,6 +11,7 @@ dependencies = [
     "fastapi>=0.142.2",
     "httpcore>=1.0.9",
     "httpx>=0.28.1",
+    "httpx2>=2.13.1",
     "jsonschema>=4.26.0",
     "langfuse>=4.17.0",
     "openai>=3.24.0",

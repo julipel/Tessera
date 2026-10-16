@@ -3,15 +3,21 @@
 Стрим разбирается по сырым событиям: `content_block_start` с блоком `tool_use` несёт id и имя,
 аргументы приходят фрагментами `input_json_delta` по индексу блока. Блоки размышлений и прочие
 служебные блоки пропускаются. Ошибки SDK переводятся в `LLMError` с признаком `retryable`.
+SDK не оборачивает транспортные ошибки при чтении посреди стрима — их ловим отдельно
+(retryable), тем же набором, что оборачивает OpenAI SDK. Стрим без `message_stop` (соединение
+закрыто раньше) — тоже retryable `LLMError`, а не оборванный ответ.
 
 Параметры сэмплинга (ADR-0009): не передаёт ни один. Актуальные модели Anthropic их не
 принимают, и SDK убрал их из сигнатуры `messages.create`; заданная `LLMRequest.temperature`
 отбрасывается с debug-логом `llm.param_dropped`.
 """
 
+import ssl
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+import anyio
+import httpx2
 from anthropic import (
     APIError,
     APIStatusError,
@@ -60,6 +66,10 @@ _STOP_REASONS = {
     "model_context_window_exceeded": StopReason.MAX_TOKENS,
 }
 
+# Ошибки чтения посреди стрима, которые anthropic 1.11 пропускает как есть. Состав тот же,
+# что в `openai._httpx2.request_exceptions()`: TLS-сбои AnyIO httpx2 пока не переводит в свои.
+_STREAM_TRANSPORT_ERRORS = (httpx2.RequestError, ssl.SSLError, anyio.EndOfStream)
+
 # В Anthropic max_tokens обязателен; используется, если в запросе лимит не задан.
 DEFAULT_MAX_TOKENS = 4096
 
@@ -104,6 +114,11 @@ class AnthropicLLM:
                         yield item
         except APIError as error:
             raise to_llm_error(error) from error
+        except _STREAM_TRANSPORT_ERRORS as error:
+            # Обрыв/таймаут чтения посреди стрима SDK пропускает как есть.
+            raise LLMError(
+                f"Anthropic: обрыв стрима: {type(error).__name__}: {error}", retryable=True
+            ) from error
         yield ResponseCompleted(accumulator.response())
 
 
@@ -135,11 +150,14 @@ def to_anthropic_messages(request: LLMRequest) -> list[MessageParam]:
                 messages.append({"role": "user", "content": text})
             case AssistantMessage(text=text, tool_calls=()):
                 flush_results()
-                messages.append({"role": "assistant", "content": text})
+                if text.strip():  # пустое или пробельное сообщение API отклоняет
+                    messages.append({"role": "assistant", "content": text})
             case AssistantMessage(text=text, tool_calls=calls):
                 flush_results()
-                # Пустой текстовый блок API отклоняет — добавляем только непустой.
-                blocks: list[ContentBlockParam] = [{"type": "text", "text": text}] if text else []
+                # Пустой или пробельный текстовый блок API отклоняет — добавляем только непустой.
+                blocks: list[ContentBlockParam] = (
+                    [{"type": "text", "text": text}] if text.strip() else []
+                )
                 blocks.extend(
                     {
                         "type": "tool_use",
@@ -189,6 +207,7 @@ class _StreamAccumulator:
         self._text: list[str] = []
         self._calls: dict[int, _PendingCall] = {}
         self._stop_reason: str | None = None
+        self._stopped = False  # пришёл message_stop
         self._input_tokens = 0
         self._output_tokens = 0
 
@@ -221,6 +240,8 @@ class _StreamAccumulator:
                     self._stop_reason = event.delta.stop_reason
                 # output_tokens в message_delta — накопительный итог, а не приращение.
                 self._output_tokens = event.usage.output_tokens
+            case "message_stop":
+                self._stopped = True
             case _:
                 pass
         return out
@@ -230,6 +251,8 @@ class _StreamAccumulator:
         return TextDelta(text)
 
     def response(self) -> LLMResponse:
+        if not self._stopped:
+            raise LLMError("Anthropic: стрим закрыт без message_stop", retryable=True)
         calls = tuple(
             ToolCall(
                 id=call.id,

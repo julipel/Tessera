@@ -68,6 +68,7 @@ def test_history_maps_inputs_and_skips_empty_answers() -> None:
     history = [
         message(MessageRole.USER, "Привет", {"type": "text", "text": "Привет"}),
         message(MessageRole.ASSISTANT, ""),
+        message(MessageRole.ASSISTANT, "\n\n"),
         message(
             MessageRole.USER, "", {"type": "action", "action_id": "pick", "payload": {"id": 7}}
         ),

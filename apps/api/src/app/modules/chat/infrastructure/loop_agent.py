@@ -212,11 +212,11 @@ def client_script(history: Sequence[ChatMessage]) -> str | None:
 
 def to_llm_messages(history: Iterable[ChatMessage]) -> Iterable[LLMMessage]:
     """Сообщения диалога для модели. Ответы ассистента без текста (сбой до первого куска)
-    пропускаются: провайдеры не принимают пустые сообщения."""
+    или из одних пробелов пропускаются: провайдеры не принимают пустые сообщения."""
     for message in history:
         if message.role is MessageRole.USER:
             yield UserMessage(_user_text(message))
-        elif message.content:
+        elif message.content.strip():
             yield AssistantMessage(message.content)
 
 

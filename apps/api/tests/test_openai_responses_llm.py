@@ -448,3 +448,39 @@ async def test_other_bad_requests_are_not_retried(error: dict[str, Any]) -> None
 
     assert raised.value.retryable is False
     assert len(server.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        sse(text_delta("Оборван")),
+        sse(item_added(0, function_call(0, "call_1", "search_catalog"))),
+        "",
+    ],
+    ids=["cut_text", "cut_tool_call", "empty"],
+)
+async def test_stream_without_final_event_is_retryable(body: str) -> None:
+    received: list[LLMChunk] = []
+
+    with pytest.raises(LLMError) as raised:
+        async for item in llm_for(Server(body)).stream(request()):
+            received.append(item)
+
+    assert raised.value.retryable
+    assert not any(isinstance(item, ResponseCompleted) for item in received)
+
+
+async def test_tool_call_without_item_done_has_unparsed_arguments() -> None:
+    """Вызов оборван лимитом вывода до output_item.done: аргументов нет — не пустой объект,
+    иначе инструмент выполнится без аргументов."""
+    incomplete = response("incomplete", incomplete_details={"reason": "max_output_tokens"})
+    body = sse(
+        item_added(0, function_call(0, "call_1", "search_catalog")),
+        {"type": "response.function_call_arguments.delta", "output_index": 0, "delta": '{"q'},
+        {"type": "response.incomplete", "response": incomplete},
+    )
+
+    (parsed,) = completed(await collect(llm_for(Server(body)))).response.tool_calls
+
+    assert parsed.arguments is None
+    assert parsed.raw_arguments == ""

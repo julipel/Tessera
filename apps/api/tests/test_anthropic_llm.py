@@ -1,7 +1,8 @@
 """Адаптер Anthropic (P2-07) без сети: настоящий AsyncAnthropic поверх MockTransport с SSE."""
 
 import json
-from collections.abc import Callable, MutableMapping
+import ssl
+from collections.abc import AsyncIterator, Callable, MutableMapping
 from typing import Any
 
 import httpx2
@@ -485,3 +486,94 @@ async def test_dropped_temperature_is_logged(debug_logs: list[MutableMapping[str
             "param": "temperature",
         }
     ]
+
+
+class BrokenStream(httpx2.AsyncByteStream):
+    """Отдаёт начало SSE-тела и обрывает чтение транспортной ошибкой."""
+
+    def __init__(self, head: str, error: Exception) -> None:
+        self.head = head
+        self.error = error
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self.head.encode()
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx2.ReadTimeout("read timed out"),
+        httpx2.RemoteProtocolError("peer closed connection"),
+        httpx2.DecodingError("bad gzip"),
+        ssl.SSLError("bad record mac"),
+    ],
+    ids=["read_timeout", "peer_closed", "decoding", "ssl"],
+)
+async def test_transport_error_mid_stream_is_retryable(error: Exception) -> None:
+    def broken(request: httpx2.Request) -> httpx2.Response:
+        head = sse(message_start(), text_start(0), text_delta(0, "Начало"))
+        return httpx2.Response(
+            200,
+            stream=BrokenStream(head, error),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    received: list[LLMChunk] = []
+    with pytest.raises(LLMError) as raised:
+        async for item in llm_for(broken).stream(request()):
+            received.append(item)
+
+    assert raised.value.retryable
+    assert received == [TextDelta("Начало")]
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        # Соединение закрыто посреди текста.
+        (message_start(), text_start(0), text_delta(0, "Оборван")),
+        # message_delta с причиной остановки пришёл, а message_stop — нет.
+        (message_start(), text_start(0), text_delta(0, "Почти"), block_stop(0), message_end()[0]),
+        # Пустое тело.
+        (),
+    ],
+    ids=["cut_text", "no_message_stop", "empty"],
+)
+async def test_stream_without_message_stop_is_retryable(events: tuple[Event, ...]) -> None:
+    received: list[LLMChunk] = []
+
+    with pytest.raises(LLMError) as raised:
+        async for item in llm_for(Server(sse(*events))).stream(request()):
+            received.append(item)
+
+    assert raised.value.retryable
+    assert not any(isinstance(item, ResponseCompleted) for item in received)
+
+
+@pytest.mark.parametrize("text", ["\n\n", " ", ""], ids=["newlines", "space", "empty"])
+async def test_blank_assistant_text_before_tool_use_omitted(text: str) -> None:
+    server = Server(text_reply())
+    req = request(
+        messages=(
+            UserMessage("Нужен крем"),
+            AssistantMessage(text=text, tool_calls=(call("tu_1", {"query": "крем"}, "{}"),)),
+            ToolResultMessage(tool_call_id="tu_1", content="[]"),
+        )
+    )
+
+    await collect(llm_for(server), req)
+
+    assistant = server.requests[0]["messages"][1]
+    assert [block["type"] for block in assistant["content"]] == ["tool_use"]
+
+
+async def test_blank_assistant_message_without_tool_calls_omitted() -> None:
+    server = Server(text_reply())
+    req = request(
+        messages=(UserMessage("Привет"), AssistantMessage(text="\n\n"), UserMessage("Ау"))
+    )
+
+    await collect(llm_for(server), req)
+
+    assert [m["role"] for m in server.requests[0]["messages"]] == ["user", "user"]

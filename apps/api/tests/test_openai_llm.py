@@ -1,7 +1,7 @@
 """Адаптер OpenAI (P2-06) без сети: настоящий AsyncOpenAI поверх MockTransport с SSE-ответами."""
 
 import json
-from collections.abc import Callable, MutableMapping
+from collections.abc import AsyncIterator, Callable, MutableMapping
 from typing import Any
 
 import httpx2
@@ -411,3 +411,62 @@ async def test_other_bad_requests_are_not_retried(error: dict[str, Any]) -> None
 
     assert raised.value.retryable is False
     assert len(server.requests) == 1
+
+
+class BrokenStream(httpx2.AsyncByteStream):
+    """Отдаёт начало SSE-тела и обрывает чтение транспортной ошибкой."""
+
+    def __init__(self, head: str, error: Exception) -> None:
+        self.head = head
+        self.error = error
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self.head.encode()
+        raise self.error
+
+
+async def test_transport_error_mid_stream_is_retryable() -> None:
+    def broken(request: httpx2.Request) -> httpx2.Response:
+        head = sse(chunk({"content": "Начало"}), done=False)
+        return httpx2.Response(
+            200,
+            stream=BrokenStream(head, httpx2.ReadTimeout("read timed out")),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    received: list[LLMChunk] = []
+    with pytest.raises(LLMError) as raised:
+        async for item in llm_for(broken).stream(request()):
+            received.append(item)
+
+    assert raised.value.retryable
+    assert received == [TextDelta("Начало")]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Соединение закрыто посреди текста.
+        sse(chunk({"content": "Оборван"}), done=False),
+        # Даже с [DONE]: без finish_reason ответ не считается полным.
+        sse(chunk({"content": "Оборван"})),
+        # Вызов инструмента с недописанными аргументами.
+        sse(
+            chunk(tool_fragment(0, id="call_1", name="search_catalog", arguments='{"q"')),
+            done=False,
+        ),
+        # Пустой finish_reason в промежуточном чанке (бывает у совместимых API) — не финал.
+        sse(chunk({"content": "Оборван"}, finish=""), done=False),
+        "",
+    ],
+    ids=["cut_text", "done_without_finish", "cut_tool_call", "empty_finish_reason", "empty"],
+)
+async def test_stream_without_finish_reason_is_retryable(body: str) -> None:
+    received: list[LLMChunk] = []
+
+    with pytest.raises(LLMError) as raised:
+        async for item in llm_for(Server(body)).stream(request()):
+            received.append(item)
+
+    assert raised.value.retryable
+    assert not any(isinstance(item, ResponseCompleted) for item in received)

@@ -770,6 +770,12 @@
     Запись ответа под щитом от отмены, `_saved` после commit; сбой — rollback и запись
     `failed`/`internal`, стрим заканчивается `error` + `done`; сводка — commit до вызова
     модели, не больше 4 сводок одновременно (`SummaryScheduler(max_concurrent)`).
+  - [x] **P9-01r Надёжность стрима модели** (`REVIEW.md`: AG-3, AG-4, AG-8). Обрыв чтения
+    `httpx2` в стриме Anthropic и стрим без финального события (`message_stop`,
+    `finish_reason`, `response.completed`/`incomplete`) — `LLMError(retryable=True)` вместо
+    `internal` или оборванного ответа `answered`; вызов Responses без `output_item.done` —
+    `arguments=None`; пробельный текст не уходит блоком в Anthropic и в историю диалога.
+    `httpx2` объявлен в зависимостях API (раньше — только транзитивно от SDK).
   - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
     образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
 - [ ] **P9-02 Пилот и разбор.** Реальные диалоги → новые эталоны в evals → итерации P6-03.

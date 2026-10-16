@@ -6,6 +6,9 @@ leads и observability, политика и порции — `chat.application.r
 Каждый тенант — своя сессия; сроки берутся из активного конфига. Сбой одного тенанта не
 останавливает остальных: лог `retention.failed`, тенант попадает в `failed`. `dry_run`
 только считает (`SELECT count(*)` с теми же условиями) — без транзакции удаления и блокировок.
+
+Заодно, при чистке всех тенантов, удаляются истёкшие сессии админки (REVIEW.md: AC-10): они
+не тенантские, и при входе чистятся только сессии того, кто входит.
 """
 
 from collections.abc import Callable, Sequence
@@ -15,6 +18,7 @@ from datetime import datetime
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.access.public import SqlAdminSessionStore
 from app.modules.chat.public import (
     ConversationRepository,
     PurgeResult,
@@ -32,10 +36,18 @@ logger = structlog.get_logger(__name__)
 
 @dataclass(slots=True)
 class RetentionRun:
-    """Итог по slug тенанта; `failed` — тенанты, чистка которых упала (подробности в логе)."""
+    """Итог по slug тенанта; `failed` — тенанты, чистка которых упала (подробности в логе).
+    `admin_sessions` — истёкшие сессии админки; None — не чистились (выбраны тенанты) или
+    чистка упала (тогда `admin_sessions_failed`)."""
 
     results: dict[str, PurgeResult] = field(default_factory=dict)
     failed: list[str] = field(default_factory=list)
+    admin_sessions: int | None = None
+    admin_sessions_failed: bool = False
+
+    @property
+    def ok(self) -> bool:
+        return not self.failed and not self.admin_sessions_failed
 
 
 async def purge_all_tenants(
@@ -51,6 +63,12 @@ async def purge_all_tenants(
     if slugs:
         tenants = [t for t in tenants if t.slug in slugs]
     run = RetentionRun()
+    if not slugs:
+        try:
+            run.admin_sessions = await _purge_admin_sessions(session_factory, now, dry_run=dry_run)
+        except Exception:
+            logger.exception("retention.admin_sessions_failed", dry_run=dry_run)
+            run.admin_sessions_failed = True
     for tenant in tenants:
         try:
             run.results[tenant.slug] = await _purge_tenant(
@@ -60,6 +78,19 @@ async def purge_all_tenants(
             logger.exception("retention.failed", tenant_id=str(tenant.id), dry_run=dry_run)
             run.failed.append(tenant.slug)
     return run
+
+
+async def _purge_admin_sessions(
+    session_factory: Callable[[], AsyncSession], now: datetime, *, dry_run: bool
+) -> int:
+    async with session_factory() as session:
+        sessions = SqlAdminSessionStore(session)
+        if dry_run:
+            return await sessions.count_expired(now)
+        deleted = await sessions.purge_expired(now)
+        await session.commit()
+    logger.info("retention.admin_sessions_purged", deleted=deleted)
+    return deleted
 
 
 async def _purge_tenant(

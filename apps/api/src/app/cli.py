@@ -315,12 +315,18 @@ async def retention(slugs: list[str], dry_run: bool, settings: Settings) -> bool
             f"{slug}: {prefix} диалогов {result.conversations}, событий журнала "
             f"{result.agent_events}, заявок {result.leads}"
         )
+    if run.admin_sessions is not None:
+        print(f"истёкших сессий админки {prefix}: {run.admin_sessions}")
     for slug in run.failed:
         print(f"{slug}: сбой чистки — см. лог retention.failed", file=sys.stderr)
+    if run.admin_sessions_failed:
+        print(
+            "сессии админки: сбой чистки — см. лог retention.admin_sessions_failed", file=sys.stderr
+        )
     missing = sorted(set(slugs) - run.results.keys() - set(run.failed))
     for slug in missing:
         print(f"{slug}: тенант не найден", file=sys.stderr)
-    return not missing and not run.failed
+    return not missing and run.ok
 
 
 async def _named_sources(

@@ -59,6 +59,11 @@ class AdminSessionStore(Protocol):
 
     async def delete_expired(self, user_id: UUID, now: datetime) -> int: ...
 
+    async def keep_latest(self, user_id: UUID, limit: int, current: str) -> int:
+        """Оставить пользователю `limit` сессий: `current` (хэш токена только что созданной)
+        и самые новые из остальных; прочие закрыть. Число закрытых."""
+        ...
+
     async def delete_all(self, user_id: UUID) -> int:
         """Закрыть все сессии пользователя (смена пароля, отключение); число закрытых."""
         ...

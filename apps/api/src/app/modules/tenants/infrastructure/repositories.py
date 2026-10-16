@@ -1,6 +1,6 @@
 """Репозитории модуля tenants (реализации портов из domain/ports.py)."""
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any
 from uuid import UUID
 
@@ -48,6 +48,17 @@ class SqlTenantDirectory:
     async def get(self, tenant_id: TenantId) -> Tenant | None:
         record = await self.session.get(TenantRecord, tenant_id)
         return _tenant(record) if record else None
+
+    async def get_many(self, tenant_ids: Collection[TenantId]) -> list[Tenant]:
+        """Тенанты по id одним запросом, по slug; несуществующие id пропускаются."""
+        if not tenant_ids:
+            return []
+        stmt = (
+            select(TenantRecord)
+            .where(TenantRecord.id.in_(list(tenant_ids)))
+            .order_by(TenantRecord.slug)
+        )
+        return [_tenant(r) for r in (await self.session.execute(stmt)).scalars()]
 
     async def list_all(self) -> list[Tenant]:
         """Все тенанты по slug — для задач по всем тенантам (срок хранения, ADR-0043)."""

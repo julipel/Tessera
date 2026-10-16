@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     admin_cookie_secure: bool = True
     rate_admin_login_per_ip_per_min: int = 10
     rate_admin_login_per_email_per_hour: int = 20
+    # Потоки проверки паролей (scrypt ~0,1 с CPU и 32 МиБ на попытку): флуд входа ждёт в их
+    # очереди, а не занимает общий пул потоков и соединения БД (REVIEW.md: AC-4).
+    admin_kdf_threads: int = Field(default=2, ge=1, le=32)
+    # Открытых сессий на пользователя: при входе сверх лимита закрываются самые старые.
+    admin_max_sessions_per_user: int = Field(default=10, ge=1)
 
     @field_validator("cors_origins")
     @classmethod

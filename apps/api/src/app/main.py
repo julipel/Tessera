@@ -13,7 +13,7 @@ from redis.asyncio import Redis
 from app.api import health
 from app.knowledge_wiring import KnowledgeServices, build_knowledge_services
 from app.logs import TraceIdMiddleware, configure_logging
-from app.modules.access.public import SqlAdminAuthenticator
+from app.modules.access.public import KdfPool, SqlAdminAuthenticator
 from app.modules.access.public import router as access_router
 from app.modules.agent.public import LLMClients
 from app.modules.chat.public import (
@@ -52,6 +52,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     directory: RedisTurnDirectory = app.state.turn_directory
     cancel_listener = asyncio.create_task(directory.listen(turns.cancel_local))
     yield
+    kdf: KdfPool = app.state.kdf_pool
+    kdf.shutdown()  # первым: сбой закрытия соединений ниже не оставит потоки пула
     cancel_listener.cancel()
     with suppress(asyncio.CancelledError):
         await cancel_listener
@@ -138,6 +140,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.source_file_limits = SourceFileLimits()
     # Сессии админки для зависимостей ролей в любом модуле (ADR-0036).
     app.state.admin_authenticator = SqlAdminAuthenticator(app.state.session_factory)
+    app.state.kdf_pool = KdfPool(settings.admin_kdf_threads)
     install_error_handlers(app)
     # Размер тела — до чтения и разбора JSON (REVIEW.md: C-3): чат анонимный — 64 КБ (ход
     # проверяется ещё и на 32 КБ после разбора), файлы источников читаются потоково со своим

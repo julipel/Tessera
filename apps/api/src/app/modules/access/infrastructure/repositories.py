@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, delete, select
+from sqlalchemy import ColumnElement, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.access.domain.entities import AdminRole, AdminUser, TenantMembership
@@ -164,6 +164,41 @@ class SqlAdminSessionStore:
             .returning(AdminSessionRecord.id)
         )
         return len((await self.session.execute(stmt)).scalars().all())
+
+    async def keep_latest(self, user_id: UUID, limit: int, current: str) -> int:
+        # По времени создания, не по сроку: после уменьшения ADMIN_SESSION_TTL_HOURS новая
+        # сессия истекает раньше старых, но закрываться должны старые. Сессии одной
+        # транзакции созданы в один момент (now()) — их порядок задаёт срок.
+        others = (AdminSessionRecord.user_id == user_id, AdminSessionRecord.token_hash != current)
+        latest = (
+            select(AdminSessionRecord.id)
+            .where(*others)
+            .order_by(
+                AdminSessionRecord.created_at.desc(),
+                AdminSessionRecord.expires_at.desc(),
+                AdminSessionRecord.id,
+            )
+            .limit(limit - 1)
+        )
+        stmt = (
+            delete(AdminSessionRecord)
+            .where(*others, AdminSessionRecord.id.not_in(latest))
+            .returning(AdminSessionRecord.id)
+        )
+        return len((await self.session.execute(stmt)).scalars().all())
+
+    async def purge_expired(self, now: datetime) -> int:
+        """Истёкшие сессии всех пользователей — ежедневная чистка (REVIEW.md: AC-10)."""
+        stmt = (
+            delete(AdminSessionRecord)
+            .where(AdminSessionRecord.expires_at <= now)
+            .returning(AdminSessionRecord.id)
+        )
+        return len((await self.session.execute(stmt)).scalars().all())
+
+    async def count_expired(self, now: datetime) -> int:
+        stmt = select(func.count()).where(AdminSessionRecord.expires_at <= now)
+        return int((await self.session.execute(stmt)).scalar_one())
 
     async def delete_all(self, user_id: UUID) -> int:
         stmt = (

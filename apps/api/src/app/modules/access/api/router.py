@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.contracts import AdminLoginRequest, AdminLoginResponse, AdminMe, AdminMembership
 from app.modules.access.application.auth import login, logout
 from app.modules.access.domain.errors import InvalidCredentialsError
+from app.modules.access.infrastructure.kdf import KdfPool
 from app.modules.access.infrastructure.repositories import (
     SqlAdminSessionStore,
     SqlAdminUserDirectory,
@@ -66,13 +67,20 @@ async def admin_login(
     await ensure_not_limited(limiter, email_rule, email)
     now = datetime.now(UTC)
     sessions = SqlAdminSessionStore(session)
+    kdf: KdfPool = request.app.state.kdf_pool
     try:
         result = await login(
             body.email,
             body.password,
             users=SqlAdminUserDirectory(session),
             sessions=sessions,
+            verify=kdf.verify,
+            # До login роутер в БД не пишет: commit фиксирует пустую транзакцию чтения и
+            # возвращает соединение в пул. Запись в session выше этой строки зафиксировалась
+            # бы и при неверном пароле.
+            release=session.commit,
             ttl=timedelta(hours=settings.admin_session_ttl_hours),
+            max_sessions=settings.admin_max_sessions_per_user,
             now=now,
         )
     except InvalidCredentialsError as e:
@@ -130,16 +138,14 @@ async def admin_me(principal: CurrentAdmin, session: DbSession) -> AdminMe:
 
 
 async def _me(principal: AdminPrincipal, session: AsyncSession) -> AdminMe:
-    tenants = SqlTenantDirectory(session)
-    memberships = []
-    for tenant_id, role in principal.roles.items():
-        tenant = await tenants.get(tenant_id)
-        if tenant is not None:  # роль удаляется каскадом вместе с тенантом
-            memberships.append(
-                AdminMembership(
-                    tenant_id=tenant.id, tenant_slug=tenant.slug, tenant_name=tenant.name, role=role
-                )
-            )
+    # Роль удаляется каскадом вместе с тенантом, так что тенант есть у каждой роли.
+    tenants = await SqlTenantDirectory(session).get_many(principal.roles.keys())
+    memberships = [
+        AdminMembership(
+            tenant_id=t.id, tenant_slug=t.slug, tenant_name=t.name, role=principal.roles[t.id]
+        )
+        for t in tenants
+    ]
     return AdminMe(
         id=principal.user_id,
         email=principal.email,

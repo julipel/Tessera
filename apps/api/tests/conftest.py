@@ -61,13 +61,14 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def app(settings: Settings) -> FastAPI:
+def app(settings: Settings) -> Iterator[FastAPI]:
     app = create_app(settings)
     # Лимиты — в памяти и свои на тест: Redis-счётчики делились бы между тестами (ADR-0030).
     app.state.rate_limiter = InMemoryRateLimiter()
     # Ходы — только в процессе теста: межпроцессная отмена — в test_turn_directory.py.
     app.state.turn_registry = TurnRegistry()
-    return app
+    yield app
+    app.state.kdf_pool.shutdown()  # lifespan в тестах не запускается
 
 
 @pytest.fixture

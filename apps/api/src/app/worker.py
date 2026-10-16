@@ -122,9 +122,11 @@ async def purge_expired_data(ctx: dict[str, Any]) -> None:
     trace_id = str(ctx.get("job_id") or uuid.uuid4())
     with structlog.contextvars.bound_contextvars(trace_id=trace_id):
         run = await purge_all_tenants(session_factory, datetime.now(UTC))
-    if run.failed:
-        # Остальные тенанты уже почищены; задача — failed, чтобы сбой был виден в arq.
-        raise RuntimeError(f"retention: сбой у тенантов {', '.join(run.failed)}")
+    if not run.ok:
+        # Остальное уже почищено; задача — failed, чтобы сбой был виден в arq.
+        parts = [f"тенанты {', '.join(run.failed)}"] if run.failed else []
+        parts += ["сессии админки"] if run.admin_sessions_failed else []
+        raise RuntimeError(f"retention: сбой: {'; '.join(parts)}")
 
 
 async def startup(ctx: dict[str, Any]) -> None:

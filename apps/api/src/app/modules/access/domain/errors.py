@@ -8,7 +8,7 @@ class InvalidEmailError(DomainError):
 
 
 class WeakPasswordError(DomainError):
-    """Пароль короче минимальной длины."""
+    """Пароль короче минимальной или длиннее максимальной длины."""
 
 
 class PasswordRequiredError(DomainError):

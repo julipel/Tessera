@@ -1,24 +1,33 @@
 """Вход в админку, сессии и проверка роли в тенанте (P8-01b, ADR-0036)."""
 
+import asyncio
+import hashlib
+import threading
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
+import structlog
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import event, select
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.contracts import AdminLoginResponse, AdminMe
 from app.modules.access.application import auth
-from app.modules.access.domain.passwords import verify_password
+from app.modules.access.domain.entities import AdminUser
+from app.modules.access.domain.errors import InvalidCredentialsError
+from app.modules.access.domain.passwords import _scrypt as scrypt
+from app.modules.access.domain.passwords import hash_password, verify_password
 from app.modules.access.domain.sessions import hash_session_token
 from app.modules.access.public import (
     AdminMembershipRepository,
     AdminSessionRecord,
+    KdfPool,
     SqlAdminSessionStore,
     SqlAdminUserDirectory,
     upsert_admin_user,
@@ -34,6 +43,8 @@ from app.modules.shared.public import (
 from app.modules.tenants.public import SqlTenantDirectory
 
 AdminLogin = Callable[..., Awaitable[dict[str, str]]]  # фикстура admin_login из conftest
+KDF = "app.modules.access.infrastructure.kdf"
+PASSWORDS = "app.modules.access.domain.passwords"
 LOGIN = "/v1/admin/auth/login"
 LOGOUT = "/v1/admin/auth/logout"
 ME = "/v1/admin/me"
@@ -144,20 +155,229 @@ async def test_failed_login_is_indistinguishable(
     await _user(db_session, "anna@example.com", password=PASSWORD)
     await _user(db_session, "off@example.com", password=PASSWORD, is_active=False)
     checked: list[str] = []
+    kdf_calls: list[str] = []
 
     def counting_verify(given: str, encoded: str) -> bool:
-        checked.append(encoded)
+        checked.append(threading.current_thread().name)
         return verify_password(given, encoded)
 
-    monkeypatch.setattr(auth, "verify_password", counting_verify)
+    def counting_scrypt(*args: Any) -> bytes:
+        kdf_calls.append("scrypt")
+        return scrypt(*args)
+
+    monkeypatch.setattr(f"{KDF}.verify_password", counting_verify)
+    monkeypatch.setattr(f"{PASSWORDS}._scrypt", counting_scrypt)
 
     response = await db_client.post(LOGIN, json={"email": email, "password": password})
 
     assert response.status_code == 401
     assert response.json() == INVALID
-    # Пароль проверяется всегда — для неизвестного email по фиктивному хэшу.
-    assert len(checked) == 1
+    # Пароль проверяется всегда — для неизвестного email по фиктивному хэшу, и это ровно
+    # один scrypt, как у настоящего пользователя (REVIEW.md: AC-7); в пуле KDF (AC-4).
+    assert len(checked) == 1 and checked[0].startswith("kdf")
+    assert len(kdf_calls) == 1
     assert (await db_session.execute(select(AdminSessionRecord))).scalars().all() == []
+
+
+class _FakeUsers:
+    def __init__(self, log: list[str], user: AdminUser | None) -> None:
+        self.log, self.user = log, user
+
+    async def get_credentials(self, email: str) -> tuple[AdminUser, str] | None:
+        self.log.append("read")
+        return (self.user, hash_password(PASSWORD)) if self.user else None
+
+
+async def test_login_releases_db_connection_before_password_check() -> None:
+    """AC-4: транзакция чтения закрыта до KDF — флуд входа не держит соединения пула."""
+    log: list[str] = []
+    user = AdminUser(uuid4(), "anna@example.com", is_superadmin=False, is_active=True)
+
+    async def release() -> None:
+        log.append("release")
+
+    async def verify(password: str, encoded: str) -> bool:
+        log.append("kdf")
+        return False
+
+    with pytest.raises(InvalidCredentialsError):
+        await auth.login(
+            "anna@example.com",
+            "wrong password!",
+            users=cast(Any, _FakeUsers(log, user)),
+            sessions=cast(Any, None),
+            verify=verify,
+            release=release,
+            ttl=timedelta(hours=1),
+            max_sessions=10,
+            now=datetime.now(UTC),
+        )
+
+    assert log == ["read", "release", "kdf"]
+
+
+async def test_kdf_pool_limits_concurrent_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-4: проверки паролей идут в своём пуле, одновременно — не больше его потоков."""
+    running, peak, threads = 0, 0, set()
+    lock = threading.Lock()
+
+    def slow_verify(password: str, encoded: str) -> bool:
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+            threads.add(threading.current_thread().name)
+        time.sleep(0.02)
+        with lock:
+            running -= 1
+        return False
+
+    monkeypatch.setattr(f"{KDF}.verify_password", slow_verify)
+    pool = KdfPool(2)
+    try:
+        await asyncio.gather(*(pool.verify("p", "h") for _ in range(8)))
+    finally:
+        pool.shutdown()
+
+    assert peak == 2
+    assert all(name.startswith("kdf") for name in threads)
+
+
+@pytest.mark.parametrize(
+    ("email", "password", "reason"),
+    [
+        ("anna@example.com", "wrong password!", "bad_password"),
+        ("nobody@example.com", PASSWORD, "unknown_user"),
+        ("off@example.com", PASSWORD, "inactive"),
+    ],
+)
+async def test_login_attempts_are_logged_without_email(
+    db_client: AsyncClient, db_session: AsyncSession, email: str, password: str, reason: str
+) -> None:
+    """AC-9: успех и отказ в логе; email — только хэшем (ПДн)."""
+    user_id = await _user(db_session, "anna@example.com", password=PASSWORD)
+    await _user(db_session, "off@example.com", password=PASSWORD, is_active=False)
+
+    with structlog.testing.capture_logs() as logs:
+        await db_client.post(LOGIN, json={"email": email.upper(), "password": password})
+        await db_client.post(LOGIN, json={"email": "anna@example.com", "password": PASSWORD})
+
+    (failed,) = [e for e in logs if e["event"] == "admin.login_failed"]
+    assert failed["reason"] == reason
+    assert failed["email_hash"] == hashlib.sha256(email.encode()).hexdigest()[:16]
+    (succeeded,) = [e for e in logs if e["event"] == "admin.login_succeeded"]
+    assert succeeded["user_id"] == str(user_id)
+    assert not any("@" in str(value) for entry in logs for value in entry.values())
+
+
+async def test_login_keeps_only_latest_sessions(
+    app: FastAPI, db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """AC-10: сессий у пользователя не больше лимита — при входе закрываются самые старые."""
+    app.state.settings = app.state.settings.model_copy(update={"admin_max_sessions_per_user": 2})
+    user_id = await _user(db_session, "anna@example.com", password=PASSWORD)
+    credentials = {"email": "anna@example.com", "password": PASSWORD}
+    tokens = [(await db_client.post(LOGIN, json=credentials)).json()["token"] for _ in range(3)]
+
+    stored = await db_session.execute(
+        select(AdminSessionRecord.token_hash).where(AdminSessionRecord.user_id == user_id)
+    )
+    assert set(stored.scalars()) == {hash_session_token(t) for t in tokens[1:]}
+    assert (await db_client.get(ME, headers=_bearer(tokens[0]))).status_code == 401
+    assert (await db_client.get(ME, headers=_bearer(tokens[2]))).status_code == 200
+
+
+async def test_new_session_survives_limit_after_ttl_was_shortened(
+    app: FastAPI, db_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Срок сократили: новая сессия истекает раньше открытых, но закрываются старые."""
+    user_id = await _user(db_session, "anna@example.com", password=PASSWORD)
+    for i in range(2):
+        db_session.add(
+            AdminSessionRecord(
+                user_id=user_id,
+                token_hash=hash_session_token(f"as_long{i}"),
+                expires_at=datetime.now(UTC) + timedelta(hours=12 + i),
+            )
+        )
+    await db_session.flush()
+    app.state.settings = app.state.settings.model_copy(
+        update={"admin_max_sessions_per_user": 2, "admin_session_ttl_hours": 1}
+    )
+
+    response = await db_client.post(LOGIN, json={"email": "anna@example.com", "password": PASSWORD})
+
+    assert response.status_code == 200
+    assert (await db_client.get(ME, headers=_bearer(response.json()["token"]))).status_code == 200
+    stored = await db_session.execute(
+        select(AdminSessionRecord.token_hash).where(AdminSessionRecord.user_id == user_id)
+    )
+    assert len(stored.scalars().all()) == 2
+
+
+async def test_user_disabled_during_login_gets_no_session() -> None:
+    """AC-8: пользователя отключили между проверкой пароля и созданием сессии — отказ."""
+    user = AdminUser(uuid4(), "anna@example.com", is_superadmin=False, is_active=True)
+
+    class Sessions:
+        async def delete_expired(self, user_id: UUID, now: datetime) -> int:
+            return 0
+
+        async def create(self, user_id: UUID, token_hash: str, expires_at: datetime) -> None:
+            pass
+
+        async def keep_latest(self, user_id: UUID, limit: int, current: str) -> int:
+            return 0
+
+        async def principal(self, token_hash: str, now: datetime) -> AdminPrincipal | None:
+            return None
+
+    async def release() -> None:
+        pass
+
+    async def verify(password: str, encoded: str) -> bool:
+        return True
+
+    with (
+        structlog.testing.capture_logs() as logs,
+        pytest.raises(InvalidCredentialsError),
+    ):
+        await auth.login(
+            "anna@example.com",
+            PASSWORD,
+            users=cast(Any, _FakeUsers([], user)),
+            sessions=cast(Any, Sessions()),
+            verify=verify,
+            release=release,
+            ttl=timedelta(hours=1),
+            max_sessions=10,
+            now=datetime.now(UTC),
+        )
+    assert [(e["event"], e.get("reason")) for e in logs] == [("admin.login_failed", "inactive")]
+
+
+async def test_me_reads_tenants_in_one_query(
+    db_client: AsyncClient,
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+    admin_login: AdminLogin,
+) -> None:
+    """AC-11: тенанты ролей — одним запросом, а не по запросу на роль."""
+    roles = {await _tenant(db_session, slug): AdminRole.VIEWER for slug in ("b", "a", "c")}
+    headers = await admin_login(roles=roles)
+    statements: list[str] = []
+
+    def record(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+        statements.append(statement)
+
+    event.listen(db_connection.sync_connection, "before_cursor_execute", record)
+    try:
+        me = await db_client.get(ME, headers=headers)
+    finally:
+        event.remove(db_connection.sync_connection, "before_cursor_execute", record)
+
+    assert [m["tenant_slug"] for m in me.json()["memberships"]] == ["a", "b", "c"]
+    assert len([s for s in statements if "FROM tenants" in s]) == 1
 
 
 # --- Сессия ---

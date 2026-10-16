@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cli import parse_grants, read_password
 from app.modules.access.domain.passwords import (
     check_password_strength,
+    dummy_hash,
     hash_password,
     verify_password,
 )
@@ -70,14 +71,53 @@ def test_short_password_is_rejected() -> None:
         check_password_strength("short")
 
 
+def test_password_longer_than_login_accepts_is_rejected() -> None:
+    """AC-12: CLI не создаёт пароль, с которым вход (maxLength 1024) не пустит."""
+    check_password_strength("x" * 1024)
+    with pytest.raises(WeakPasswordError, match="длиннее"):
+        check_password_strength("x" * 1025)
+
+
+def test_password_is_nfkc_normalized() -> None:
+    """AC-12: «é» одним символом и «e» + combining-ударение — один и тот же пароль."""
+    composed, decomposed = "пароль-café-12", "пароль-cafe\u0301-12"
+    assert verify_password(decomposed, hash_password(composed))
+    assert verify_password(composed, hash_password(decomposed))
+
+
+def test_hash_made_before_nfkc_still_verifies() -> None:
+    salt = b"0123456789abcdef"
+    raw = "пароль-cafe\u0301-12"  # хэш до P9-01aa — из строки как есть
+    key = hashlib.scrypt(raw.encode(), salt=salt, n=2**10, r=8, p=1, dklen=32)
+    encoded = f"scrypt$1024$8$1${base64.b64encode(salt).decode()}${base64.b64encode(key).decode()}"
+
+    assert verify_password(raw, encoded)
+    assert not verify_password("пароль-café-13", encoded)
+
+
+@pytest.mark.parametrize("n", [str(2**70), "-1", "0", "3", str(2**21)])
+def test_tampered_hash_parameters_do_not_raise(n: str) -> None:
+    """AC-12: подменённый `n` (TypeError, OverflowError у scrypt) — False, а не 500."""
+    assert not verify_password(PASSWORD, f"scrypt${n}$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AA==")
+
+
+def test_dummy_hash_never_verifies_and_has_current_parameters() -> None:
+    first, second = dummy_hash(), dummy_hash()
+    assert first != second
+    assert first.split("$")[:4] == hash_password(PASSWORD).split("$")[:4]
+    assert not verify_password(PASSWORD, first)
+
+
 def test_email_is_normalized() -> None:
     assert normalize_email("  Admin@Example.COM ") == "admin@example.com"
 
 
 @pytest.mark.parametrize("email", ["", "admin", "a@b", "a b@c.d", "a@@b.c"])
 def test_invalid_email_is_rejected(email: str) -> None:
-    with pytest.raises(InvalidEmailError):
+    with pytest.raises(InvalidEmailError) as error:
         normalize_email(email)
+    # AC-13: сообщение попадает в логи — без самого значения.
+    assert str(error.value) == "некорректный email"
 
 
 def test_editor_includes_viewer() -> None:

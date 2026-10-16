@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app import cli, worker
+from app.modules.access.public import AdminSessionRecord, AdminUserRecord
 from app.modules.chat.public import (
     ConversationRecord,
     MessageRatingRecord,
@@ -364,6 +365,78 @@ async def test_tenant_failure_does_not_stop_others(
     assert await count(db_session, ConversationRecord, shop["tenant_id"]) == 4
     (failed,) = [log for log in debug_logs if log["event"] == "retention.failed"]
     assert failed["tenant_id"] == str(broken.id)
+
+
+async def test_full_run_purges_expired_admin_sessions(
+    db_connection: AsyncConnection, db_session: AsyncSession
+) -> None:
+    """AC-10: истёкшие сессии админки всех пользователей — в ежедневной чистке; при выборе
+    тенантов (`slugs`) не трогаются."""
+    user = AdminUserRecord(email="anna@example.com", password_hash="x", is_superadmin=False)
+    db_session.add(user)
+    await db_session.flush()
+    for name, expires in (("old", NOW - timedelta(hours=1)), ("live", NOW + timedelta(hours=1))):
+        db_session.add(AdminSessionRecord(user_id=user.id, token_hash=name, expires_at=expires))
+    await db_session.commit()
+
+    assert (
+        await purge_all_tenants(factory(db_connection), NOW, slugs=["x"])
+    ).admin_sessions is None
+    dry = await purge_all_tenants(factory(db_connection), NOW, dry_run=True)
+    assert dry.admin_sessions == 1
+    run = await purge_all_tenants(factory(db_connection), NOW)
+
+    assert run.admin_sessions == 1 and run.ok
+    remaining = await db_session.execute(select(AdminSessionRecord.token_hash))
+    assert list(remaining.scalars()) == ["live"]
+
+
+async def test_admin_sessions_failure_does_not_stop_tenants(
+    db_connection: AsyncConnection,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def broken(*_: Any, **__: Any) -> int:
+        raise RuntimeError("БД недоступна")
+
+    monkeypatch.setattr("app.retention._purge_admin_sessions", broken)
+    shop = await seed_tenant(db_session, "shop")
+
+    run = await purge_all_tenants(factory(db_connection), NOW)
+
+    assert run.admin_sessions_failed and not run.ok
+    assert run.results["shop"].conversations == 2
+    assert await count(db_session, ConversationRecord, shop["tenant_id"]) == 4
+
+
+def test_cli_reports_admin_sessions(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def fake_run(*_: Any, **__: Any) -> RetentionRun:
+        return RetentionRun(admin_sessions=3)
+
+    monkeypatch.setattr(cli, "purge_all_tenants", fake_run)
+    assert cli.main(["retention"]) == 0
+    assert capsys.readouterr().out == "истёкших сессий админки удалено: 3\n"
+
+    async def failed_run(*_: Any, **__: Any) -> RetentionRun:
+        return RetentionRun(admin_sessions_failed=True)
+
+    monkeypatch.setattr(cli, "purge_all_tenants", failed_run)
+    assert cli.main(["retention"]) == 1
+    assert "сессии админки: сбой чистки" in capsys.readouterr().err
+
+
+async def test_worker_job_fails_when_admin_sessions_purge_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run_with_failure(*_: Any, **__: Any) -> RetentionRun:
+        return RetentionRun(admin_sessions_failed=True)
+
+    monkeypatch.setattr(worker, "purge_all_tenants", run_with_failure)
+
+    with pytest.raises(RuntimeError, match="сессии админки"):
+        await purge_expired_data({"session_factory": None, "job_id": "cron:retention"})
 
 
 async def test_worker_job_fails_when_a_tenant_failed(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -10,6 +10,7 @@ from app.modules.access.domain.errors import (
 )
 from app.modules.access.domain.passwords import MIN_PASSWORD_LENGTH, normalize_email
 from app.modules.access.infrastructure.authenticator import SqlAdminAuthenticator
+from app.modules.access.infrastructure.kdf import KdfPool
 from app.modules.access.infrastructure.models import (
     AdminMembershipRecord,
     AdminSessionRecord,
@@ -31,6 +32,7 @@ __all__ = [
     "AdminUserRecord",
     "AdminUserResult",
     "InvalidEmailError",
+    "KdfPool",
     "PasswordRequiredError",
     "SqlAdminAuthenticator",
     "SqlAdminSessionStore",

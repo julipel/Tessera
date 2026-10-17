@@ -31,10 +31,15 @@ class RawItemRef:
 
 @dataclass(frozen=True, slots=True)
 class Listing:
-    """Результат discover/changed_since; `cursor` — курсор для следующего changed_since."""
+    """Результат discover/changed_since; `cursor` — курсор для следующего changed_since.
+
+    `present` — external_id всех элементов источника сейчас, если коннектор знает их и при
+    changed_since (файлы: листинг каталога дешёвый). Тогда удалённое уходит из поиска и при
+    инкрементальной синхронизации (REVIEW.md: K-14); None — только полная видит удаления."""
 
     refs: list[RawItemRef]
     cursor: str | None = None
+    present: frozenset[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)

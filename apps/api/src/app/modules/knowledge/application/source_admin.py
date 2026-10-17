@@ -43,6 +43,9 @@ from app.modules.shared.kernel import NotFoundError, TenantId
 type ConfigValidator = Callable[[SourceKind, dict[str, Any]], None]
 
 _CONFIG = "config_yaml"
+# Пауза между запросами к сайту у источника из админки: editor может указать чужой сайт,
+# и воркер не должен обходить его без пауз (REVIEW.md: K-12). YAML тенанта — без ограничения.
+ADMIN_MIN_CRAWL_DELAY_S = 0.5
 
 
 def parse_source_config_yaml(source: str) -> dict[str, Any]:
@@ -98,6 +101,12 @@ async def create_source(
         raise InvalidSourceError(
             str(e), [SourceProblem((_CONFIG, *p.loc), p.message) for p in e.problems]
         ) from e
+    if kind is SourceKind.WEBSITE:
+        # Конфиг уже проверен, но валидатор нестрогий: «"0"» в YAML — тоже число (0.0).
+        delay = float(config.get("crawl_delay_s", ADMIN_MIN_CRAWL_DELAY_S))
+        if delay < ADMIN_MIN_CRAWL_DELAY_S:
+            message = f"у источника из админки пауза — не меньше {ADMIN_MIN_CRAWL_DELAY_S:g} с"
+            raise InvalidSourceError(message, [SourceProblem((_CONFIG, "crawl_delay_s"), message)])
     source_id = await store.create_source(tenant_id, name, kind, config)
     if source_id is None:
         message = f"имя {name!r} уже занято другим источником тенанта"
@@ -189,12 +198,18 @@ async def delete_source_file(
     name: str,
     store: SourceAdminStore,
     files: SourceFileStore,
-) -> None:
-    """Данные файла удалит следующая полная синхронизация."""
+    syncs: SyncStore,
+    queue: SyncQueue,
+) -> UUID:
+    """Удалить файл и поставить в очередь полную синхронизацию (REVIEW.md: K-14). Источник
+    `file` удалённое видит и в инкрементальной (`Listing.present`), поэтому уже ждущая
+    синхронизация его тоже уберёт; у `table` удалённые строки видит только полная, и если
+    в этот момент синхронизация уже идёт, удалённое уберёт следующая полная."""
     source = _editable_files(await get_source(tenant_id, source_id, store))
     check_file_name(source.kind, name)
     if not await asyncio.to_thread(files.delete_file, _spec(tenant_id, source), name):
         raise NotFoundError(f"файл {name!r} не найден")
+    return await request_sync(tenant_id, source_id, syncs, queue, full=True)
 
 
 def _with_files(source: SourceOverview) -> SourceOverview:

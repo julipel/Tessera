@@ -94,6 +94,8 @@ async def test_changed_since_returns_newer_files(
 
     nothing = await connector.changed_since(source, "2000")
     assert (nothing.refs, nothing.cursor) == ([], "2000")
+    # Все файлы каталога — чтобы инкрементальная синхронизация видела удалённые (K-14).
+    assert nothing.present == frozenset({"old.md", "new.md"})
 
 
 async def test_fetch_markdown_takes_title_from_h1(
@@ -203,3 +205,44 @@ async def test_sync_stores_documents_with_structural_chunks(
         ("Доставка > Сроки", "## Сроки\n\nДва дня."),
         ("Доставка > Цена", "## Цена\n\nБесплатно."),
     ]
+
+
+async def test_incremental_sync_removes_deleted_file(
+    tmp_path: Path, db_session: AsyncSession
+) -> None:
+    # Удалённый файл уходит из поиска и без полной синхронизации (REVIEW.md: K-14).
+    tenant_id = (await SqlTenantDirectory(db_session).create("files", "files")).id
+    source = await SourceRepository(db_session).add(
+        tenant_id, SourceRecord(tenant_id=tenant_id, kind=SourceKind.FILE, config={})
+    )
+    connector = FileConnector(tmp_path)
+    base = connector.source_dir(SourceSpec(tenant_id, source.id, {}))
+    for name in ("a.md", "b.md", "c.md"):
+        write(base / name, f"Текст {name}.", mtime_ns=1_000)
+    index = InMemoryChunkIndex()
+
+    async def sync() -> dict[str, object]:
+        record = await SourceSyncRepository(db_session).add(
+            tenant_id, SourceSyncRecord(tenant_id=tenant_id, source_id=source.id)
+        )
+        await run_sync(
+            tenant_id,
+            record.id,
+            SqlSyncStore(db_session),
+            {SourceKind.FILE: connector},
+            MarkdownChunker(),
+            embedder=FakeEmbedder(),
+            index=index,
+        )
+        await db_session.refresh(record)
+        assert record.status is SyncStatus.SUCCEEDED
+        return dict(record.stats)
+
+    await sync()
+    (base / "b.md").unlink()
+    stats = await sync()
+
+    assert (stats["incremental"], stats["deleted"]) == (True, 1)
+    documents = {d.external_id for d in await DocumentRepository(db_session).list(tenant_id)}
+    assert documents == {"a.md", "c.md"}
+    assert index.external_ids(tenant_id) == {"a.md", "c.md"}

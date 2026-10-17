@@ -116,6 +116,7 @@ export function SourceView({
           tenantId={tenantId}
           sourceId={sourceId}
           editable={editable && source.origin === "admin"}
+          onDeleted={() => void reload()}
         />
       )}
 

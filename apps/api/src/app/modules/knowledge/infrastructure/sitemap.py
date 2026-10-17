@@ -87,6 +87,10 @@ def _gunzip(data: bytes, max_bytes: int) -> bytes:
 
 def _parse_xml(data: bytes) -> tuple[list[SitemapEntry], bool]:
     # Sitemap не нуждается в DTD; сущности — путь к XML-бомбам, их не принимаем вовсе.
+    # Sitemap — только UTF-8: в UTF-16/32 без BOM проверка ниже не видит `<!DOCTYPE`
+    # (REVIEW.md: K-19), а NUL-байтов в UTF-8 XML не бывает.
+    if b"\x00" in data:
+        raise SitemapError("sitemap не в UTF-8")
     if b"<!ENTITY" in data or b"<!DOCTYPE" in data:
         raise SitemapError("DTD в sitemap не поддерживается")
     try:

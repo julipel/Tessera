@@ -240,6 +240,7 @@ class _Renderer:
             or (self.skip_header and (element.tag == "header" or role == "banner"))
             or "hidden" in attrs
             or attrs.get("aria-hidden", "").lower() == "true"
+            or _hidden_by_style(element)
         )
 
     def _inline_text(self, node: "_Element | str") -> str:
@@ -302,6 +303,38 @@ class _Renderer:
             ]
             for row in _find(table, "tr", stop="table")
         ]
+
+
+# Inline-стиль, скрывающий элемент целиком: такой текст — канал для отравленных знаний
+# (REVIEW.md: K-9). Только `display:none` и `visibility:hidden` без `visibility:visible` в
+# поддереве: `font-size:0` (зазоры inline-block) и `opacity:0` (старт анимации) у видимого
+# контента обычны. CSS-классы не смотрим: под ними часто свёрнутые FAQ и вкладки.
+_STYLE_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_DISPLAY_NONE = re.compile(r"(?:^|;)\s*display\s*:\s*none\s*(?:!important\s*)?(?:;|$)")
+_VISIBILITY = re.compile(
+    r"(?:^|;)\s*visibility\s*:\s*(hidden|collapse|visible)\s*(?:!important\s*)?(?:;|$)"
+)
+
+
+def _style(element: "_Element") -> str:
+    return _STYLE_COMMENT.sub("", element.attrs.get("style", "")).lower()
+
+
+def _hidden_by_style(element: "_Element") -> bool:
+    style = _style(element)
+    if not style:
+        return False
+    if _DISPLAY_NONE.search(style):
+        return True
+    visibility = _VISIBILITY.search(style)
+    if visibility is None or visibility.group(1) == "visible":
+        return False
+    # Потомок с visibility:visible виден, хотя предок скрыт.
+    return not any(
+        (m := _VISIBILITY.search(_style(e))) is not None and m.group(1) == "visible"
+        for e in _iter_elements(element)
+        if e is not element
+    )
 
 
 def _iter_elements(root: _Element) -> Iterator[_Element]:

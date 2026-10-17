@@ -171,17 +171,17 @@
 - [x] *(исправлено в P9-01y)* **K-8. `url`/`image_url` сущностей сохраняются без проверки схемы.** `infrastructure/entity_mapping.py:90-91`, `infrastructure/record_mapping.py:101` — `javascript:`/`data:`/фишинговые ссылки из table/http_api/database попадают в `product_card.url` (`apps/web/.../ProductCard.tsx:30`, `href={card.url}`). React 19, вероятно, блокирует `javascript:` (не подтверждено), `data:` проходит. *Исправление:* `normalize_url` (только http/https) при маппинге.
 
 ### Мелочи
-- [ ] K-9. `infrastructure/html_extract.py:234` — текст, скрытый `display:none`/`visibility:hidden`/`font-size:0`, индексируется (канал для отравленных знаний; ADR-0031 смягчает частично).
-- [ ] K-10. `infrastructure/web_guard.py:29-40` — `is_public_address("::127.0.0.1")` → True (`::/96` отклонять явно; эксплуатируемость не подтверждена).
+- [x] *(исправлено в P9-01aj: inline `display:none` и `visibility:hidden`; `font-size:0`, `opacity:0` и классы — нет: так бывает и у видимого)* K-9. `infrastructure/html_extract.py:234` — текст, скрытый `display:none`/`visibility:hidden`/`font-size:0`, индексируется (канал для отравленных знаний; ADR-0031 смягчает частично).
+- [x] *(исправлено в P9-01aj: и `::ffff:0:0:0/96`)* K-10. `infrastructure/web_guard.py:29-40` — `is_public_address("::127.0.0.1")` → True (`::/96` отклонять явно; эксплуатируемость не подтверждена).
 - [x] *(исправлено в P9-01z)* K-11. `infrastructure/website_connector.py:153-163` — `fetch` вне кэша каждый раз заново качает robots и игнорирует `crawl_delay`: всплеск запросов к перегруженному сайту.
-- [ ] K-12. `infrastructure/website_connector.py:87` — `crawl_delay_s=0` допустим для источников из админки (editor может направить воркер на чужой сайт без пауз).
+- [x] *(исправлено в P9-01aj: у источников из админки не меньше 0,5 с)* K-12. `infrastructure/website_connector.py:87` — `crawl_delay_s=0` допустим для источников из админки (editor может направить воркер на чужой сайт без пауз).
 - [x] *(исправлено в P9-01z)* K-13. `infrastructure/website_connector.py:134,144` — кэш страниц живёт в воркере бессрочно (очищать после `run_sync`).
-- [ ] K-14. `application/source_admin.py:186-197` + `ingestion.py:148` — удалённый в админке файл остаётся в поиске до синхронизации с `full=True`.
-- [ ] K-15. `infrastructure/models.py:160` — `external_id String(512)`: длинные URL дают ошибку элемента на каждой синхронизации.
-- [ ] K-16. `application/chunking.py:78-89` — блок без пробелов (base64) — одно «слово», чанк превышает лимит эмбеддера, и весь документ падает.
-- [ ] K-17. `infrastructure/qdrant_index.py:234` — ответ не в JSON даёт голый `ValueError`, а не `VectorIndexError`.
-- [ ] K-18. `apps/api/src/app/knowledge_wiring.py:53-55` — таймаут эмбеддинга 5 с × `max_retries=1` может съесть весь 10-секундный бюджет инструмента.
-- [ ] K-19. `infrastructure/sitemap.py:90` — проверку `<!DOCTYPE`/`<!ENTITY` обходит UTF-16 без BOM (последствий нет: expat 2.8.5 защищён).
+- [x] *(исправлено в P9-01aj: удаление ставит полную синхронизацию; `file` видит удалённое и в инкрементальной — `Listing.present`)* K-14. `application/source_admin.py:186-197` + `ingestion.py:148` — удалённый в админке файл остаётся в поиске до синхронизации с `full=True`.
+- [x] *(исправлено в P9-01aj: `String(2048)`, миграция 0021, URL длиннее 2000 байт — пропускаются)* K-15. `infrastructure/models.py:160` — `external_id String(512)`: длинные URL дают ошибку элемента на каждой синхронизации.
+- [x] *(исправлено в P9-01aj: длинное слово — несколько «токенов»)* K-16. `application/chunking.py:78-89` — блок без пробелов (base64) — одно «слово», чанк превышает лимит эмбеддера, и весь документ падает.
+- [x] *(исправлено в P9-01aj)* K-17. `infrastructure/qdrant_index.py:234` — ответ не в JSON даёт голый `ValueError`, а не `VectorIndexError`.
+- [x] *(исправлено в P9-01aj: эмбеддинг запроса и Qdrant в API — по 3 с)* K-18. `apps/api/src/app/knowledge_wiring.py:53-55` — таймаут эмбеддинга 5 с × `max_retries=1` может съесть весь 10-секундный бюджет инструмента.
+- [x] *(исправлено в P9-01aj: NUL-байты — ошибка sitemap)* K-19. `infrastructure/sitemap.py:90` — проверку `<!DOCTYPE`/`<!ENTITY` обходит UTF-16 без BOM (последствий нет: expat 2.8.5 защищён).
 
 ---
 

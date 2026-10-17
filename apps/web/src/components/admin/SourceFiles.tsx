@@ -14,11 +14,14 @@ export function SourceFiles({
   tenantId,
   sourceId,
   editable,
+  onDeleted,
 }: {
   session: AdminSession;
   tenantId: string;
   sourceId: string;
   editable: boolean;
+  /** После удаления: API поставил полную синхронизацию — её статус показывает страница. */
+  onDeleted: () => void;
 }) {
   const { api, expire } = session;
   const [files, setFiles] = useState<SourceFile[] | null>(null);
@@ -75,7 +78,8 @@ export function SourceFiles({
     if (!window.confirm(`Удалить ${name}?`)) return;
     void run(async () => {
       await api.deleteFile(tenantId, sourceId, name);
-      return `${name} удалён. Его данные уйдут из поиска после полной синхронизации.`;
+      onDeleted();
+      return `${name} удалён. Синхронизация поставлена в очередь — после неё данные файла уйдут из поиска.`;
     });
   }
 

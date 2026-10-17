@@ -157,7 +157,9 @@ class DocumentRecord(TenantScopedBase):
     entity_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("entities.id", ondelete="CASCADE"), index=True
     )
-    external_id: Mapped[str] = mapped_column(String(512))
+    # URL страницы сайта бывает длинным (REVIEW.md: K-15). Не Text: уникальный индекс B-tree
+    # держит строку до ~2,7 КБ, коннектор website пропускает URL длиннее 2000 байт.
+    external_id: Mapped[str] = mapped_column(String(2048))
     title: Mapped[str] = mapped_column(Text, default="")
     url: Mapped[str | None] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(String(64))  # sha256 hex

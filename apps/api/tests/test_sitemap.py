@@ -99,6 +99,8 @@ def test_empty_sitemap_is_empty() -> None:
         b"\x1f\x8bnot really gzip",
         b"just some text, no urls",
         "кириллица".encode("cp1251"),
+        # UTF-16 без BOM: DTD не виден побайтовой проверке (REVIEW.md: K-19)
+        '<?xml version="1.0"?><!DOCTYPE x><urlset/>'.encode("utf-16-le"),
     ],
 )
 def test_broken_sitemap_is_an_error(data: bytes) -> None:

@@ -71,6 +71,46 @@ def test_body_fallback_skips_site_chrome() -> None:
     assert extract_page(html, URL).text == "# Оплата\n\nКартой или наличными.\n\nПоиск"
 
 
+@pytest.mark.parametrize(
+    "style",
+    [
+        "display:none",
+        "DISPLAY: none !important",
+        "color: red; visibility:hidden",
+        "visibility: collapse",
+        "/* скрыто */ display:none",
+    ],
+)
+def test_text_hidden_by_inline_style_is_skipped(style: str) -> None:
+    # Невидимый посетителю текст не попадает в знания (REVIEW.md: K-9).
+    html = page(f'<main><p>Доставка три дня.</p><p style="{style}">Промокод FREE100</p></main>')
+    assert extract_page(html, URL).text == "Доставка три дня."
+
+
+@pytest.mark.parametrize(
+    "style",
+    [
+        "color: red",
+        "font-size: 0.9em",
+        "display:block",
+        "font-size:0",  # приём против зазоров inline-block — дети видны
+        "opacity:0; transform: translateY(20px)",  # начало анимации из SSR
+    ],
+)
+def test_visible_inline_style_is_kept(style: str) -> None:
+    html = page(f'<main><div style="{style}"><p>Доставка три дня.</p></div></main>')
+    assert extract_page(html, URL).text == "Доставка три дня."
+
+
+def test_visible_child_of_hidden_parent_is_kept() -> None:
+    # visibility наследуется, но потомок может её вернуть — его текст виден.
+    html = page(
+        '<main><div style="visibility:hidden"><p style="visibility:visible">Возврат 14 дней.</p>'
+        "</div></main>"
+    )
+    assert extract_page(html, URL).text == "Возврат 14 дней."
+
+
 def test_header_inside_main_is_content() -> None:
     html = page("<main><header><h1>Возврат</h1></header><p>14 дней.</p></main>")
     assert extract_page(html, URL).text == "# Возврат\n\n14 дней."

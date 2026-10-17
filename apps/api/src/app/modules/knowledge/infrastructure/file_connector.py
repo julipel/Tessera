@@ -6,6 +6,7 @@
 
 import asyncio
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
 from app.modules.knowledge.domain.entities import SourceKind
@@ -55,7 +56,8 @@ class FileConnector:
     async def changed_since(self, source: SourceSpec, cursor: str) -> Listing:
         since = int(cursor)
         files = await asyncio.to_thread(self.files.scan, source)
-        return _listing([f for f in files if f.mtime_ns > since], fallback=cursor)
+        changed = _listing([f for f in files if f.mtime_ns > since], fallback=cursor)
+        return replace(changed, present=frozenset(f.external_id for f in files))
 
     async def fetch(self, source: SourceSpec, ref: RawItemRef) -> RawItem:
         return await asyncio.to_thread(self._read, source, ref.external_id)

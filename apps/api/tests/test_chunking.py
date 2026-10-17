@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.modules.knowledge.application.chunking import WORD_CHARS, word_tokens
 from app.modules.knowledge.public import MarkdownChunker
 
 
@@ -83,6 +84,44 @@ def test_paragraph_longer_than_limit_is_split_by_words() -> None:
 
     assert [c.text for c in chunks] == ["a b c d", "d e f g", "g h i j"]
     assert all(c.token_count <= 4 for c in chunks)
+
+
+def test_block_without_spaces_is_split_within_limit() -> None:
+    # base64 без пробелов — не одно «слово» на весь документ (REVIEW.md: K-16).
+    blob = "QUJD" * 10_000  # 40 000 символов
+    chunker = MarkdownChunker(max_tokens=500, overlap_tokens=50)
+
+    chunks = chunker.chunk(f"Фото товара:\n\n{blob}")
+
+    assert len(chunks) > 1
+    assert all(c.token_count <= 500 for c in chunks)
+    assert all(len(c.text) <= 500 * WORD_CHARS for c in chunks)
+    # Ничего не потеряно и не задвоено: кусок дороже перекрытия, поэтому без перекрытия.
+    pieces = [c.text for c in chunks if "Фото" not in c.text]
+    assert "".join(pieces) == blob
+
+
+def test_overlap_counts_cost_of_long_words() -> None:
+    long = "x" * 50  # 2 «токена»
+    chunker = MarkdownChunker(max_tokens=4, overlap_tokens=2)
+
+    # Перекрытие — последнее слово в 2 токена, а не два последних слова.
+    assert [c.text for c in chunker.chunk(f"a b {long} c d e")] == [
+        f"a b {long}",
+        f"{long} c d",
+        "c d e",
+    ]
+    # Последнее слово дороже перекрытия — следующее окно начинается без него.
+    big = "y" * 75  # 3 «токена»
+    assert [c.text for c in chunker.chunk(f"a {big} b c d")] == [f"a {big}", "b c d"]
+
+
+def test_long_word_costs_more_but_stays_whole() -> None:
+    url = "https://example.ru/" + "a" * 81  # 100 символов — 4 «токена»
+    chunks = MarkdownChunker(max_tokens=6, overlap_tokens=0).chunk(f"см. {url} и ещё")
+
+    assert word_tokens(url) == 4
+    assert [c.text for c in chunks] == [f"см. {url} и", "ещё"]
 
 
 def test_chunks_never_cross_sections() -> None:

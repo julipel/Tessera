@@ -203,6 +203,19 @@ async def test_rejected_request_raises(index: QdrantChunkIndex) -> None:
         await index.replace_document(TENANT_A, SOURCE, bad)
 
 
+async def test_non_json_answer_raises_index_error() -> None:
+    # Прокси вернул HTML с 200 — ошибка индекса, а не голый ValueError (REVIEW.md: K-17).
+    def proxy(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>Bad gateway</html>")
+
+    http = httpx.AsyncClient(base_url="http://qdrant.test", transport=httpx.MockTransport(proxy))
+    index = QdrantChunkIndex(http, collection="c", dimensions=DIMENSIONS)
+
+    with pytest.raises(VectorIndexError, match="не JSON"):
+        await index.ensure_collection()
+    await http.aclose()
+
+
 async def test_network_error_raises() -> None:
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused", request=request)

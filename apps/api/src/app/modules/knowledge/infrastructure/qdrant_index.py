@@ -231,7 +231,17 @@ class QdrantChunkIndex:
             raise VectorIndexError(
                 f"Qdrant {method} {url}: {response.status_code} {response.text[:500]}"
             )
-        return response.json().get("result")
+        try:
+            body = response.json()
+        except ValueError as error:  # не JSON — прокси или сбой Qdrant (REVIEW.md: K-17)
+            raise VectorIndexError(
+                f"Qdrant {method} {url}: ответ не JSON: {response.text[:200]!r}"
+            ) from error
+        if not isinstance(body, dict):
+            raise VectorIndexError(
+                f"Qdrant {method} {url}: ответ не объект: {response.text[:200]!r}"
+            )
+        return body.get("result")
 
 
 def _tenant_condition(tenant_id: TenantId) -> dict[str, Any]:

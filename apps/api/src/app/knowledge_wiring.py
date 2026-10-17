@@ -50,8 +50,9 @@ def build_knowledge_services(settings: Settings) -> KnowledgeServices | None:
         dimensions=settings.embedding_dimensions,
         base_url=settings.openai_base_url,
         batch_size=settings.embedding_batch_size,
-        # Запрос — в ходе диалога: таймаут инструмента 10 с, долгие ретраи бессмысленны.
-        timeout_s=5.0,
+        # Запрос — в ходе диалога: таймаут инструмента 10 с; две попытки по 3 с в типичном
+        # случае оставляют время на Qdrant и реранкер, общего дедлайна поиска нет (K-18).
+        timeout_s=3.0,
         max_retries=1,
     )
     qdrant_api_key = settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None
@@ -60,7 +61,7 @@ def build_knowledge_services(settings: Settings) -> KnowledgeServices | None:
         collection=settings.qdrant_collection,
         dimensions=settings.embedding_dimensions,
         api_key=qdrant_api_key or None,
-        timeout_s=5.0,
+        timeout_s=3.0,
     )
     reranker = build_reranker(settings)
     return KnowledgeServices(KnowledgeSearch(embedder, index, reranker), embedder, index, reranker)

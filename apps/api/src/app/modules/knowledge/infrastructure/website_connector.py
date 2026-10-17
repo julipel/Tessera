@@ -73,6 +73,10 @@ MAX_ROBOTS_DELAY_S = 10.0
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_SITEMAP_FILES = 50
 MAX_SITEMAP_NESTING = 2
+# URL страницы — external_id документа: уникальный индекс B-tree держит строку до ~2,7 КБ,
+# а кириллица в пути — 2 байта на символ. Длиннее такие адреса пропускаются, а не дают
+# ошибку элемента на каждой синхронизации (K-15).
+MAX_URL_BYTES = 2000
 
 _HTML = frozenset({"text/html", "application/xhtml+xml"})
 
@@ -206,8 +210,12 @@ class WebsiteConnector:
         return site
 
     async def _allowed(self, site: _Site, url: str) -> bool:
-        """В источнике и разрешено robots своего origin (robots читается при первом обращении)."""
+        """В источнике, не длиннее MAX_URL_BYTES в UTF-8 и разрешено robots своего origin (robots
+        читается при первом обращении)."""
         if not site.in_scope(url):
+            return False
+        if len(url.encode()) > MAX_URL_BYTES:
+            logger.info("website.url_too_long", url=url[:200], length=len(url))
             return False
         origin = _origin(url)
         if origin not in site.robots:

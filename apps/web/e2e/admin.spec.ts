@@ -177,12 +177,11 @@ test("источники: ошибка конфига, файловый исто
   await expect(page.getByRole("main").getByRole("alert")).toContainText("run.exe");
   await expect(files.getByRole("listitem")).toHaveCount(1);
 
+  // Удаление само ставит полную синхронизацию (REVIEW.md: K-14). Воркера в e2e нет —
+  // она остаётся в очереди (выполнение проверяет pytest).
   await page.getByRole("button", { name: "Удалить faq.md" }).click();
-  await expect(page.getByRole("status")).toContainText("после полной синхронизации");
+  await expect(page.getByRole("status")).toContainText("Синхронизация поставлена в очередь");
   await expect(page.getByText("Файлов нет.")).toBeVisible();
-
-  // Воркера в e2e нет — синхронизация остаётся в очереди (выполнение проверяет pytest).
-  await page.getByRole("button", { name: "Синхронизировать" }).click();
   const history = page.getByRole("table", { name: "История синхронизаций" });
   await expect(history.getByRole("row").nth(1)).toContainText("в очереди");
   await expect(page.getByRole("button", { name: "Синхронизировать" })).toBeDisabled();

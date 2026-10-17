@@ -3,6 +3,7 @@
 import asyncio
 import threading
 from typing import Any
+from urllib.parse import unquote
 from uuid import uuid4
 
 import httpx
@@ -89,6 +90,16 @@ async def test_crawls_links_within_hosts_and_depth() -> None:
     )
     assert await listed(site, max_depth=2) == ["/", "/a", "/b"]
     assert "/c" not in site.requests
+
+
+async def test_too_long_urls_are_skipped() -> None:
+    # Длиннее documents.external_id — не запрашивается и не попадает в листинг (K-15).
+    # Лимит — в байтах UTF-8: 1100 кириллических символов — 2200 байт.
+    long_path = "/каталог/" + "я" * 1100
+    site = Site({"/": page(long_path, "/ok"), "/ok": page()})
+
+    assert await listed(site) == ["/", "/ok"]
+    assert all("каталог" not in unquote(path) for path in site.requests)
 
 
 async def test_sitemap_index_from_robots_include_exclude_and_max_pages() -> None:

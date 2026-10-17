@@ -36,6 +36,9 @@ from app.modules.knowledge.infrastructure.web_guard import (
         ("::ffff:8.8.8.8", True),
         ("64:ff9b::a00:1", False),  # NAT64 → 10.0.0.1
         ("64:ff9b::808:808", True),
+        ("::127.0.0.1", False),  # IPv4-compatible (REVIEW.md: K-10)
+        ("::8.8.8.8", False),  # устаревшая форма — не нужна и для публичных
+        ("::ffff:0:7f00:1", False),  # IPv4-translated → 127.0.0.1
         ("not-an-ip", False),
     ],
 )

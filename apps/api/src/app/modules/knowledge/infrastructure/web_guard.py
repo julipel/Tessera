@@ -20,6 +20,9 @@ type Resolver = Callable[[str, int], Awaitable[list[str]]]
 ALLOWED_PORTS = frozenset({80, 443})
 # NAT64 (RFC 6052): Python считает префикс глобальным, но внутри — IPv4-адрес назначения.
 _NAT64 = ipaddress.IPv6Network("64:ff9b::/96")
+# IPv4-compatible (устаревший, RFC 4291) и IPv4-translated (RFC 2765): `::127.0.0.1` и
+# `::ffff:0:7f00:1` Python считает глобальными (K-10).
+_IPV4_EMBEDDED = (ipaddress.IPv6Network("::/96"), ipaddress.IPv6Network("::ffff:0:0:0/96"))
 
 
 class BlockedAddressError(Exception):
@@ -37,6 +40,8 @@ def is_public_address(address: str) -> bool:
         ip = ip.ipv4_mapped
     elif isinstance(ip, ipaddress.IPv6Address) and ip in _NAT64:
         ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    elif isinstance(ip, ipaddress.IPv6Address) and any(ip in net for net in _IPV4_EMBEDDED):
+        return False
     return ip.is_global and not ip.is_multicast
 
 

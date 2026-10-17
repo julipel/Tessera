@@ -12,12 +12,21 @@ from app.modules.knowledge.domain.ingestion import ChunkDraft
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$")
 _FENCE = re.compile(r"^\s*(```|~~~)")
 SECTION_SEPARATOR = " > "
+# Слово длиннее — несколько «токенов»: блок без пробелов (base64, мусор вёрстки) иначе был бы
+# одним словом и чанком больше лимита эмбеддера (REVIEW.md: K-16). Чанк — до max_tokens * 25
+# символов: ASCII-мусор укладывается в лимит, слитный CJK-текст (≈ токен на символ) — нет.
+WORD_CHARS = 25
 
 
 def word_tokens(text: str) -> int:
-    """Размер в «токенах» — число слов (не `memory.estimate_tokens`: та считает по символам);
-    точный подсчёт придёт с токенизатором эмбеддингов (P4-06)."""
-    return len(text.split())
+    """Размер в «токенах» — число слов, слово длиннее WORD_CHARS — по WORD_CHARS символов на
+    токен (не `memory.estimate_tokens`: та считает по символам); точный подсчёт придёт
+    с токенизатором эмбеддингов (P4-06)."""
+    return sum(_cost(word) for word in text.split())
+
+
+def _cost(word: str) -> int:
+    return -(-len(word) // WORD_CHARS)
 
 
 @dataclass(slots=True)
@@ -33,8 +42,9 @@ class MarkdownChunker:
     - Чанк не пересекает границу секции; `section` — путь заголовков («Доставка > Сроки»),
       текст до первого заголовка — секция `None`. Секция без текста (только заголовок)
       пропускается, её заголовок остаётся в пути вложенных секций.
-    - Абзацы секции склеиваются в чанк до `max_tokens`; абзац длиннее лимита режется по словам.
-    - Следующий чанк той же секции начинается с последних `overlap_tokens` слов предыдущего,
+    - Абзацы секции склеиваются в чанк до `max_tokens`; абзац длиннее лимита режется по словам,
+      слово длиннее всего лимита — по символам.
+    - Следующий чанк той же секции начинается с последних слов предыдущего на `overlap_tokens`,
       если это не выводит его за `max_tokens`.
     """
 
@@ -77,22 +87,45 @@ class MarkdownChunker:
         return pieces
 
     def _fit(self, blocks: list[str]) -> list[str]:
-        """Абзацы длиннее `max_tokens` — окнами по словам с перекрытием."""
+        """Абзацы длиннее `max_tokens` — окнами по словам с перекрытием `overlap_tokens`."""
         result: list[str] = []
-        step = self.max_tokens - self.overlap_tokens
         for block in blocks:
-            words = block.split()
-            if len(words) <= self.max_tokens:
+            if word_tokens(block) <= self.max_tokens:
                 result.append(block)
                 continue
-            for start in range(0, len(words) - self.overlap_tokens, step):
-                result.append(" ".join(words[start : start + self.max_tokens]))
+            words = self._words(block)
+            costs = [_cost(w) for w in words]
+            start = 0
+            while True:
+                end, size = start, 0
+                while end < len(words) and size + costs[end] <= self.max_tokens:
+                    size += costs[end]
+                    end += 1
+                result.append(" ".join(words[start:end]))
+                if end == len(words):
+                    break
+                # Следующее окно — с последних слов этого в пределах перекрытия, но с продвижением.
+                back, overlap = end, 0
+                while back > start + 1 and overlap + costs[back - 1] <= self.overlap_tokens:
+                    back -= 1
+                    overlap += costs[back]
+                start = back
         return result
+
+    def _words(self, block: str) -> list[str]:
+        """Слова абзаца; слово дороже всего чанка режется на куски по `max_tokens`."""
+        piece = self.max_tokens * WORD_CHARS
+        return [word[i : i + piece] for word in block.split() for i in range(0, len(word), piece)]
 
     def _tail(self, text: str) -> str:
         if self.overlap_tokens == 0:
             return ""
-        return " ".join(text.split()[-self.overlap_tokens :])
+        words, size = text.split(), 0
+        start = len(words)
+        while start > 0 and size + _cost(words[start - 1]) <= self.overlap_tokens:
+            start -= 1
+            size += _cost(words[start])
+        return " ".join(words[start:])
 
 
 def _sections(text: str) -> list[_Section]:

@@ -44,6 +44,7 @@ from app.modules.knowledge.public import (
     SourceRepository,
     SqlSyncStore,
     SyncStatus,
+    run_sync,
     run_sync_now,
     seed_sources,
     validate_source_config,
@@ -214,8 +215,32 @@ async def test_create_file_source_with_empty_config(
         ("website", "max_pages: 10", ["config_yaml", "start_urls"], ""),
         ("website", WEBSITE_YAML + "unknown: 1", ["config_yaml", "unknown"], ""),
         ("file", "path: /etc", ["config_yaml"], "config должен быть пустым"),
+        # без пауз по чужому сайту — нельзя (REVIEW.md: K-12)
+        (
+            "website",
+            WEBSITE_YAML + "crawl_delay_s: 0.1",
+            ["config_yaml", "crawl_delay_s"],
+            "не меньше 0.5 с",
+        ),
+        # строка тоже число для нестрогого валидатора — не обход ограничения
+        (
+            "website",
+            WEBSITE_YAML + 'crawl_delay_s: "0"',
+            ["config_yaml", "crawl_delay_s"],
+            "не меньше 0.5 с",
+        ),
     ],
-    ids=["http_api", "database", "broken-yaml", "not-object", "missing", "extra-key", "file"],
+    ids=[
+        "http_api",
+        "database",
+        "broken-yaml",
+        "not-object",
+        "missing",
+        "extra-key",
+        "file",
+        "short-crawl-delay",
+        "crawl-delay-as-string",
+    ],
 )
 async def test_create_rejects_invalid_input(
     db_client: AsyncClient,
@@ -451,6 +476,7 @@ async def test_upload_replace_delete_and_sync(
     shop: TenantId,
     editor: dict[str, str],
     files_root: Path,
+    queue: FakeSyncQueue,
 ) -> None:
     source_id = await _file_source(db_client, shop, editor)
     assert await _file_names(db_client, shop, source_id, editor) == []
@@ -490,6 +516,20 @@ async def test_upload_replace_delete_and_sync(
     deleted = await db_client.delete(_files_url(shop, source_id, "faq.md"), headers=editor)
     assert deleted.status_code == 204
     assert await _file_names(db_client, shop, source_id, editor) == ["Доставка.txt"]
+    # Удаление ставит полную синхронизацию: инкрементальная удалённое не видит (K-14).
+    [(job_tenant, sync_id, full)] = queue.jobs
+    assert (job_tenant, full) == (shop, True)
+    await run_sync(
+        shop,
+        sync_id,
+        SqlSyncStore(db_session),
+        {SourceKind.FILE: FileConnector(files_root)},
+        MarkdownChunker(),
+        embedder=FakeEmbedder(),
+        index=index,
+        full=True,
+    )
+    assert index.external_ids(shop) == {"Доставка.txt"}
     again = await db_client.delete(_files_url(shop, source_id, "faq.md"), headers=editor)
     assert again.status_code == 404
 

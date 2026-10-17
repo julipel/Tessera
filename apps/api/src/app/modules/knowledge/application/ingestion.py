@@ -191,12 +191,20 @@ async def _process(
         else:
             stats.created += 1
 
-    if not stats.incremental:
+    if not stats.incremental or listing.present is not None:
         # Элемент, который не удалось получить, не удаляем: его вид (документ/сущность)
-        # неизвестен, а сам он в источнике есть.
-        stale = [k for k in known if k not in seen and k.external_id not in failed_ids]
+        # неизвестен, а сам он в источнике есть. Инкрементальная — по `present` коннектора.
+        if stats.incremental:
+            assert listing.present is not None
+            present = listing.present
+            stale = [k for k in known if k.external_id not in present]
+        else:
+            stale = [k for k in known if k not in seen]
+        stale = [k for k in stale if k.external_id not in failed_ids]
         if stale and not full:
-            _check_mass_deletion(len(stale), len(known), stats.discovered)
+            # В источнике сейчас — весь `present`, а не только изменённое из листинга.
+            in_source = len(listing.present) if stats.incremental and listing.present else 0
+            _check_mass_deletion(len(stale), len(known), in_source or stats.discovered)
         if stale:
             documents = [k.external_id for k in stale if k.kind is ItemKind.DOCUMENT]
             if documents:

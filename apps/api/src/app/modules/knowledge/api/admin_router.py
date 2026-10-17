@@ -172,10 +172,17 @@ async def upload_file(
 async def delete_file(
     request: Request, tenant_id: UUID, source_id: UUID, filename: str, session: DbSession
 ) -> Response:
-    """Документы и сущности файла удалит следующая полная синхронизация."""
+    """Удаляет файл и ставит в очередь полную синхронизацию: она уберёт его данные из поиска."""
+    queue: SyncQueue = request.app.state.sync_queue
     try:
         await delete_source_file(
-            TenantId(tenant_id), source_id, filename, SqlSourceAdminStore(session), _files(request)
+            TenantId(tenant_id),
+            source_id,
+            filename,
+            SqlSourceAdminStore(session),
+            _files(request),
+            SqlSyncStore(session),
+            queue,
         )
     except NotFoundError as e:
         raise ApiError(status.HTTP_404_NOT_FOUND, "not_found", str(e)) from e

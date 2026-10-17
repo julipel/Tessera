@@ -14,8 +14,26 @@ test("CSP страницы iframe: allowed_origins ключа, иначе 'none'
   expect(await csp(`?key=${WIDGET_KEY}`)).toBe(`frame-ancestors http://localhost:3000 ${WEB_URL}`);
   expect(await csp("?key=wk_unknown")).toBe("frame-ancestors 'none'");
   expect(await csp("")).toBe("frame-ancestors 'none'");
-  // Полноэкранный чат proxy не трогает.
-  expect((await request.get(`/?key=${WIDGET_KEY}`)).headers()["content-security-policy"]).toBeUndefined();
+});
+
+test("встраивать во фрейм можно только /widget: чат и витрины — нигде (W-1)", async ({ request }) => {
+  for (const path of [
+    `/?key=${WIDGET_KEY}`,
+    `/demo/shop/lumiere.html?key=${WIDGET_KEY}`,
+    `/widgetx?key=${WIDGET_KEY}`,
+    `/widget/x?key=${WIDGET_KEY}`,
+  ]) {
+    const response = await request.get(path);
+    expect(response.headers()["content-security-policy"], path).toBe("frame-ancestors 'none'");
+    expect(response.headers()["x-powered-by"], path).toBeUndefined();
+  }
+  // Админка — одна своя CSP (proxy), тоже без встраивания.
+  const admin = (await request.get("/admin/login")).headers()["content-security-policy"];
+  expect(admin).toContain("frame-ancestors 'none'");
+  expect(admin).toContain("nonce-");
+  // У /widget — только политика по ключу: общий запрет из next.config.ts его не касается.
+  const widget = await request.get(`/widget?key=${WIDGET_KEY}`);
+  expect(widget.headers()["content-security-policy"]).not.toContain("'none'");
 });
 
 async function openWidget(page: Page) {

@@ -28,10 +28,12 @@ ENV NODE_ENV=production \
     PORT=3000
 WORKDIR /srv
 # Standalone повторяет раскладку монорепо от outputFileTracingRoot (next.config.ts);
-# public и .next/static он не копирует — раздаёт их тот же server.js.
-COPY --from=build --chown=node /repo/apps/web/.next/standalone ./
-COPY --from=build --chown=node /repo/apps/web/.next/static ./apps/web/.next/static
-COPY --from=build --chown=node /repo/apps/web/public ./apps/web/public
+# public и .next/static он не копирует — раздаёт их тот же server.js. Владелец — root:
+# процесс node код только читает, при RCE подменить страницы нельзя (REVIEW.md: D-10);
+# кэш Next (.next/cache) — tmpfs в compose.prod.yml.
+COPY --from=build /repo/apps/web/.next/standalone ./
+COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build /repo/apps/web/public ./apps/web/public
 USER node
 
 EXPOSE 3000

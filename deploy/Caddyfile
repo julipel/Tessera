@@ -1,14 +1,25 @@
 # Вход на сервер (P9-01, ADR-0040): TLS от Let's Encrypt для {$DOMAIN} (localhost —
 # внутренний сертификат Caddy, для проверки стека на машине разработчика).
+{
+	# Адрес для писем Let's Encrypt о проблемах с сертификатом (D-13).
+	email {$ACME_EMAIL}
+}
+
 {$DOMAIN} {
 	# Заголовки безопасности на весь домен (P9-01v). HSTS — без includeSubDomains: поддомены
 	# могут быть не нашими; срок — HSTS_MAX_AGE (сутки, пока домен не проверен; 0 — для
-	# DOMAIN=localhost: браузер не закрепит https за localhost и сбросит прежний HSTS). X-Frame-Options не ставим: встраивание /widget решает его CSP
-	# (ADR-0022), админке — CSP frame-ancestors 'none' из web (proxy.ts).
+	# DOMAIN=localhost: браузер не закрепит https за localhost и сбросит прежний HSTS).
+	# X-Frame-Options не ставим: встраивание решает CSP frame-ancestors из web — /widget по
+	# ключу (proxy.ts, ADR-0022), остальное — 'none' (next.config.ts, админка — proxy.ts).
+	# Server и X-Powered-By — без версий и названий ПО; камера, микрофон, геолокация и оплата
+	# не нужны ни чату, ни админке (D-12).
 	header {
 		Strict-Transport-Security "max-age={$HSTS_MAX_AGE:86400}"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+		-X-Powered-By
 	}
 
 	# API: без сжатия — SSE-ход (text/event-stream) уходит посетителю по событию, без буфера.

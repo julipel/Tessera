@@ -126,6 +126,19 @@ def test_httpx_requests_are_not_logged(capsys: pytest.CaptureFixture[str]) -> No
     assert [json.loads(line)["event"] for line in lines] == ["retrying"]
 
 
+@pytest.mark.usefixtures("production_logs")
+@pytest.mark.parametrize("sdk", ["openai", "anthropic"])
+def test_llm_sdk_debug_requests_are_not_logged(
+    sdk: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """На DEBUG SDK пишут тело запроса — историю диалога без маскирования (REVIEW.md: R-3)."""
+    capsys.readouterr()
+    logging.getLogger(f"{sdk}._base_client").debug("Request options: %s", {"messages": ["+7 999"]})
+    logging.getLogger(sdk).info("retrying request")
+
+    assert capsys.readouterr().out == ""
+
+
 # --- X-Trace-Id (REVIEW.md: O-6) ---
 
 

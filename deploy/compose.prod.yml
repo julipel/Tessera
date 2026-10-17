@@ -25,8 +25,24 @@ x-app-env: &app-env
   # (REVIEW.md: S-5).
   FORWARDED_ALLOW_IPS: ${COMPOSE_SUBNET:-172.30.240.0/24}
 
+# Логи json-file с ротацией: без неё журнал контейнера растёт, пока не кончится диск,
+# и падают Postgres и Redis (REVIEW.md: D-4).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# Укрепление (D-9): без повышения привилегий, без capabilities, корневая ФС только для чтения.
+# Postgres и Redis без cap_drop: их entrypoint понижает права через gosu/su-exec.
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  read_only: true
+
 # Остальные настройки API (ключи LLM, Langfuse, лимиты, SOURCE_SECRET_*) — из env-файла.
 x-app: &app
+  <<: *hardening
   image: tessera-api:${IMAGE_TAG:-latest}
   build:
     context: ..
@@ -36,6 +52,10 @@ x-app: &app
   environment: *app-env
   restart: unless-stopped
   networks: [backend]
+  logging: *logging
+  # Загрузки файлов источников больше порога SpooledTemporaryFile — во временный файл.
+  # tmpfs — в памяти контейнера: размер ограничен, чтобы переполнение было ENOSPC, а не OOM.
+  tmpfs: ["/tmp:size=96m"]
 
 services:
   postgres:
@@ -52,6 +72,13 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/app-role.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
     networks: [backend]
+    logging: *logging
+    security_opt: ["no-new-privileges:true"]
+    # Лимиты памяти — потолки на VPS 4 ГБ (deploy.md), чтобы OOM-killer хоста не выбирал
+    # жертву сам; в сумме больше RAM — все сразу до потолка не доходят (D-4).
+    mem_limit: 1g
+    # Параллельные hash join — в /dev/shm; 64m по умолчанию мало.
+    shm_size: 256m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -63,12 +90,13 @@ services:
     image: redis:7-alpine
     # AOF: очередь синхронизаций (arq) переживает перезапуск. Пароль обязателен: arq
     # разбирает задачи через pickle — запись в очередь равна выполнению кода в воркере (D-1).
-    # Пароль — конфигом через stdin, не в argv redis-server.
+    # Пароль — конфигом через stdin, не в argv redis-server. noeviction: вытеснение удалило бы
+    # задачи очереди arq; при переполнении запись получает ошибку (D-4).
     command:
       - sh
       - -c
       - |
-        exec redis-server - --appendonly yes <<EOF
+        exec redis-server - --appendonly yes --maxmemory 192mb --maxmemory-policy noeviction <<EOF
         requirepass $$REDIS_PASSWORD
         EOF
     environment:
@@ -78,6 +106,10 @@ services:
     volumes:
       - redis-data:/data
     networks: [backend]
+    logging: *logging
+    security_opt: ["no-new-privileges:true"]
+    # Запас над maxmemory — fork при перезаписи AOF, буферы клиентов и pub/sub.
+    mem_limit: 384m
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
@@ -93,6 +125,9 @@ services:
     volumes:
       - qdrant-data:/qdrant/storage
     networks: [backend]
+    logging: *logging
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
     healthcheck:
       # В образе нет curl/wget — проверяем HTTP через bash /dev/tcp; /readyz — без ключа.
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 && printf \"GET /readyz HTTP/1.0\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
@@ -122,6 +157,7 @@ services:
     stop_grace_period: 60s
     # edge — от Caddy и web (X-Forwarded-For доверяется только ей), backend — к хранилищам.
     networks: [edge, backend]
+    mem_limit: 768m
     volumes:
       - knowledge-files:/srv/data/knowledge
     depends_on:
@@ -140,6 +176,8 @@ services:
   worker:
     <<: *app
     command: ["arq", "app.worker.WorkerSettings"]
+    # Разбор файлов источников (до 20 МБ) и эмбеддинги пачками.
+    mem_limit: 1g
     volumes:
       - knowledge-files:/srv/data/knowledge
     depends_on:
@@ -151,6 +189,7 @@ services:
         condition: service_healthy
 
   web:
+    <<: *hardening
     image: tessera-web:${IMAGE_TAG:-latest}
     build:
       context: ..
@@ -161,6 +200,13 @@ services:
       # CSP страницы /widget (proxy.ts) — запрос к API внутри сети compose.
       API_INTERNAL_URL: http://api:8000
     networks: [edge]
+    logging: *logging
+    mem_limit: 384m
+    # Код — root, только чтение (D-10); кэш Next пишется в память (uid node — 1000). ISR
+    # и revalidate пишут в .next/server — понадобится ещё tmpfs или том (сейчас их нет).
+    tmpfs:
+      - /tmp:size=32m
+      - /srv/apps/web/.next/cache:uid=1000,gid=1000,size=64m
     depends_on:
       api:
         condition: service_healthy
@@ -172,9 +218,13 @@ services:
     restart: unless-stopped
 
   caddy:
+    <<: *hardening
     image: caddy:2.10-alpine
+    # Caddy в образе — root; без capabilities, кроме портов 80/443.
+    cap_add: [NET_BIND_SERVICE]
     environment:
       DOMAIN: ${DOMAIN:?}
+      ACME_EMAIL: ${ACME_EMAIL:?}
       HSTS_MAX_AGE: ${HSTS_MAX_AGE:-86400}
     ports:
       - "80:80"
@@ -185,6 +235,9 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     networks: [edge]
+    logging: *logging
+    mem_limit: 128m
+    tmpfs: ["/tmp:size=16m"]
     depends_on:
       api:
         condition: service_healthy

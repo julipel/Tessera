@@ -24,7 +24,7 @@
 ```bash
 git clone <репозиторий> tessera && cd tessera
 cp deploy/.env.example deploy/.env
-$EDITOR deploy/.env    # DOMAIN, четыре секрета хранилищ (openssl rand -hex 24), ключи LLM
+$EDITOR deploy/.env    # DOMAIN, ACME_EMAIL, четыре секрета хранилищ (openssl rand -hex 24), ключи LLM
 make deploy-up         # сборка образов, миграции, запуск; ждёт healthcheck
 make deploy-seed       # тенанты из config/tenants; новые ключи виджета печатаются
 make deploy-sync       # индексация источников (каталог, база знаний)
@@ -72,9 +72,21 @@ make deploy-seed       # если менялись config/tenants или data/pi
 ## Эксплуатация
 
 - `make deploy-ps` — состояние сервисов; `make deploy-logs svc=api` — логи (JSON, structlog).
-- `make deploy-backup` — дамп Postgres в `backups/<время>.sql.gz` (каталог вне git).
-  Восстановление:
-  `gunzip -c backups/<файл>.sql.gz | docker compose -f deploy/compose.prod.yml --env-file deploy/.env exec -T postgres psql -U app app`.
+- `make deploy-backup` — дамп Postgres `backups/<время>.sql.gz` и файлы источников из админки
+  `backups/knowledge-<время>.tar.gz` (их синхронизация не восстановит). Каталог вне git,
+  права 700, файлы 600: внутри ПДн посетителей и хэши паролей. Сбой дампа — ошибка make,
+  недописанный файл удаляется. Копируйте `backups/` с сервера: на нём же они пропадут вместе
+  с диском. Ротация — например, ежедневно из cron:
+  `find backups -name '*.gz' -mtime +14 -delete` (срок прибавляется к сроку хранения, см. ниже).
+- Восстановление (`D` — `docker compose -f deploy/compose.prod.yml --env-file deploy/.env`):
+  дамп с `--clean --if-exists` — в ту же или пустую БД, api и worker на это время остановлены:
+  ```bash
+  $D stop api worker
+  gunzip -c backups/<время>.sql.gz | $D exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" "$POSTGRES_DB"'
+  $D run --rm --no-deps -T api tar -xzf - -C /srv/data/knowledge < backups/knowledge-<время>.tar.gz
+  make deploy-db-roles && make deploy-up && make deploy-sync
+  ```
+  `deploy-sync` перестраивает индекс Qdrant (он не бэкапится).
 - Сроки хранения данных посетителей (ADR-0043): воркер раз в сутки (03:17 UTC) удаляет
   диалоги, журнал хода и заявки старше `retention` из конфига тенанта. Перед первым запуском
   на накопленной базе — `make deploy-retention dry=1` (только счётчики); вручную —
@@ -82,8 +94,17 @@ make deploy-seed       # если менялись config/tenants или data/pi
   Удалённое остаётся в бэкапах до их удаления: храните `backups/` не дольше нужного
   (срок ротации прибавляется к сроку хранения). В Langfuse задайте срок хранения трейсов
   в настройках проекта — не дольше срока диалогов.
-- Qdrant отдельно не бэкапится: индекс восстанавливается `make deploy-sync` из источников.
-- Файлы источников из админки лежат в томе `tessera-prod_knowledge-files`.
+- Qdrant отдельно не бэкапится: индекс восстанавливается `make deploy-sync` из источников
+  (файлы из админки — из `knowledge-*.tar.gz`, том `tessera-prod_knowledge-files`).
+- Логи контейнеров — `json-file` с ротацией (5 файлов по 20 МБ на сервис). Память ограничена
+  `mem_limit` в `compose.prod.yml` (потолки для 4 ГБ RAM): при упоре OOM-killer завершает
+  процесс внутри этого контейнера, а не случайный на хосте. Если это PID 1 (api, web), контейнер
+  перезапускается (`restart`); у Postgres обычно гибнет один backend и сервер восстанавливается
+  сам. Признак — `docker inspect <контейнер> --format '{{.State.OOMKilled}}'` и ошибки в логах.
+  Redis — `maxmemory 192mb` без вытеснения: при переполнении запись отклоняется
+  (`OOM command not allowed`). Тогда лимиты частоты чата и блокировка диалога не действуют
+  (fail-open, ADR-0030; события `rate_limit_unavailable`, `turn_directory_unavailable`), а новые
+  синхронизации не ставятся в очередь. Все ключи с TTL — обычно это не случается.
 - Откат кода: `git checkout <коммит> && make deploy-up`. Миграции назад не откатываются
   сами; если новая миграция несовместима со старым кодом —
   `docker compose -f deploy/compose.prod.yml --env-file deploy/.env run --rm api alembic downgrade <ревизия>`
@@ -115,6 +136,11 @@ make deploy-seed       # если менялись config/tenants или data/pi
   `make deploy-up`. Браузер запоминает HSTS с первого ответа: домен, переведённый обратно
   на http, откроется только по истечении срока.
 - Поставьте лимит расходов у провайдера LLM: виджет публичный, каждый ход — платный запрос.
+- Контейнеры api, worker, migrate, web и caddy — с корневой ФС только для чтения, без
+  capabilities (caddy — только `NET_BIND_SERVICE`) и без повышения привилегий; запись — в тома
+  и tmpfs (`/tmp`, кэш Next). Код web принадлежит root. Caddy и web убирают `Server`
+  и `X-Powered-By`, ставят `Permissions-Policy`; встраивать во фрейм можно только `/widget`.
+- `/docs` и `/openapi.json` API в production выключены.
 
 ## Проверка стека локально
 
@@ -124,7 +150,7 @@ make deploy-seed       # если менялись config/tenants или data/pi
 
 ```bash
 cd deploy
-export DOMAIN=localhost HSTS_MAX_AGE=0 POSTGRES_PASSWORD=local APP_DB_PASSWORD=local-app \
+export DOMAIN=localhost ACME_EMAIL=dev@localhost HSTS_MAX_AGE=0 POSTGRES_PASSWORD=local APP_DB_PASSWORD=local-app \
   REDIS_PASSWORD=local QDRANT_API_KEY=local DEPLOY_ENV_FILE=../.env
 docker compose -f compose.prod.yml up -d --build --wait
 docker compose -f compose.prod.yml run --rm api python -m app.cli seed
@@ -133,6 +159,8 @@ docker compose -f compose.prod.yml down      # -v — удалить и данн
 ```
 
 Сборке нужен доступ к Docker Hub, ghcr.io, PyPI и npm (см. «Если сборка не идёт»).
+`failed to install root certificate` в логах Caddy при `DOMAIN=localhost` — не ошибка: корневая
+ФС контейнера только для чтения, и внутренний сертификат не ставится в его хранилище доверия.
 
 ## Если сборка не идёт
 

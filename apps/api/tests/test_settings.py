@@ -101,13 +101,16 @@ def test_production_allows_https_localhost() -> None:
         ({"redis_url": "redis://:@redis:6379/0"}, "REDIS_URL"),
         ({"qdrant_api_key": None}, "QDRANT_API_KEY"),
         ({"qdrant_api_key": ""}, "QDRANT_API_KEY"),
+        ({"admin_cookie_secure": False}, "ADMIN_COOKIE_SECURE"),
+        ({"database_echo": True}, "DATABASE_ECHO"),
     ],
 )
-def test_production_requires_redis_password_and_qdrant_key(
+def test_production_rejects_dev_store_and_debug_settings(
     override: dict[str, Any], field: str
 ) -> None:
     """Redis без пароля — запись в очередь arq (pickle) из соседнего контейнера, Qdrant без
-    ключа — векторы всех тенантов (REVIEW.md: D-1, D-2)."""
+    ключа — векторы всех тенантов (REVIEW.md: D-1, D-2); cookie админки по http и SQL
+    в обход JSON-логов (R-4)."""
     with pytest.raises(ValidationError, match=field):
         Settings(
             _env_file=None,

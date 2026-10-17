@@ -114,6 +114,8 @@ uv run alembic upgrade head >"$LOG_DIR/migrate.log" 2>&1 || {
 # Свой веб-чат за туннелем и локально; IP посетителя для лимитов — из X-Forwarded-For
 # cloudflared (ADR-0030).
 export CORS_ORIGINS="[\"$web_url\",\"http://localhost:$WEB_PORT\"]"
+# Туннель публичный: без Swagger и схемы API (REVIEW.md: R-2).
+export API_DOCS=false
 uv run uvicorn --factory app.main:create_app --host $HOST --port $API_PORT \
   --proxy-headers --forwarded-allow-ips $HOST >"$LOG_DIR/api.log" 2>&1 &
 pids+=($!)

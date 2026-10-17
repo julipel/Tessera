@@ -34,6 +34,9 @@ class Settings(BaseSettings):
 
     app_env: AppEnv = "local"
     log_level: LogLevel = "INFO"
+    # /docs, /redoc, /openapi.json; не задано — только локально. demo-public (туннель прямо
+    # к uvicorn с APP_ENV=local) выключает их явно (REVIEW.md: R-2).
+    api_docs: bool | None = None
     # Адреса с паролями — без repr: не попадают в вывод настроек и трассировки (S-17).
     database_url: str = Field(default="postgresql+asyncpg://app:app@localhost:5432/app", repr=False)
     database_echo: bool = False
@@ -159,6 +162,11 @@ class Settings(BaseSettings):
             raise ValueError("REDIS_URL: в production нужен пароль Redis")
         if not secret_value(self.qdrant_api_key):
             raise ValueError("QDRANT_API_KEY: в production нужен ключ Qdrant")
+        # Cookie админки по http и SQL в обход JSON-логов — настройки разработки (R-4).
+        if not self.admin_cookie_secure:
+            raise ValueError("ADMIN_COOKIE_SECURE: в production только true")
+        if self.database_echo:
+            raise ValueError("DATABASE_ECHO: в production только false")
         for origin in self.cors_origins:
             if not origin.startswith("https://"):
                 raise ValueError(f"CORS_ORIGINS: {origin!r} — в production только https")

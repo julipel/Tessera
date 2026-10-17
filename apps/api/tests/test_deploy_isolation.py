@@ -56,3 +56,41 @@ def test_redis_and_qdrant_require_credentials() -> None:
         env = services[name]["environment"]
         assert env["REDIS_URL"] == "redis://:${REDIS_PASSWORD:?}@redis:6379/0"
         assert env["QDRANT_API_KEY"] == "${QDRANT_API_KEY:?}"
+
+
+def test_every_service_rotates_logs_and_has_memory_limit() -> None:
+    """Без ротации json-file заполняет диск, без потолка памяти OOM-killer хоста бьёт
+    случайный процесс (REVIEW.md: D-4)."""
+    for name, service in _services().items():
+        assert service["logging"]["options"]["max-size"], name
+        if name != "migrate":  # одноразовый, тот же образ что api
+            assert service["mem_limit"], name
+
+
+def test_app_containers_are_hardened() -> None:
+    """Корень только для чтения, без capabilities и повышения привилегий (REVIEW.md: D-9)."""
+    services = _services()
+    for name in ("api", "worker", "migrate", "web", "caddy"):
+        service = services[name]
+        assert service["read_only"] is True, name
+        assert service["cap_drop"] == ["ALL"], name
+        assert "no-new-privileges:true" in service["security_opt"], name
+    assert services["caddy"]["cap_add"] == ["NET_BIND_SERVICE"]
+    for name in STORES:
+        assert "no-new-privileges:true" in services[name]["security_opt"], name
+
+
+def test_dev_compose_ports_bound_to_localhost() -> None:
+    """Docker публикует порты в обход ufw: Postgres с паролем app и Redis/Qdrant без
+    авторизации на всех интерфейсах открыли бы данные сети (REVIEW.md: D-7)."""
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    ports = [port for service in compose["services"].values() for port in service.get("ports", [])]
+    assert ports
+    assert all(port.startswith("127.0.0.1:") for port in ports), ports
+
+
+def test_caddy_requires_acme_email() -> None:
+    """Адрес для писем Let's Encrypt про истекающий сертификат обязателен (REVIEW.md: D-13)."""
+    caddy = _services()["caddy"]
+    assert caddy["environment"]["ACME_EMAIL"] == "${ACME_EMAIL:?}"
+    assert "email {$ACME_EMAIL}" in (ROOT / "deploy/Caddyfile").read_text()

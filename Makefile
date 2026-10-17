@@ -169,8 +169,21 @@ deploy-db-roles:
 	$(DEPLOY) up -d --wait postgres
 	$(DEPLOY) exec -T postgres sh /docker-entrypoint-initdb.d/10-app-role.sh
 
-# Дамп Postgres в backups/<время>.sql.gz на хосте (вне git).
+# Бэкап на хосте (вне git, только владельцу — внутри ПДн и хэши паролей): дамп Postgres
+# backups/<время>.sql.gz и файлы источников из админки backups/knowledge-<время>.tar.gz
+# (их не восстановить синхронизацией, D-6). pipefail внутри контейнера и проверка gzip:
+# упавший pg_dump не оставляет «успешного» пустого файла — недописанное удаляется (D-5).
 deploy-backup:
-	mkdir -p backups
-	$(DEPLOY) exec -T postgres sh -c 'pg_dump -U "$$POSTGRES_USER" "$$POSTGRES_DB"' \
-		| gzip > backups/$$(date +%Y%m%d-%H%M%S).sql.gz
+	@set -e; umask 077; mkdir -p backups; chmod 700 backups; \
+	stamp=$$(date +%Y%m%d-%H%M%S); \
+	trap 'rm -f backups/$$stamp.sql.gz.part backups/knowledge-$$stamp.tar.gz.part' EXIT INT TERM; \
+	$(DEPLOY) exec -T postgres sh -c \
+		'set -o pipefail; pg_dump -U "$$POSTGRES_USER" --clean --if-exists "$$POSTGRES_DB" | gzip' \
+		> backups/$$stamp.sql.gz.part; \
+	gzip -t backups/$$stamp.sql.gz.part; \
+	$(DEPLOY) run --rm --no-deps -T api tar -czf - -C /srv/data/knowledge . \
+		> backups/knowledge-$$stamp.tar.gz.part; \
+	gzip -t backups/knowledge-$$stamp.tar.gz.part; \
+	mv backups/$$stamp.sql.gz.part backups/$$stamp.sql.gz; \
+	mv backups/knowledge-$$stamp.tar.gz.part backups/knowledge-$$stamp.tar.gz; \
+	ls -l backups/$$stamp.sql.gz backups/knowledge-$$stamp.tar.gz

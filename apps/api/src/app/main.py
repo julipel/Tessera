@@ -96,7 +96,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings)
 
-    app = FastAPI(title="AI-консультант API", lifespan=lifespan)
+    # Схема и Swagger — только локально (API_DOCS): в проде их закрывает и маршрутизация
+    # Caddy, а туннель demo-public открывает uvicorn напрямую (REVIEW.md: R-2).
+    docs = settings.is_local if settings.api_docs is None else settings.api_docs
+    app = FastAPI(
+        title="AI-консультант API",
+        lifespan=lifespan,
+        docs_url="/docs" if docs else None,
+        redoc_url="/redoc" if docs else None,
+        openapi_url="/openapi.json" if docs else None,
+    )
     app.state.settings = settings
     # Engine ленивый (соединения открываются при первом запросе), поэтому создаём сразу,
     # а не в lifespan: так он доступен и в тестах без запуска lifespan.

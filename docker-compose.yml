@@ -1,5 +1,7 @@
 # Локальная инфраструктура для разработки: Postgres, Redis, Qdrant.
 # Значения по умолчанию совпадают с .env.example — `make up` работает без .env.
+# Порты — только на 127.0.0.1: Docker публикует их в обход ufw, а пароль `app` и Redis/Qdrant
+# без авторизации на всех интерфейсах открыли бы данные сети (REVIEW.md: D-7).
 name: tessera
 
 services:
@@ -10,7 +12,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       POSTGRES_DB: ${POSTGRES_DB:-app}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +24,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -34,8 +36,8 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.19.1
     ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+      - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
       - qdrant-data:/qdrant/storage
     healthcheck:

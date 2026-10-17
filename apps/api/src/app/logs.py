@@ -27,8 +27,9 @@ _exception_dict = structlog.processors.ExceptionRenderer(
 # `--no-access-log` (propagate=False) так отменился бы — не используется.
 _OWN_HANDLER_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access", "arq")
 # httpx и httpcore на INFO пишут каждый запрос с полным URL (Langfuse, провайдеры LLM,
-# источники знаний): в логах только их предупреждения, как было до O-13.
-_QUIET_LOGGERS = ("httpx", "httpcore")
+# источники знаний): в логах только их предупреждения, как было до O-13. SDK провайдеров LLM
+# на DEBUG пишут тело запроса — историю диалога в обход маскирования ADR-0032 (R-3).
+_QUIET_LOGGERS = ("httpx", "httpcore", "openai", "anthropic")
 
 
 class _StdoutHandler(logging.Handler):

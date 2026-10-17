@@ -900,6 +900,13 @@
     владельцем, его пароль в окружение api/worker не попадает; production без пароля Redis
     и ключа Qdrant не стартует; тесты конфига compose; дополнение ADR-0040. В `deploy/.env` —
     `APP_DB_PASSWORD`, `REDIS_PASSWORD`, `QDRANT_API_KEY`.
+  - [x] **P9-01an Эксплуатация и заголовки выкладки** (`REVIEW.md`: W-1, D-4…D-7, D-9, D-10,
+    D-12, D-13, D-16, R-2…R-4). Во фрейм встраивается только `/widget`; ротация логов
+    и `mem_limit` у всех сервисов, Redis `maxmemory`; бэкап с pipefail, правами 600 и файлами
+    источников, восстановление в `deploy.md`; порты dev-compose — на 127.0.0.1; контейнеры
+    приложения — read-only, без capabilities; без `Server`/`X-Powered-By`, `Permissions-Policy`;
+    `ACME_EMAIL`; `/docs` только локально; SDK LLM не пишут тела запросов в лог; production
+    отклоняет `ADMIN_COOKIE_SECURE=false` и `DATABASE_ECHO=true`.
   - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
     образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
     Попутно, если трогаем остановку: таймаут на закрытие ресурса в `close_all` (REVIEW.md: S-14).

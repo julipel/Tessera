@@ -41,9 +41,15 @@ src = ["src", "tests", "."]
 extend-exclude = ["src/app/contracts/generated"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "ASYNC", "SIM", "RUF"]
+select = ["E", "F", "W", "I", "N", "UP", "B", "ASYNC", "SIM", "RUF", "S"]
+# assert в src — сужение типов для mypy и инварианты; образы не запускаются с -O.
+ignore = ["S101"]
 # Кириллица в комментариях и docstrings — норма для проекта, не путаем её с латиницей.
 allowed-confusables = ["а", "в", "г", "е", "к", "м", "н", "о", "р", "с", "т", "у", "х", "А", "В", "Е", "К", "М", "Н", "О", "Р", "С", "Т", "Х"]
+
+[tool.ruff.lint.per-file-ignores]
+# Тесты: пароли и токены, seed-рандом, SQL фикстур из констант.
+"tests/**" = ["S104", "S105", "S106", "S311", "S608"]
 
 [tool.mypy]
 python_version = "3.12"

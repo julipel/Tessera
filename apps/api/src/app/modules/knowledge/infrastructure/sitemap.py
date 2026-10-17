@@ -94,7 +94,7 @@ def _parse_xml(data: bytes) -> tuple[list[SitemapEntry], bool]:
     if b"<!ENTITY" in data or b"<!DOCTYPE" in data:
         raise SitemapError("DTD в sitemap не поддерживается")
     try:
-        root = ElementTree.fromstring(data)
+        root = ElementTree.fromstring(data)  # noqa: S314 — DTD и сущности отклонены выше
     except ElementTree.ParseError as e:
         raise SitemapError(f"битый XML: {e}") from e
     kind = _local_name(root.tag)

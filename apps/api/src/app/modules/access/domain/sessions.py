@@ -3,7 +3,7 @@
 import hashlib
 import secrets
 
-TOKEN_PREFIX = "as_"
+TOKEN_PREFIX = "as_"  # noqa: S105 — префикс токена, не секрет
 
 
 def generate_session_token() -> str:

@@ -1,6 +1,6 @@
 # Ревью модулей бэкенда
 
-Ревью всего кода модулей `apps/api/src/app/modules/*` (не диффа), сабагент `reviewer`.
+Ревью всего кода модулей `apps/api/src/app/modules/*` (не диффа), сабагент `reviewer`. Ревью безопасности web, выкладки и корня сборки (P9-01al) — в конце файла.
 Начато 2026-10-15 на коммите `e1d9e02`. Находки не исправлены, если не отмечено `[x]`.
 Исправлено: P9-01c — O-1, K-1, K-2, K-3 (= S-3); P9-01d — S-1, AG-2 (AC-3/S-2 частично); P9-01e — O-2, O-4 (O-10 частично).
 
@@ -331,3 +331,90 @@
 - [x] *(исправлено в P9-01ak: `settings.secret_value` — в API, воркере, CLI, knowledge_wiring и эвалах)* S-18. `_secret` продублирован в `main.py:159-160` и `worker.py:77-78`.
 - [x] *(исправлено в P9-01ak иначе: pipeline сломал бы S-1 — после сбоя Redis лимитер 5 с к нему не обращается, сразу запасной путь)* S-19. `modules/shared/api/rate_limit.py:26-27` — N правил = N последовательных запросов к Redis (до 1 с при зависшем Redis); можно одним pipeline.
 - [x] *(исправлено в P9-01ak: в ключе — sha256 email; HMAC — не исправляем: ключи читает только тот, у кого есть доступ к Redis во внутренней сети compose, живут не дольше часа и говорят лишь о неудачном входе, а новый обязательный секрет в deploy/.env усложнил бы выкладку)* S-20. `access/api/router.py:50` — email открытым текстом в ключе Redis (лучше sha256).
+
+---
+
+# Ревью безопасности: web, выкладка, корень сборки, зависимости (P9-01al)
+
+2026-10-17, коммит `e16716d`, сабагент `reviewer` (три прохода) + ручная перепроверка важных.
+Ruff `S` (flake8-bandit) включён в `apps/api`: в `src` только ложные срабатывания (`# noqa`
+с причиной); `assert` (S101) — глобальный игнор, образы без `-O`. Находки не исправлены,
+если не отмечено `[x]`.
+
+| Раздел | Критично | Важно | Мелочи |
+|---|---|---|---|
+| W — web (`apps/web`) | 0 | 1 | 5 |
+| D — выкладка (`deploy/`, Dockerfile, `docker-compose.yml`, `deploy.md`) | 0 | 8 | 12 |
+| R — корень сборки (`src/app/*.py`, `migrations/env.py`) | 0 | 1 | 9 |
+| DEP — зависимости | 0 | 0 | 1 |
+
+**Предложение:** до P9-01b — все важные (W-1, D-1…D-7, R-1; D-8 — проверить на сервере
+в P9-01b), из мелочей попутно дешёвые в тех же файлах (D-9, D-12, D-13, D-15, R-2, R-3, R-4).
+Остальные мелочи — после выкладки.
+
+## W. web
+
+### Важно
+- [ ] **W-1. Полноэкранный чат `/` встраивается во фрейм на любом сайте — обход `allowed_origins` (ADR-0022).** `apps/web/src/proxy.ts:39` — `matcher: ["/widget", "/admin/:path*"]`; `app/page.tsx:7` рендерит чат с любым `?key=`; Caddy `X-Frame-Options` не ставит. Чужой сайт: `<iframe src="https://<чат>/?key=wk_victim">` — запросы к API идут с нашего Origin и проходят. Бюджет LLM тенанта, спам-заявки, выдача себя за бренд, clickjacking формы контактов. В ADR-0022 «отдельная мелкая задача», в roadmap её нет. *Исправление:* `frame-ancestors 'none'` для всего, кроме `/widget` (proxy или `next.config.ts` headers).
+
+### Мелочи
+- [ ] W-2. `proxy.ts:11-20` — на `/` и `/widget` нет CSP со `script-src`, а origin общий с админкой (ADR-0040): будущая XSS в чате получит админку (cookie `SameSite=Strict` и проверка Origin пройдут). Готовой XSS нет. *Исправление:* nonce + `'strict-dynamic'`, `object-src 'none'`, `base-uri 'self'`.
+- [ ] W-3. `components/chat/Markdown.tsx:8-16` — любые http(s)-ссылки в тексте модели кликабельны: инъекция через базу знаний (ADR-0031) даёт фишинговую ссылку в обход ADR-0004. Продуктовое решение — нужен ADR (кликабельны только хосты тенанта).
+- [ ] W-4. `rich/ProductCard.tsx`, `Content.tsx`, `ActionButton.tsx` — фронт сам не проверяет схему `href`/`src`; сейчас защищают `entity_mapping.link()` на бэкенде и React. *Исправление:* общий `safeUrl()` или `pattern: "^https?://"` в `components.schema.json`.
+- [ ] W-5. `proxy.ts:16`, `lib/widget/csp.ts:20-29` — каждая загрузка `/widget` = запрос `GET /v1/public/widget` без кэша и лимита (усилитель нагрузки; закрыто по умолчанию). *Исправление:* кэш 30–60 с в proxy или лимит в Caddy.
+- [ ] W-6. `app/page.tsx:7` — `NEXT_PUBLIC_WIDGET_KEY` по умолчанию и в production. *Исправление:* только при `NODE_ENV !== "production"`, как в `/demo/widget`.
+
+Проверено, в порядке: postMessage (`widget.js` проверяет source и origin; `"*"` из iframe — без данных), нет `innerHTML`/`dangerouslySetInnerHTML`/`rehype-raw`, markdown `skipHtml`, брендинг через regex, CSP админки (nonce, `frame-ancestors 'none'`), токен админки только в HttpOnly-cookie, нет open redirect после входа, `encodeURIComponent` в путях, ошибки API без стектрейсов, нет route handlers и source maps.
+
+## D. Выкладка
+
+### Важно
+- [ ] **D-1. Redis без пароля, arq разбирает задачи через pickle — RCE в воркере из любого контейнера.** `deploy/compose.prod.yml:9,158-162` (одна сеть `default` для всех, включая web и caddy), `worker.py` — свой `job_serializer` не задан. RCE в Next.js → задача с вредным pickle в очередь → код в воркере с паролем БД, ключами LLM и `SOURCE_SECRET_*`; заодно сброс лимитов. *Исправление:* `requirepass` (пароль в `REDIS_URL`), сети `edge` (caddy, web, api) и `backend` (api, worker, migrate, postgres, redis, qdrant); JSON-сериализатор arq — отдельно.
+- [ ] **D-2. Qdrant без API-ключа.** `compose.prod.yml:10,60-70` — из соседнего контейнера читается и удаляется коллекция `knowledge` всех тенантов. *Исправление:* `QDRANT__SERVICE__API_KEY` + ключ в клиенте; сети из D-1.
+- [ ] **D-3. Приложение ходит в Postgres суперпользователем.** `compose.prod.yml:8,35-37` — `POSTGRES_USER` образа postgres — суперпользователь, одна роль у api, worker и migrate; SQL-инъекция/RCE → `COPY … TO PROGRAM`. *Исправление:* роль приложения только с DML, владелец схемы — только migrate.
+- [ ] **D-4. Нет лимитов ресурсов и размера логов.** `compose.prod.yml` — нет `logging`, `mem_limit`, `pids_limit`: `json-file` без ротации заполняет диск (Postgres и Redis AOF падают), OOM-killer бьёт случайный процесс. *Исправление:* якорь `x-logging` (`max-size`, `max-file`), `mem_limit` у qdrant/worker/api/web, `maxmemory` у Redis.
+- [ ] **D-5. Бэкап без `pipefail`, с правами по umask, без ротации.** `Makefile:166-169` — упавший `pg_dump` даёт «успешный» пустой `.sql.gz`; дамп с ПДн и хэшами паролей читаем всем на хосте. *Исправление:* `SHELL := bash` + `pipefail`, `umask 077`, проверка размера; ротация в `deploy.md`.
+- [ ] **D-6. Файлы источников (том `knowledge-files`) не бэкапятся.** `docs/deploy.md:77-78` — «Qdrant восстанавливается `deploy-sync` из источников», но для `file`/`table` первоисточник — сам том; `compose down -v` советуется в `deploy.md:118`. *Исправление:* tar тома в `deploy-backup`, описание в `deploy.md`.
+- [ ] **D-7. Dev-compose публикует Postgres (пароль `app`), Redis и Qdrant на все интерфейсы.** `docker-compose.yml:12-13,24-25,36-38`; Docker обходит ufw. *Исправление:* `127.0.0.1:` в портах (проверить с WSL mirrored).
+- [ ] **D-8. IPv6-посетители могут делить одну корзину лимитов** *(требует проверки на сервере)*. `deploy.md:18` советует AAAA, IPv6 в сети compose не включён — docker-proxy подставит адрес шлюза, бот заблокирует чат всем IPv6-клиентам. *Исправление:* проверить `client_ip` в P9-01b; `enable_ipv6` + подсеть v6 в `FORWARDED_ALLOW_IPS` или без AAAA.
+
+### Мелочи
+- [ ] D-9. `compose.prod.yml`, оба Dockerfile — нет `no-new-privileges`, `cap_drop: [ALL]`, `read_only` + tmpfs; qdrant и caddy от root (у qdrant есть `-unprivileged`).
+- [ ] D-10. `apps/web/Dockerfile:32-34` — `--chown=node`: процесс может переписать свой `server.js`/`.next`. *Исправление:* без `--chown` (как в api).
+- [ ] D-11. Базовые образы по тегу, не digest (`python:3.12-slim`, `node:24-slim`, `postgres:16-alpine`, `redis:7-alpine`, `caddy:2.10-alpine`); `packageManager: pnpm@12.8.1` без хэша.
+- [ ] D-12. `Caddyfile:8-12` — нет `-Server`/`-X-Powered-By`, `Permissions-Policy`; `poweredByHeader: false`, `uvicorn --no-server-header`.
+- [ ] D-13. `Caddyfile:3` — нет `email` для ACME (`{$ACME_EMAIL}` в `.env.example`).
+- [ ] D-14. `Caddyfile:29-32` — у `handle` web нет `request_body max_size` (своих POST у web нет — проверить).
+- [ ] D-15. `compose.prod.yml:60-70` — телеметрия Qdrant включена: `QDRANT__TELEMETRY_DISABLED: "true"`.
+- [ ] D-16. `deploy.md:69` — восстановление жёстко `psql -U app app`, без описания восстановления в пустую БД.
+- [ ] D-17. ADR-0040:35-36 всё ещё `--forwarded-allow-ips *` — после S-5 нужно дополнение ADR.
+- [ ] D-18. `compose.prod.yml:103-114` — у worker нет `healthcheck` (зависший не перезапустится).
+- [ ] D-19. = R-2 (`/docs`, `/openapi.json` в production).
+- [ ] D-20. `/admin` и `/v1/admin/*` открыты из интернета без allowlist — для пилота приемлемо; опционально `remote_ip` в Caddy.
+
+Проверено, в порядке: наружу только 80/443 у caddy; XFF извне не подделать (нет `trusted_proxies`, uvicorn доверяет только подсети compose); HSTS/nosniff/Referrer-Policy без дублей; SSE без буфера и таймаутов; лимиты тела 25 МБ + точные в API; `POSTGRES_PASSWORD:?` и production-валидация; migrate до api/worker; non-root api (uid 10001) и web; секретов в слоях и build-args нет; `.dockerignore` исключает `.env*`, `.git`, `deploy`, `backups`; `env_file` только у migrate/api/worker; SSRF во внутреннюю сеть закрыт `web_guard`.
+
+## R. Корень сборки
+
+### Важно
+- [ ] **R-1. `deploy-seed` молча перезаписывает конфиг, изменённый в админке, включая сроки хранения.** `modules/tenants/application/seed.py:45-49` — YAML активируется, если отличается от активной версии; `Makefile:143` велит `deploy-seed` после каждого `git pull`. Тенант поставил в админке `retention.conversations_days: 365` → seed вернул 180 → ночная чистка необратимо удаляет диалоги 180–365 дней; заодно откатываются промпт и инструменты. ADR-0043 это не описывает. *Исправление:* seed не активирует YAML поверх версии из админки (признак происхождения версии или `--force-config`); минимум — предупреждение CLI и `deploy.md`. Вероятно, нужно дополнение ADR-0043.
+
+### Мелочи
+- [ ] R-2. `main.py:99` — `/docs`, `/redoc`, `/openapi.json` во всех окружениях (в проде закрыты маршрутизацией Caddy, но `scripts/demo-public.sh` открывает uvicorn напрямую). *Исправление:* `None` вне `is_local`.
+- [ ] R-3. `logs.py:31` — приглушены только httpx/httpcore; при `LOG_LEVEL=DEBUG` SDK anthropic пишет `Request options: %s` с телом запроса (`anthropic/_base_client.py:532`) — вся история диалога в обход маскирования ADR-0032. *Исправление:* `openai`, `anthropic` в `_QUIET_LOGGERS` или запрет DEBUG в production.
+- [ ] R-4. `settings.py:147-160` — production не отклоняет `ADMIN_COOKIE_SECURE=false` и `DATABASE_ECHO=true`.
+- [ ] R-5. `cli.py:75` — `CREATE DATABASE "{target.database}"` без экранирования (ввод оператора, не внешний); без имени создастся база `"None"`. *Исправление:* `identifier_preparer.quote`, ошибка при пустом имени.
+- [ ] R-6. `cli.py` не вызывает `configure_logging` — в бою логи CLI не в JSON, `LOG_LEVEL` не действует; локально `ConsoleRenderer` с rich печатает трейсбеки с `show_locals=True`. *Исправление:* `configure_logging` в `cli.main`, `show_locals=False`.
+- [ ] R-7. `cli.py:360-364,436` — `seed --reset-widget-key` без путей перевыпускает ключи всем тенантам без подтверждения. *Исправление:* требовать пути/slug или подтверждение в production.
+- [ ] R-8. `settings.py:79` — `SEED_WIDGET_KEY` с `wk_dev_` не отклоняется в production (ключ публичный, ущерб мал).
+- [ ] R-9. `cli.py:121-122` — `ADMIN_PASSWORD` из env применяется молча (если положить в `deploy/.env` — уйдёт всем новым пользователям и висит в окружении api/worker). *Исправление:* явный флаг или сообщение в stderr.
+- [ ] R-10. `migrations/env.py:35-38` — нет `lock_timeout`: DDL встанет за долгой транзакцией и заблокирует таблицу. *Исправление:* `SET lock_timeout = '5s'`.
+
+Проверено, в порядке: CORS (явный список, https в production, порядок middleware — ошибки с CORS и trace_id), CLI (getpass, ключ виджета печатается один раз), retention (своя сессия и `tenant_id` на тенант, сбой одного не останавливает остальных), секреты в логах (`repr=False`, SecretStr, `hide_parameters`, без locals в JSON), worker (`tenant_id` явно, таймауты), migrations (URL не логируется), лимиты тела, нет построения из Host.
+
+## DEP. Зависимости
+
+Python (`uv export` всех групп, разовый `uvx pip-audit`) — уязвимостей нет. npm prod (`pnpm audit --prod`) — нет.
+
+### Мелочи
+- [ ] DEP-1. dev: `braces ≤ 3.0.3` (GHSA-vfj7-8cjw-p6xm, high, DoS при глубоко вложенных шаблонах) через `eslint-config-next > @next/eslint-plugin-next > fast-glob > micromatch`. Исправленной версии нет; только линтер на наших шаблонах — недостижимо. Не обновляем; перепроверить при обновлении eslint-config-next.

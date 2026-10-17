@@ -14,7 +14,7 @@ from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfig
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 ENV_FILES: tuple[Path | str, ...] = (_REPO_ROOT / ".env", ".env")
-SOURCE_SECRET_PREFIX = "SOURCE_SECRET_"
+SOURCE_SECRET_PREFIX = "SOURCE_SECRET_"  # noqa: S105 — префикс имени env, не секрет
 
 # Пароль БД из .env.example и значений по умолчанию.
 _DEV_DB_PASSWORDS = frozenset({"app"})

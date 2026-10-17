@@ -7,7 +7,7 @@
 import re
 from collections.abc import Mapping
 
-SECRET_PREFIX = "SOURCE_SECRET_"
+SECRET_PREFIX = "SOURCE_SECRET_"  # noqa: S105 — префикс имени env, не секрет
 _NAME = re.compile(rf"{SECRET_PREFIX}[A-Z0-9_]+")
 
 

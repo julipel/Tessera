@@ -99,6 +99,17 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
         record = (await self.session.execute(stmt)).scalar_one_or_none()
         return _config(record) if record else None
 
+    async def version_numbers(
+        self, tenant_id: TenantId, config_ids: Collection[UUID]
+    ) -> dict[UUID, int]:
+        """Номера версий по id — для списков, где нужен только номер (диалоги в админке)."""
+        if not config_ids:
+            return {}
+        stmt = select(AgentConfigRecord.id, AgentConfigRecord.version).where(
+            AgentConfigRecord.tenant_id == tenant_id, AgentConfigRecord.id.in_(list(config_ids))
+        )
+        return {config_id: version for config_id, version in await self.session.execute(stmt)}
+
     async def get_version(self, tenant_id: TenantId, config_id: UUID) -> AgentConfigVersion | None:
         """Любая версия, в т.ч. архивная: диалог работает на той, с которой начат."""
         record = await self.get(tenant_id, config_id)
@@ -132,7 +143,7 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
         )
         record = (await self.session.execute(stmt)).scalar_one_or_none()
         if record is None:
-            raise AgentConfigNotFoundError(f"AgentConfig {config_id} not found")
+            raise AgentConfigNotFoundError(f"версия конфига {config_id} не найдена")
         if record.status == AgentConfigStatus.ACTIVE:
             return Activation(_config(record), previous_version=record.version)
         # Сначала архивируем прежнюю активную: частичный уникальный индекс проверяется сразу.
@@ -156,6 +167,10 @@ class WidgetKeyRepository(TenantRepository[WidgetKeyRecord]):
 
     async def has_any(self, tenant_id: TenantId) -> bool:
         stmt = select(self._scoped(tenant_id).exists())
+        return bool((await self.session.execute(stmt)).scalar_one())
+
+    async def has_key(self, tenant_id: TenantId, key_hash: str) -> bool:
+        stmt = select(self._scoped(tenant_id).where(WidgetKeyRecord.key_hash == key_hash).exists())
         return bool((await self.session.execute(stmt)).scalar_one())
 
     async def delete_all(self, tenant_id: TenantId) -> int:

@@ -13,6 +13,9 @@ from app.modules.tenants.domain.entities import (
 )
 from app.modules.tenants.domain.errors import AgentConfigNotFoundError, InvalidTenantSpecError
 from app.modules.tenants.domain.widget_keys import generate_widget_key, hash_widget_key
+
+# ORM-модели — только для app.db_models (метаданные Alembic) и тестов; другие модули
+# читают данные tenants через репозитории (REVIEW.md: T-8).
 from app.modules.tenants.infrastructure.models import (
     AgentConfigRecord,
     TenantRecord,

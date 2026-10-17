@@ -117,10 +117,22 @@ async def _messages(shop: Shop, conversation_id: UUID) -> list[ChatMessage]:
 async def test_requires_session_and_role(
     db_client: AsyncClient, admin_login: AdminLogin, shop: Shop
 ) -> None:
-    assert (await db_client.get(_url(shop))).status_code == 401
+    # Все маршруты диалогов, а не только список (REVIEW.md: C-13); id — любые: роль
+    # проверяется раньше поиска диалога.
+    conversation_id, message_id = uuid4(), uuid4()
+    rating = _rating_url(shop, conversation_id, message_id)
+    routes = [
+        ("GET", _url(shop), None),
+        ("GET", _url(shop, f"/{conversation_id}"), None),
+        ("PUT", rating, {"rating": "good"}),
+        ("DELETE", rating, None),
+    ]
     other = await _shop(shop.session, "other")
     stranger = await admin_login("stranger@example.com", roles={other.id: AdminRole.EDITOR})
-    assert (await db_client.get(_url(shop), headers=stranger)).status_code == 403
+    for method, url, body in routes:
+        assert (await db_client.request(method, url, json=body)).status_code == 401, url
+        denied = await db_client.request(method, url, json=body, headers=stranger)
+        assert denied.status_code == 403, (method, url)
 
 
 # --- список ---
@@ -149,6 +161,21 @@ async def test_list_newest_first_with_summary(
     assert item.ratings.good == item.ratings.bad == 0
     blank = page.conversations[1]
     assert (blank.messages, blank.preview, blank.last_message_at) == (0, None, None)
+
+
+async def test_list_and_detail_show_version_of_each_conversation(
+    db_client: AsyncClient, shop: Shop, viewer: dict[str, str]
+) -> None:
+    # Номер версии — по id конфига каждого диалога (REVIEW.md: T-8), а не один на страницу.
+    v2 = await AgentConfigRepository(shop.session).create_draft(shop.id, {"assistant": {}})
+    old = await shop.conversation("на первой версии")
+    new = await Shop(shop.session, shop.id, v2.id).conversation("на второй версии")
+
+    page = ConversationList.model_validate((await db_client.get(_url(shop), headers=viewer)).json())
+    versions = {c.id: c.agent_config_version for c in page.conversations}
+    assert versions == {old: 1, new: 2}
+    detail = await db_client.get(_url(shop, f"/{new}"), headers=viewer)
+    assert ConversationDetail.model_validate(detail.json()).conversation.agent_config_version == 2
 
 
 async def test_list_pages_with_cursor(

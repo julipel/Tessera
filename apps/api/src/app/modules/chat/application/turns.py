@@ -131,6 +131,9 @@ class TurnStream:
     и `done` (REVIEW.md: C-1).
     """
 
+    # Сколько close() ждёт остановки агента после отмены (REVIEW.md: C-8).
+    agent_stop_timeout_s: float = 5.0
+
     def __init__(
         self,
         conversation: Conversation,
@@ -174,6 +177,7 @@ class TurnStream:
         self._saved = False
         self._cancel_requested = False
         self._agent_task: asyncio.Task[None] | None = None
+        self._closed = False
 
     async def events(self) -> AsyncGenerator[Event]:
         """События хода (contracts.md §2) — без пингов."""
@@ -215,9 +219,9 @@ class TurnStream:
                 for event in self._translate(item):
                     yield event
             finished = item
-        if finished.error is None:
-            for event in self._close_text():
-                yield event
+        # Открытый текстовый блок закрывается и перед `error` (REVIEW.md: C-7).
+        for event in self._close_text():
+            yield event
         if not await self._save_shielded(finished.status, finished.error):
             finished = _AgentFinished(MessageStatus.FAILED, _INTERNAL)
         if finished.error is not None:
@@ -360,14 +364,31 @@ class TurnStream:
 
     async def close(self) -> None:
         """При закрытии стрима (в т.ч. обрыве соединения): остановить агента, записать
-        ответ как `interrupted`, если он ещё не записан, и снять ход с реестра."""
+        ответ как `interrupted`, если он ещё не записан, и снять ход с реестра. Повторный
+        вызов ничего не делает.
+
+        close() идёт под щитом, поэтому агента, не ответившего на отмену, он ждёт не дольше
+        `agent_stop_timeout_s` (REVIEW.md: C-8). Ответ записывается и тогда: агент пишет только
+        в очередь, а её после закрытия стрима никто не читает; свои инструменты он ведёт в
+        своих сессиях. Ход же остаётся в реестре, и диалог занят, пока задача агента не
+        завершится (ADR-0041) или не истечёт срок занятости."""
+        if self._closed:
+            return
+        self._closed = True
+        task = self._agent_task
+        stuck = False
         try:
-            if self._agent_task is not None and not self._agent_task.done():
-                self._agent_task.cancel()
-                await asyncio.wait([self._agent_task])
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.wait([task], timeout=self.agent_stop_timeout_s)
+                if not task.done():
+                    logger.error("turn_agent_not_stopped", turn_id=str(self.turn_id))
+                    self.registry.remove_when_done(self, task)
+                    stuck = True
             await self._save_shielded(MessageStatus.INTERRUPTED, None)
         finally:
-            await self.registry.remove(self)
+            if not stuck:
+                await self.registry.remove(self)
 
     async def save(self, status: MessageStatus, error: _TurnError | None = None) -> None:
         """Записать ответ с накопленными блоками, ошибкой хода и завершёнными вызовами
@@ -718,6 +739,8 @@ class TurnRegistry:
         self._busy: dict[tuple[TenantId, UUID], tuple[UUID, float]] = {}
         self._directory = directory
         self._busy_ttl_s = busy_ttl_s
+        # Снятия с реестра после зависших агентов: сильные ссылки на задачи до их конца.
+        self._removals: set[asyncio.Task[None]] = set()
 
     def __contains__(self, turn_id: object) -> bool:
         return turn_id in self._turns
@@ -734,6 +757,17 @@ class TurnRegistry:
         if self._turns.pop(turn.turn_id, None) is not None and self._directory is not None:
             await self._directory.unregister(turn.turn_id)
         await self.release(turn.conversation.tenant_id, turn.conversation.id, turn.turn_id)
+
+    def remove_when_done(self, turn: TurnStream, agent_task: asyncio.Task[None]) -> None:
+        """Снять ход с реестра, когда завершится задача агента, не ответившего на отмену
+        (REVIEW.md: C-8). До тех пор ход в реестре держит и сильную ссылку на задачу."""
+
+        def removal(_: asyncio.Task[None]) -> None:
+            task = asyncio.ensure_future(self.remove(turn))
+            self._removals.add(task)
+            task.add_done_callback(self._removals.discard)
+
+        agent_task.add_done_callback(removal)
 
     async def acquire(self, tenant_id: TenantId, conversation_id: UUID, turn_id: UUID) -> bool:
         """Занять диалог ходом (ADR-0041). False — в диалоге идёт другой ход: в этом

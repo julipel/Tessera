@@ -214,6 +214,11 @@ async def seed(
                 )
                 if result.new_widget_key:
                     print(f"{result.tenant.slug}: ключ виджета {result.new_widget_key}")
+                if result.widget_key_ignored:
+                    print(
+                        f"{result.tenant.slug}: заданный ключ виджета не применён — у тенанта "
+                        "уже другой ключ; заменить: --reset-widget-key"
+                    )
                 sources = await seed_sources(
                     result.tenant.id,
                     declarations,

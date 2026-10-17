@@ -127,11 +127,28 @@ async def test_widget_keys_are_isolated_between_tenants(
 
     assert await keys.has_any(a) is True
     assert await keys.has_any(b) is False
+    assert await keys.has_key(a, "0" * 64) is True
+    assert await keys.has_key(a, "1" * 64) is False
+    assert await keys.has_key(b, "0" * 64) is False  # хэш чужого ключа не находится
     assert await keys.list(b) == []
     [key] = await keys.list(a)
     assert key.allowed_origins == ["https://shop.example"]
     assert await keys.delete(b, key.id) is False
     assert await keys.get(b, uuid4()) is None
+
+
+async def test_version_numbers_by_id_within_tenant(
+    configs: AgentConfigRepository, tenants: tuple[TenantId, TenantId]
+) -> None:
+    a, b = tenants
+    v1, v2 = await configs.create_draft(a, CONFIG), await configs.create_draft(a, CONFIG)
+    foreign = await configs.create_draft(b, CONFIG)
+
+    assert await configs.version_numbers(a, {v1.id, v2.id}) == {v1.id: 1, v2.id: 2}
+    # Версия чужого тенанта и неизвестный id не находятся; пустой набор — без запроса.
+    assert await configs.version_numbers(a, {foreign.id, uuid4()}) == {}
+    assert await configs.version_numbers(b, {foreign.id, v1.id}) == {foreign.id: 1}
+    assert await configs.version_numbers(a, set()) == {}
 
 
 async def test_get_version_returns_archived_and_respects_tenant(

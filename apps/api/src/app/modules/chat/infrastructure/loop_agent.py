@@ -5,6 +5,7 @@ TurnContext.
 """
 
 import json
+import unicodedata
 from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -242,9 +243,11 @@ def client_script(history: Sequence[ChatMessage]) -> str | None:
         (m.content for m in reversed(history) if m.role is MessageRole.USER and m.content.strip()),
         "",
     )
-    letters = [c.lower() for c in text if c.isalpha()]
-    cyrillic = sum("а" <= c <= "я" or c == "ё" for c in letters)
-    latin = sum("a" <= c <= "z" or c in "åäöéü" for c in letters)
+    # По имени символа Unicode, а не по диапазонам: украинские и белорусские буквы, «ß ñ ç ł»
+    # тоже буквы своего алфавита (REVIEW.md: C-11).
+    scripts = [unicodedata.name(c, "").split(" ", 1)[0] for c in text if c.isalpha()]
+    cyrillic = scripts.count("CYRILLIC")
+    latin = scripts.count("LATIN")
     if cyrillic == latin:
         return None
     return "cyrillic" if cyrillic > latin else "latin"

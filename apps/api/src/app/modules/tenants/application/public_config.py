@@ -5,8 +5,7 @@ from collections.abc import Collection
 import structlog
 from pydantic import ValidationError
 
-from app.contracts import AgentConfig, PublicAssistant, PublicConfig
-from app.contracts.generated.agent_config_schema import BrandingConfig
+from app.contracts import AgentConfig, BrandingConfig, PublicAssistant, PublicConfig
 from app.modules.shared.kernel import TenantId
 from app.modules.tenants.domain.entities import WidgetAccess
 from app.modules.tenants.domain.errors import (

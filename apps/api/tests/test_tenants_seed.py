@@ -195,11 +195,29 @@ async def test_changed_config_becomes_new_active_version(db_session: AsyncSessio
 
 async def test_seed_renames_tenant(db_session: AsyncSession) -> None:
     await _seed(db_session, load_tenant_spec(SPEC_YAML))
-    await _seed(db_session, load_tenant_spec(SPEC_YAML.replace('name: "Shop"', 'name: "Shop 2"')))
+    renamed = await _seed(
+        db_session, load_tenant_spec(SPEC_YAML.replace('name: "Shop"', 'name: "Shop 2"'))
+    )
 
     tenant = await SqlTenantDirectory(db_session).get_by_slug("shop")
     assert tenant is not None
     assert tenant.name == "Shop 2"
+    # Результат — с новым именем, а не прочитанным до переименования (REVIEW.md: T-6).
+    assert renamed.tenant == tenant
+
+
+async def test_given_key_is_reported_when_tenant_has_another(db_session: AsyncSession) -> None:
+    first = await _seed(db_session, load_tenant_spec(SPEC_YAML), widget_key="wk_local")
+    # Тот же ключ при повторном seed — без предупреждения (make seed с SEED_WIDGET_KEY).
+    same = await _seed(db_session, load_tenant_spec(SPEC_YAML), widget_key="wk_local")
+    assert (same.new_widget_key, same.widget_key_ignored) == (None, False)
+    # Другой ключ без reset_widget_key не применяется, и это видно в результате (T-7).
+    other = await _seed(db_session, load_tenant_spec(SPEC_YAML), widget_key="wk_other")
+    assert (other.new_widget_key, other.widget_key_ignored) == (None, True)
+    [key] = await WidgetKeyRepository(db_session).list(first.tenant.id)
+    assert key.key_hash == hash_widget_key("wk_local")
+    # Без заданного ключа предупреждать не о чем.
+    assert (await _seed(db_session, load_tenant_spec(SPEC_YAML))).widget_key_ignored is False
 
 
 async def test_reset_widget_key_replaces_keys(db_session: AsyncSession) -> None:

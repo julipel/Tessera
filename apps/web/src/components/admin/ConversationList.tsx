@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConversationSummary } from "@/contracts";
 import { ApiError } from "@/lib/api/client";
 import type { AdminSession } from "@/lib/admin/useAdminSession";
@@ -20,6 +20,8 @@ export function ConversationList({ session, tenantId }: { session: AdminSession;
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
+  // Поколение фильтра: ответ «Показать ещё» на прежний фильтр в новый список не попадает.
+  const generation = useRef(0);
 
   const fail = useCallback(
     (e: unknown) => (e instanceof ApiError && e.status === 401 ? expire() : setProblem(toProblem(e))),
@@ -30,24 +32,31 @@ export function ConversationList({ session, tenantId }: { session: AdminSession;
 
   // Первая страница — при открытии и смене фильтра (onlyBad сбрасывает список в обработчике).
   useEffect(() => {
+    let stale = false;
     api
       .listConversations(tenantId, { rating, limit: PAGE })
       .then((page) => {
+        if (stale) return;
         setItems(page.conversations);
         setNext(page.next_before);
       })
-      .catch(fail);
+      .catch((e: unknown) => stale || fail(e));
+    return () => {
+      stale = true;
+    };
   }, [api, tenantId, rating, fail]);
 
   async function more(before: string) {
+    const current = generation.current;
     setLoading(true);
     setProblem(null);
     try {
       const page = await api.listConversations(tenantId, { before, rating, limit: PAGE });
+      if (current !== generation.current) return;
       setItems((prev) => [...(prev ?? []), ...page.conversations]);
       setNext(page.next_before);
     } catch (e) {
-      fail(e);
+      if (current === generation.current) fail(e);
     } finally {
       setLoading(false);
     }
@@ -55,6 +64,7 @@ export function ConversationList({ session, tenantId }: { session: AdminSession;
 
   function filter(bad: boolean) {
     setOnlyBad(bad);
+    generation.current += 1;
     setItems(null);
     setNext(null);
     setProblem(null);

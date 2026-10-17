@@ -91,7 +91,7 @@ async def get_config_version(
 ) -> AgentConfigVersion:
     version = await configs.get_version(tenant_id, config_id)
     if version is None:
-        raise AgentConfigNotFoundError(f"AgentConfig {config_id} not found")
+        raise AgentConfigNotFoundError(f"версия конфига {config_id} не найдена")
     return version
 
 

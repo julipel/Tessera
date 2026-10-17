@@ -254,20 +254,21 @@ class ToolCallRepository(TenantRepository[ToolCallRecord]):
     async def add_many(
         self, tenant_id: TenantId, message_id: UUID, calls: Sequence[ToolCallEntry]
     ) -> None:
-        for call in calls:
-            await self.add(
-                tenant_id,
-                ToolCallRecord(
-                    tenant_id=tenant_id,
-                    message_id=message_id,
-                    tool_call_id=call.tool_call_id,
-                    name=call.name,
-                    arguments=call.arguments,
-                    result=call.result,
-                    error=call.error,
-                    duration_ms=call.duration_ms,
-                ),
+        # Один flush на все вызовы, а не на каждый (REVIEW.md: C-10).
+        self.session.add_all(
+            ToolCallRecord(
+                tenant_id=tenant_id,
+                message_id=message_id,
+                tool_call_id=call.tool_call_id,
+                name=call.name,
+                arguments=call.arguments,
+                result=call.result,
+                error=call.error,
+                duration_ms=call.duration_ms,
             )
+            for call in calls
+        )
+        await self.session.flush()
 
     async def list_for(self, tenant_id: TenantId, message_id: UUID) -> Sequence[ToolCallEntry]:
         stmt = (

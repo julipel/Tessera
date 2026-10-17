@@ -1,6 +1,7 @@
 """POST /v1/conversations/{id}/messages: события агента → SSE-стрим хода (docs/contracts.md §2)."""
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator, Iterator, Mapping
 from datetime import UTC, datetime, timedelta
@@ -281,13 +282,21 @@ async def test_agent_failure_ends_turn_with_error(
 
     events = [e.model_dump() for _, e in _parse_sse((await _send(db_client, conversation_id)).text)]
 
-    assert [e["type"] for e in events] == ["turn_started", "text_delta", "error", "done"]
-    assert events[2]["data"] == {
+    # Начатый текст закрывается и при ошибке (REVIEW.md: C-7).
+    assert [e["type"] for e in events] == [
+        "turn_started",
+        "text_delta",
+        "text_done",
+        "error",
+        "done",
+    ]
+    assert events[2]["data"] == {"block_id": events[1]["data"]["block_id"]}
+    assert events[3]["data"] == {
         "code": "internal",
         "message": "не удалось ответить",
         "retryable": False,
     }
-    assert events[3]["data"]["status"] == "failed"
+    assert events[4]["data"]["status"] == "failed"
     _, assistant = (await _history(db_client, conversation_id)).messages
     assert assistant.status == "failed"
     assert [b.root.model_dump()["text"] for b in assistant.blocks] == ["Сейчас "]
@@ -363,6 +372,69 @@ async def test_client_disconnect_saves_partial_answer_as_interrupted(
     _, assistant = (await _history(db_client, conversation_id)).messages
     assert (assistant.status, assistant.message_id) == ("interrupted", turn.message_id)
     assert [b.root.model_dump()["text"] for b in assistant.blocks] == ["Подбираю "]
+
+
+class StubbornAgent:
+    """Отдаёт первый кусок и не реагирует на отмену, пока тест его не отпустит."""
+
+    def __init__(self) -> None:
+        self.first_sent = anyio.Event()
+        self.release = asyncio.Event()
+
+    async def run_turn(self, request: TurnRequest) -> AsyncIterator[AgentEvent]:
+        yield AnswerDelta("Подбираю ")
+        self.first_sent.set()
+        while not self.release.is_set():
+            # Отмена проглатывается — как у инструмента, завязшего в чужом коде.
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.release.wait()
+
+
+async def test_close_does_not_wait_forever_for_agent_ignoring_cancel(
+    db_session: AsyncSession, shop: TenantId, conversation_id: UUID, db_client: AsyncClient
+) -> None:
+    agent, registry = StubbornAgent(), TurnRegistry()
+    turn = await start_turn(
+        shop,
+        conversation_id,
+        uuid4(),
+        UserInput.model_validate(TEXT),
+        ConversationRepository(db_session),
+        MessageRepository(db_session),
+        ToolCallRepository(db_session),
+        TenantsAgentConfigs(db_session),
+        agent,
+        db_session.commit,
+        registry,
+    )
+    turn.agent_stop_timeout_s = 0.05
+
+    async def consume() -> None:
+        async for _ in sse_stream(turn):
+            pass
+
+    with structlog.testing.capture_logs() as logs:
+        with anyio.fail_after(WAIT):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(consume)
+                await agent.first_sent.wait()
+                tg.cancel_scope.cancel()
+            # Второй close() — как из TurnResponse: ничего не ждёт и не пишет.
+            await turn.close()
+
+    # close() вернулся по таймауту (REVIEW.md: C-8), один раз; показанный ответ записан.
+    assert [log["event"] for log in logs].count("turn_agent_not_stopped") == 1
+    _, assistant = (await _history(db_client, conversation_id)).messages
+    assert (assistant.status, assistant.message_id) == ("interrupted", turn.message_id)
+    # Пока агент жив, ход в реестре и диалог занят (ADR-0041).
+    assert turn.turn_id in registry
+    assert await registry.acquire(shop, conversation_id, uuid4()) is False
+    assert await registry.wait_idle(0.05) is False
+
+    agent.release.set()
+    assert await registry.wait_idle(WAIT) is True
+    assert await registry.acquire(shop, conversation_id, uuid4()) is True
+    assert len((await _history(db_client, conversation_id)).messages) == 2
 
 
 # --- Запись ответа: сбой и обрыв во время записи (REVIEW.md: C-1) ---
@@ -938,12 +1010,18 @@ async def test_llm_error_ends_turn_with_llm_unavailable(
 
     events = [e.model_dump() for _, e in _parse_sse((await _send(db_client, conversation_id)).text)]
 
-    assert [e["type"] for e in events] == ["turn_started", "text_delta", "error", "done"]
-    assert (events[2]["data"]["code"], events[2]["data"]["retryable"]) == (
+    assert [e["type"] for e in events] == [
+        "turn_started",
+        "text_delta",
+        "text_done",
+        "error",
+        "done",
+    ]
+    assert (events[3]["data"]["code"], events[3]["data"]["retryable"]) == (
         "llm_unavailable",
         retryable,
     )
-    assert events[3]["data"]["status"] == "failed"
+    assert events[4]["data"]["status"] == "failed"
 
 
 async def test_turn_timeout_ends_turn_with_retryable_error(
@@ -953,9 +1031,15 @@ async def test_turn_timeout_ends_turn_with_retryable_error(
 
     events = [e.model_dump() for _, e in _parse_sse((await _send(db_client, conversation_id)).text)]
 
-    assert [e["type"] for e in events] == ["turn_started", "text_delta", "error", "done"]
-    assert (events[2]["data"]["code"], events[2]["data"]["retryable"]) == ("turn_timeout", True)
-    assert events[3]["data"]["status"] == "failed"
+    assert [e["type"] for e in events] == [
+        "turn_started",
+        "text_delta",
+        "text_done",
+        "error",
+        "done",
+    ]
+    assert (events[3]["data"]["code"], events[3]["data"]["retryable"]) == ("turn_timeout", True)
+    assert events[4]["data"]["status"] == "failed"
     _, assistant = (await _history(db_client, conversation_id)).messages
     # Показанный до таймаута текст сохранён вместе с ошибкой.
     assert assistant.status == "failed"

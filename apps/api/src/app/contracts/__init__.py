@@ -44,6 +44,7 @@ from app.contracts.generated.admin_sources_schema import (
 from app.contracts.generated.agent_config_schema import (
     AgentConfig,
     AssistantConfig,
+    BrandingConfig,
     CardAction,
     CatalogConfig,
     ConfirmLabels,
@@ -138,6 +139,7 @@ __all__ = [
     "AgentEventItem",
     "AgentEventList",
     "AssistantConfig",
+    "BrandingConfig",
     "CardAction",
     "CatalogConfig",
     "ComparisonTable",

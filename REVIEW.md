@@ -59,11 +59,11 @@
 - [x] *(исправлено в P9-01k)* **T-4. Нет журнала админских действий.** `api/admin_router.py:57-85` — сохранение черновика и активация не логируются, хотя `tenant_id` и `admin_user_id` под рукой. Нельзя установить, кто переключил версию агента. *Исправление:* `agent_config_draft_saved` / `agent_config_activated` (config_id, version, previous_version, admin_user_id).
 
 ### Мелочи
-- [ ] T-5. `application/public_config.py:6` — `BrandingConfig` импортируется из `app.contracts.generated.*` в обход фасада `app.contracts` (единственный такой импорт).
-- [ ] T-6. `application/seed.py:38-39,57` — после переименования `SeedResult.tenant` содержит старое имя; тест проверяет только БД.
-- [ ] T-7. `application/seed.py:53-55` — если у тенанта уже есть ключ, переданный `widget_key` без `reset_widget_key` молча игнорируется.
-- [ ] T-8. `public.py:16-20` — наружу экспортируются ORM-модели (`AgentConfigRecord` и др.), и `chat/infrastructure/review_store.py:29,62-77` строит запросы к `agent_configs` в обход репозитория (фильтр по tenant_id там есть). Лучше метод репозитория или порт; для `db_models.py` экспорт оправдан.
-- [ ] T-9. `infrastructure/repositories.py:101`, `application/config_editor.py:86` — тексты исключений на английском, остальной модуль на русском.
+- [x] *(исправлено в P9-01ah)* T-5. `application/public_config.py:6` — `BrandingConfig` импортируется из `app.contracts.generated.*` в обход фасада `app.contracts` (единственный такой импорт).
+- [x] *(исправлено в P9-01ah)* T-6. `application/seed.py:38-39,57` — после переименования `SeedResult.tenant` содержит старое имя; тест проверяет только БД.
+- [x] *(исправлено в P9-01ah: `widget_key_ignored` и предупреждение CLI)* T-7. `application/seed.py:53-55` — если у тенанта уже есть ключ, переданный `widget_key` без `reset_widget_key` молча игнорируется.
+- [x] *(исправлено в P9-01ah: `AgentConfigRepository.version_numbers`; ORM-модели в public — только для db_models и тестов)* T-8. `public.py:16-20` — наружу экспортируются ORM-модели (`AgentConfigRecord` и др.), и `chat/infrastructure/review_store.py:29,62-77` строит запросы к `agent_configs` в обход репозитория (фильтр по tenant_id там есть). Лучше метод репозитория или порт; для `db_models.py` экспорт оправдан.
+- [x] *(исправлено в P9-01ah)* T-9. `infrastructure/repositories.py:101`, `application/config_editor.py:86` — тексты исключений на английском, остальной модуль на русском.
 
 **Пробелы в тестах:** GET устаревшей версии, конкурентные `create_draft`/`activate`, seed с `widget_key` при существующем ключе.
 
@@ -87,13 +87,13 @@
 - [x] *(исправлено в P9-01p)* **C-6. SSE отдаётся в обход SSE-слоя FastAPI: нет keep-alive и заголовков против буферизации.** `api/router.py:228,278` — `EventSourceResponse(sse_stream(...))` — это просто `StreamingResponse`: нет `: ping`, `Cache-Control: no-cache`, `X-Accel-Buffering: no`. Долгий инструмент или ретраи без событий дольше idle-таймаута прокси (Cloudflare Tunnel ~100 с, nginx у тенантов) → обрыв, ход `interrupted`. С Caddy сейчас работает. *Исправление:* заголовки + пинг по таймауту ожидания события; тест.
 
 ### Мелочи
-- [ ] C-7. `application/turns.py:174-185` — на пути с ошибкой открытый текстовый блок не закрывается `text_done` (на пути с отменой — закрывается).
-- [ ] C-8. `application/turns.py:280-289` — `close()` под щитом ждёт задачу агента без таймаута (`move_on_after(5)`).
-- [ ] C-9. `domain/review.py:14` — `MAX_COMMENT_CHARS` не используется и дублирует `maxLength` из схемы.
-- [ ] C-10. `infrastructure/repositories.py:191-207` — `add_many` делает flush на каждую строку (N запросов).
-- [ ] C-11. `infrastructure/loop_agent.py:199-212,225-238` — пометки для модели захардкожены по-русски для любого языка; `client_script` проверяет фиксированные алфавиты.
-- [ ] C-12. `infrastructure/review_store.py:73-80` — join по ORM-таблице `tenants` (см. T-8).
-- [ ] C-13. Тесты: 403 чужого тенанта проверяется только на GET списка (нет на `GET /{id}`, `PUT`/`DELETE` rating); нет тестов на C-1, C-2, C-4, C-5.
+- [x] *(исправлено в P9-01ah)* C-7. `application/turns.py:174-185` — на пути с ошибкой открытый текстовый блок не закрывается `text_done` (на пути с отменой — закрывается).
+- [x] *(исправлено в P9-01ah: 5 с, затем лог `turn_agent_not_stopped`, ответ `interrupted`, диалог занят до конца задачи агента)* C-8. `application/turns.py:280-289` — `close()` под щитом ждёт задачу агента без таймаута (`move_on_after(5)`).
+- [x] *(исправлено в P9-01ah)* C-9. `domain/review.py:14` — `MAX_COMMENT_CHARS` не используется и дублирует `maxLength` из схемы.
+- [x] *(исправлено в P9-01ah)* C-10. `infrastructure/repositories.py:191-207` — `add_many` делает flush на каждую строку (N запросов).
+- [x] *(P9-01ah: `client_script` — по Unicode; пометки для модели — не исправляем: протокол модели (ADR-0020), на них опираются маскирование ПДн, мок e2e и эвалы)* C-11. `infrastructure/loop_agent.py:199-212,225-238` — пометки для модели захардкожены по-русски для любого языка; `client_script` проверяет фиксированные алфавиты.
+- [x] *(исправлено в P9-01ah (см. T-8))* C-12. `infrastructure/review_store.py:73-80` — join по ORM-таблице `tenants` (см. T-8).
+- [x] *(исправлено в P9-01ah: 401/403 на всех маршрутах; тесты C-1, C-2, C-4, C-5 уже есть)* C-13. Тесты: 403 чужого тенанта проверяется только на GET списка (нет на `GET /{id}`, `PUT`/`DELETE` rating); нет тестов на C-1, C-2, C-4, C-5.
 
 ---
 

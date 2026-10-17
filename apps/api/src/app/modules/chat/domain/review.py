@@ -11,7 +11,6 @@ from app.modules.chat.domain.entities import ChatMessage, Conversation, ToolCall
 
 PREVIEW_CHARS = 200
 MAX_PAGE = 100
-MAX_COMMENT_CHARS = 2000
 
 
 class Rating(StrEnum):

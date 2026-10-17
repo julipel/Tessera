@@ -420,6 +420,11 @@ async def test_forms_and_card_actions_in_conversation_language() -> None:
         (["Нужен крем"], "cyrillic"),
         (["Нужен крем", "ok, the second one"], "latin"),
         (["Hej! Jag söker en parfym"], "latin"),
+        # Буквы вне а-я и a-z считаются за свой алфавит (REVIEW.md: C-11).
+        (["Їжак і ґанок є"], "cyrillic"),  # noqa: RUF001
+        (["Łódź, żółć, ñ, ç, straße"], "latin"),
+        (["Ґ ok"], "latin"),  # 1 кириллическая против 2 латинских
+        (["Γειά σου"], None),  # noqa: RUF001 — греческий: ни тот ни другой
         (["Hi", ""], "latin"),  # пустое сообщение (кнопка) не в счёт — берётся прошлый текст
         (["42 👍"], None),
         ([], None),

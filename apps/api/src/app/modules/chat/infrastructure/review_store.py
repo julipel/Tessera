@@ -1,9 +1,11 @@
 """ConversationReviewStore на SQLAlchemy (ADR-0038): каждый запрос ограничен тенантом."""
 
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
+import structlog
 from sqlalchemy import Select, and_, delete, exists, func, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +28,9 @@ from app.modules.chat.infrastructure.models import (
 )
 from app.modules.chat.infrastructure.repositories import conversation_entity, message_entity
 from app.modules.shared.public import TenantId
-from app.modules.tenants.public import AgentConfigRecord
+from app.modules.tenants.public import AgentConfigRepository
+
+logger = structlog.get_logger(__name__)
 
 
 def _rating_entry(record: MessageRatingRecord) -> MessageRatingEntry:
@@ -56,36 +60,46 @@ class SqlConversationReviewStore:
                 .scalar_subquery()
             )
 
-        return (
-            select(
-                c,
-                AgentConfigRecord.version,
-                select(func.count()).where(in_conversation).scalar_subquery(),
-                select(func.max(m.created_at)).where(in_conversation).scalar_subquery(),
-                select(func.left(m.content, PREVIEW_CHARS))
-                .where(in_conversation, m.role == MessageRole.USER)
-                .order_by(m.created_at, m.id)
-                .limit(1)
-                .scalar_subquery(),
-                ratings(Rating.GOOD),
-                ratings(Rating.BAD),
-            )
-            .join(
-                AgentConfigRecord,
-                and_(
-                    AgentConfigRecord.id == c.agent_config_id,
-                    AgentConfigRecord.tenant_id == tenant_id,
-                ),
-            )
-            .where(c.tenant_id == tenant_id)
+        return select(
+            c,
+            select(func.count()).where(in_conversation).scalar_subquery(),
+            select(func.max(m.created_at)).where(in_conversation).scalar_subquery(),
+            select(func.left(m.content, PREVIEW_CHARS))
+            .where(in_conversation, m.role == MessageRole.USER)
+            .order_by(m.created_at, m.id)
+            .limit(1)
+            .scalar_subquery(),
+            ratings(Rating.GOOD),
+            ratings(Rating.BAD),
+        ).where(c.tenant_id == tenant_id)
+
+    async def _with_versions(
+        self, tenant_id: TenantId, rows: Sequence[Any]
+    ) -> list[ConversationOverview]:
+        # Номер версии конфига — через репозиторий tenants, а не join по его ORM-таблице
+        # (REVIEW.md: T-8, C-12). Версии не удаляются, у диалога она есть всегда (FK); диалог
+        # с версией не своего тенанта — порча данных: в лог и мимо списка, как при join.
+        versions = await AgentConfigRepository(self.session).version_numbers(
+            tenant_id, {row[0].agent_config_id for row in rows}
         )
+        overviews = []
+        for row in rows:
+            if row[0].agent_config_id in versions:
+                overviews.append(self._overview(row, versions))
+            else:
+                logger.error(
+                    "conversation_config_missing",
+                    conversation_id=str(row[0].id),
+                    agent_config_id=str(row[0].agent_config_id),
+                )
+        return overviews
 
     @staticmethod
-    def _overview(row: Any) -> ConversationOverview:
-        record, version, messages, last_at, preview, good, bad = row
+    def _overview(row: Any, versions: dict[UUID, int]) -> ConversationOverview:
+        record, messages, last_at, preview, good, bad = row
         return ConversationOverview(
             conversation=conversation_entity(record),
-            agent_config_version=version,
+            agent_config_version=versions[record.agent_config_id],
             messages=messages,
             last_message_at=last_at,
             preview=preview or None,
@@ -113,13 +127,17 @@ class SqlConversationReviewStore:
                 )
             )
         stmt = stmt.order_by(c.created_at.desc(), c.id.desc()).limit(limit)
-        return [self._overview(row) for row in await self.session.execute(stmt)]
+        return await self._with_versions(tenant_id, (await self.session.execute(stmt)).all())
 
     async def review(self, tenant_id: TenantId, conversation_id: UUID) -> ConversationReview | None:
         stmt = self._overviews(tenant_id).where(ConversationRecord.id == conversation_id)
         row = (await self.session.execute(stmt)).one_or_none()
         if row is None:
             return None
+        overviews = await self._with_versions(tenant_id, [row])
+        if not overviews:
+            return None
+        [overview] = overviews
         messages = [
             message_entity(r)
             for r in await self.session.scalars(
@@ -158,7 +176,7 @@ class SqlConversationReviewStore:
             )
         }
         return ConversationReview(
-            overview=self._overview(row),
+            overview=overview,
             messages=[ReviewedMessage(m, calls[m.id], ratings.get(m.id)) for m in messages],
         )
 

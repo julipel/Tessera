@@ -1,4 +1,7 @@
-"""Сборка FastAPI-приложения."""
+"""Сборка FastAPI-приложения: `uvicorn --factory app.main:create_app`.
+
+Приложение не создаётся при импорте (REVIEW.md: S-15): импорт модуля не читает настройки
+и не открывает engine и Redis."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -8,11 +11,11 @@ import structlog
 from arq.connections import ArqRedis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import SecretStr
 from redis.asyncio import Redis
 
 from app.api import health
 from app.knowledge_wiring import KnowledgeServices, build_knowledge_services
+from app.lifecycle import close_all
 from app.logs import TraceIdMiddleware, configure_logging
 from app.modules.access.public import KdfPool, SqlAdminAuthenticator
 from app.modules.access.public import router as access_router
@@ -44,7 +47,7 @@ from app.modules.shared.public import (
 )
 from app.modules.tenants.public import admin_router as tenants_admin_router
 from app.modules.tenants.public import public_router as tenants_public_router
-from app.settings import Settings
+from app.settings import Settings, secret_value
 
 logger = structlog.get_logger(__name__)
 
@@ -70,19 +73,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if not await turns.wait_idle(SHUTDOWN_TURNS_WAIT_S):
         logger.warning("shutdown.turns_pending")
     summaries: SummaryScheduler = app.state.summary_scheduler
-    await summaries.aclose()
     knowledge: KnowledgeServices | None = app.state.knowledge
-    if knowledge is not None:
-        await knowledge.aclose()
     tracer: Tracer = app.state.tracer
-    await asyncio.to_thread(tracer.shutdown)  # отправка накопленных трейсов — блокирующая
     redis: Redis = app.state.redis
-    await redis.aclose()
     subscriber: Redis = app.state.redis_subscriber
-    await subscriber.aclose()
     jobs: ArqRedis = app.state.arq_redis
-    await jobs.aclose()
-    await app.state.engine.dispose()
+    await close_all(
+        [
+            ("summaries", summaries.aclose),
+            *([("knowledge", knowledge.aclose)] if knowledge is not None else []),
+            # Отправка накопленных трейсов — блокирующая.
+            ("tracer", lambda: asyncio.to_thread(tracer.shutdown)),
+            ("redis", redis.aclose),
+            ("redis_subscriber", subscriber.aclose),
+            ("arq_redis", jobs.aclose),
+            ("engine", app.state.engine.dispose),
+        ]
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -116,17 +123,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.turn_directory = RedisTurnDirectory(app.state.redis, app.state.redis_subscriber)
     app.state.turn_registry = TurnRegistry(app.state.turn_directory)
     app.state.llm_clients = LLMClients(
-        openai_api_key=_secret(settings.openai_api_key),
+        openai_api_key=secret_value(settings.openai_api_key),
         openai_base_url=settings.openai_base_url,
-        openai_compatible_api_key=_secret(settings.openai_compatible_api_key),
+        openai_compatible_api_key=secret_value(settings.openai_compatible_api_key),
         openai_compatible_base_url=settings.openai_compatible_base_url,
-        anthropic_api_key=_secret(settings.anthropic_api_key),
+        anthropic_api_key=secret_value(settings.anthropic_api_key),
         anthropic_base_url=settings.anthropic_base_url,
     )
     # Трейсы ходов в Langfuse (ADR-0029); без ключей — выключены.
     app.state.tracer = build_tracer(
         settings.langfuse_public_key,
-        _secret(settings.langfuse_secret_key),
+        secret_value(settings.langfuse_secret_key),
         settings.langfuse_host,
         settings.app_env,
         settings.langfuse_timeout_s,
@@ -186,10 +193,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(chat_admin_router)
     app.include_router(leads_admin_router)
     return app
-
-
-def _secret(value: SecretStr | None) -> str | None:
-    return value.get_secret_value() if value else None
-
-
-app = create_app()

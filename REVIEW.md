@@ -317,17 +317,17 @@
 - [x] *(исправлено в P9-01y)* **S-6. Нет тестов на поведение `get_session`.** `tests/test_db_session.py:10-20` проверяет только `SELECT 1`: commit при успехе, rollback при `ApiError`, ошибка commit → 500, `StreamDbSession` при обрыве — не покрыты.
 
 ### Мелочи
-- [ ] S-7. `modules/shared/api/deps.py:13-19` — при обрыве SSE `get_session` может закоммитить частичное состояние, если отмена пришлась между записями (не подтверждено).
-- [ ] S-8. `modules/shared/infrastructure/repository.py:22-27` — фильтр по тенанту есть только в `_scoped`; `session` открыт наследникам, `_scoped_update`/`_scoped_delete` нет (нарушений сейчас не найдено).
-- [ ] S-9. `modules/shared/infrastructure/db.py:34` — у `tenant_id` нет FK на `tenants.id` (если это осознанно — отметить в ADR-0006).
+- [x] *(исправлено в P9-01ak: у StreamDbSession своя зависимость — в конце всегда rollback, стрим коммитит сам)* S-7. `modules/shared/api/deps.py:13-19` — при обрыве SSE `get_session` может закоммитить частичное состояние, если отмена пришлась между записями (не подтверждено).
+- [x] *(не исправляем, P9-01ak: прямые запросы наследников проверены — фильтр по тенанту есть везде; `_scoped_update`/`_scoped_delete` без пользователей были бы мёртвым кодом; защита — тесты изоляции и ревью, ADR-0006)* S-8. `modules/shared/infrastructure/repository.py:22-27` — фильтр по тенанту есть только в `_scoped`; `session` открыт наследникам, `_scoped_update`/`_scoped_delete` нет (нарушений сейчас не найдено).
+- [x] *(осознанно, P9-01ak: дополнение ADR-0006 — FK не нужен и дал бы блокировки строки тенанта на каждую вставку)* S-9. `modules/shared/infrastructure/db.py:34` — у `tenant_id` нет FK на `tenants.id` (если это осознанно — отметить в ADR-0006).
 - [x] *(исправлено в P9-01y)* S-10. `modules/shared/api/admin.py:47` — `tenant_id` неявно из пути — дубль AC-6.
-- [ ] S-11. `modules/shared/api/errors.py:96-97` — для 413/415 и других статусов вне таблицы код ошибки `internal`; `str(exc.detail)` отдаётся как есть.
-- [ ] S-12. `errors.py:135-138` — двойной лог при ошибке посреди стрима.
+- [x] *(исправлено в P9-01ak: 4xx вне таблицы — `invalid_input`, 5xx — `internal` с общим сообщением)* S-11. `modules/shared/api/errors.py:96-97` — для 413/415 и других статусов вне таблицы код ошибки `internal`; `str(exc.detail)` отдаётся как есть.
+- [x] *(исправлено в P9-01ak: после начала ответа — одна трассировка `unhandled_error` с trace_id, исключение не пробрасывается; uvicorn закрывает соединение и пишет короткую строку без трассировки)* S-12. `errors.py:135-138` — двойной лог при ошибке посреди стрима.
 - [x] *(исправлено в P9-01w, см. O-6)* S-13. `logs.py:58-60` — `X-Trace-Id` без проверки — см. O-6.
-- [ ] S-14. `main.py:53-70` — упавший `aclose()` одного ресурса пропускает закрытие остальных (`AsyncExitStack`).
-- [ ] S-15. `main.py:163`, `worker.py:144` — `create_app()` и `Settings()` выполняются при импорте; `cli.py:55` импортирует `app.worker`, так что любая CLI-команда создаёт engine и Redis (`uvicorn --factory`).
-- [ ] S-16. `worker.py:133-137` — если `startup` упал на полпути, `shutdown` падает на `KeyError`.
-- [ ] S-17. `settings.py:31` — `database_url`/`redis_url` не `SecretStr`; нет валидатора, запрещающего в production дефолтный пароль и localhost в `cors_origins`.
-- [ ] S-18. `_secret` продублирован в `main.py:159-160` и `worker.py:77-78`.
-- [ ] S-19. `modules/shared/api/rate_limit.py:26-27` — N правил = N последовательных запросов к Redis (до 1 с при зависшем Redis); можно одним pipeline.
-- [ ] S-20. `access/api/router.py:50` — email открытым текстом в ключе Redis (лучше sha256).
+- [x] *(исправлено в P9-01ak: `app/lifecycle.close_all` — сбой одного ресурса в лог `shutdown.close_failed`, остальные закрываются)* S-14. `main.py:53-70` — упавший `aclose()` одного ресурса пропускает закрытие остальных (`AsyncExitStack`).
+- [x] *(исправлено в P9-01ak: `uvicorn --factory app.main:create_app`, сборщики коннекторов и эмбеддера — в `knowledge_wiring`, CLI воркер не импортирует; `Settings()` в `WorkerSettings` остаётся — arq читает атрибуты класса при импорте, модуль импортирует только процесс воркера; ошибка настроек не выводит значения env — `hide_input_in_errors`)* S-15. `main.py:163`, `worker.py:144` — `create_app()` и `Settings()` выполняются при импорте; `cli.py:55` импортирует `app.worker`, так что любая CLI-команда создаёт engine и Redis (`uvicorn --factory`).
+- [x] *(исправлено в P9-01ak: `shutdown` закрывает только созданное)* S-16. `worker.py:133-137` — если `startup` упал на полпути, `shutdown` падает на `KeyError`.
+- [x] *(исправлено в P9-01ak: адреса БД и Redis — `repr=False` вместо SecretStr; в production пароль БД `app`/пустой и не-https CORS_ORIGINS отклоняются при старте)* S-17. `settings.py:31` — `database_url`/`redis_url` не `SecretStr`; нет валидатора, запрещающего в production дефолтный пароль и localhost в `cors_origins`.
+- [x] *(исправлено в P9-01ak: `settings.secret_value` — в API, воркере, CLI, knowledge_wiring и эвалах)* S-18. `_secret` продублирован в `main.py:159-160` и `worker.py:77-78`.
+- [x] *(исправлено в P9-01ak иначе: pipeline сломал бы S-1 — после сбоя Redis лимитер 5 с к нему не обращается, сразу запасной путь)* S-19. `modules/shared/api/rate_limit.py:26-27` — N правил = N последовательных запросов к Redis (до 1 с при зависшем Redis); можно одним pipeline.
+- [x] *(исправлено в P9-01ak: в ключе — sha256 email)* S-20. `access/api/router.py:50` — email открытым текстом в ключе Redis (лучше sha256).

@@ -43,7 +43,7 @@ trap 'kill "${pids[@]}" 2>/dev/null; wait 2>/dev/null' EXIT
 MOCK_LLM_HOST=$HOST MOCK_LLM_PORT=$MOCK_PORT MOCK_LLM_FIRST_TOKEN_MS="${MOCK_LLM_FIRST_TOKEN_MS:-500}" \
   node "$ROOT/apps/web/e2e/mock-llm.mjs" >"$LOG_DIR/mock-llm.log" 2>&1 &
 pids+=($!)
-uv run uvicorn app.main:app --host $HOST --port $API_PORT --workers "${LOADTEST_WORKERS:-1}" \
+uv run uvicorn --factory app.main:create_app --host $HOST --port $API_PORT --workers "${LOADTEST_WORKERS:-1}" \
   >"$LOG_DIR/api.log" 2>&1 &
 pids+=($!)
 

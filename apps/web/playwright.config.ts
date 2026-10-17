@@ -41,7 +41,7 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: `uv run uvicorn app.main:app --host ${HOST} --port ${API_PORT}`,
+      command: `uv run uvicorn --factory app.main:create_app --host ${HOST} --port ${API_PORT}`,
       cwd: "../api",
       url: `${API_URL}/health`,
       env: E2E_ENV,

@@ -507,6 +507,8 @@ async def test_login_is_rate_limited_by_email_and_ip(
     other = {"email": "bob@example.com", "password": "wrong password!"}
     assert (await db_client.post(LOGIN, json=other)).status_code == 401
     assert (await db_client.post(LOGIN, json=other)).status_code == 429
+    # В ключах счётчиков — хэш email, а не адрес (S-20).
+    assert not any("example.com" in key for key in app.state.rate_limiter._counts)
 
 
 async def test_successful_logins_do_not_use_up_email_limit(

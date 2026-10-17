@@ -1,7 +1,7 @@
 import os
 
-# До импорта app: модульный `app = create_app()` в app.main настраивает structlog по окружению,
-# а при APP_ENV=local логгеры кэшируются при первом использовании и capture_logs их не видит.
+# До импорта app: `create_app()` настраивает structlog по окружению, а при APP_ENV=local
+# логгеры кэшируются при первом использовании и capture_logs их не видит.
 os.environ["APP_ENV"] = "test"
 
 import asyncio
@@ -34,7 +34,13 @@ from app.modules.access.public import (
     upsert_admin_user,
 )
 from app.modules.chat.public import TurnRegistry
-from app.modules.shared.public import AdminRole, InMemoryRateLimiter, TenantId, get_session
+from app.modules.shared.public import (
+    AdminRole,
+    InMemoryRateLimiter,
+    TenantId,
+    get_session,
+    get_stream_session,
+)
 from app.settings import Settings
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
@@ -128,6 +134,7 @@ async def db_client(
         yield db_session
 
     app.dependency_overrides[get_session] = session_override
+    app.dependency_overrides[get_stream_session] = session_override
     # Сессии админки проверяются своей сессией БД — тоже в транзакции теста.
     app.state.admin_authenticator = SqlAdminAuthenticator(
         async_sessionmaker(bind=db_connection, join_transaction_mode="create_savepoint")

@@ -1,6 +1,7 @@
 """API админки: вход, выход, текущий пользователь (docs/contracts.md §7, ADR-0036).
 Сессия браузера — HttpOnly-cookie, у CLI и тестов — Bearer (ADR-0044)."""
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -62,9 +63,10 @@ async def admin_login(
         3600,
         local_fallback=True,
     )
-    email = body.email.strip().lower()
+    # В ключе Redis — хэш email, а не адрес (REVIEW.md: S-20).
+    email_key = hashlib.sha256(body.email.strip().lower().encode()).hexdigest()
     await enforce_rate_limits(limiter, [(ip_rule, client_ip(request))])
-    await ensure_not_limited(limiter, email_rule, email)
+    await ensure_not_limited(limiter, email_rule, email_key)
     now = datetime.now(UTC)
     sessions = SqlAdminSessionStore(session)
     kdf: KdfPool = request.app.state.kdf_pool
@@ -84,7 +86,7 @@ async def admin_login(
             now=now,
         )
     except InvalidCredentialsError as e:
-        await limiter.hit(email_rule, email)
+        await limiter.hit(email_rule, email_key)
         raise ApiError(status.HTTP_401_UNAUTHORIZED, "unauthorized", str(e)) from e
     if previous := request.cookies.get(ADMIN_COOKIE):
         await logout(previous, sessions=sessions)

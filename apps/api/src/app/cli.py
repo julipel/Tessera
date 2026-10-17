@@ -14,6 +14,7 @@ from uuid import UUID
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.knowledge_wiring import build_connectors, build_embedder
 from app.modules.access.public import (
     MIN_PASSWORD_LENGTH,
     AdminMembershipRepository,
@@ -54,8 +55,7 @@ from app.modules.tenants.public import (
     seed_tenant,
 )
 from app.retention import purge_all_tenants
-from app.settings import Settings
-from app.worker import build_connectors, build_embedder
+from app.settings import Settings, secret_value
 
 # src/app/cli.py → корень репозитория на 4 уровня выше пакета (как в settings.py).
 DEFAULT_TENANTS_DIR = Path(__file__).resolve().parents[4] / "config" / "tenants"
@@ -251,7 +251,7 @@ async def sync(slugs: list[str], names: list[str], full: bool, settings: Setting
         user_agent=settings.crawler_user_agent, timeout_s=settings.crawler_timeout_s
     )
     embedder = build_embedder(settings)
-    qdrant_key = settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None
+    qdrant_key = secret_value(settings.qdrant_api_key)
     index = create_qdrant_index(
         settings.qdrant_url,
         collection=settings.qdrant_collection,

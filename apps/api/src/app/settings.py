@@ -4,10 +4,10 @@ import ipaddress
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
 
 # src/app/settings.py → корень репозитория на 4 уровня выше пакета.
@@ -15,6 +15,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 ENV_FILES: tuple[Path | str, ...] = (_REPO_ROOT / ".env", ".env")
 SOURCE_SECRET_PREFIX = "SOURCE_SECRET_"
+
+# Пароль БД из .env.example и значений по умолчанию.
+_DEV_DB_PASSWORDS = frozenset({"app"})
 
 AppEnv = Literal["local", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
@@ -25,11 +28,14 @@ class Settings(BaseSettings):
         env_file=ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",
+        # Ошибка настроек не выводит значения из env (ключи провайдеров, адрес БД) в лог.
+        hide_input_in_errors=True,
     )
 
     app_env: AppEnv = "local"
     log_level: LogLevel = "INFO"
-    database_url: str = "postgresql+asyncpg://app:app@localhost:5432/app"
+    # Адреса с паролями — без repr: не попадают в вывод настроек и трассировки (S-17).
+    database_url: str = Field(default="postgresql+asyncpg://app:app@localhost:5432/app", repr=False)
     database_echo: bool = False
     # Пул соединений API на процесс. SSE-ход держит соединение до конца ответа модели
     # (P7-05, кандидат P7-08), поэтому одновременных ходов на процесс не больше
@@ -39,7 +45,7 @@ class Settings(BaseSettings):
     # Ожидание свободного соединения пула и потолок одного запроса к БД, с (REVIEW.md: S-4).
     db_pool_timeout_s: float = Field(default=30, gt=0)
     db_statement_timeout_s: float = Field(default=30, gt=0)
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = Field(default="redis://localhost:6379/0", repr=False)
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: SecretStr | None = None
     # Коллекция чанков знаний, одна на окружение (architecture.md §8).
@@ -138,9 +144,29 @@ class Settings(BaseSettings):
             ipaddress.ip_network(value, strict=False)
         return values
 
+    @model_validator(mode="after")
+    def _check_production(self) -> Self:
+        """В production — без пароля БД по умолчанию и только https-origin (S-17): забытая
+        переменная окружения не должна молча оставить настройки разработки. https://localhost
+        допустим — локальная проверка прод-стека (deploy.md)."""
+        if self.app_env != "production":
+            return self
+        password = urlsplit(self.database_url).password
+        if not password or password in _DEV_DB_PASSWORDS:
+            raise ValueError("DATABASE_URL: в production нужен свой пароль БД")
+        for origin in self.cors_origins:
+            if not origin.startswith("https://"):
+                raise ValueError(f"CORS_ORIGINS: {origin!r} — в production только https")
+        return self
+
     @property
     def is_local(self) -> bool:
         return self.app_env in ("local", "test")
+
+
+def secret_value(value: SecretStr | None) -> str | None:
+    """Значение секрета для клиентов SDK; пустое — как не заданное."""
+    return (value.get_secret_value() or None) if value is not None else None
 
 
 def source_secrets_env(

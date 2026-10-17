@@ -10,13 +10,11 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import SecretStr
-
 from app.knowledge_wiring import build_knowledge_services
 from app.logs import configure_logging
 from app.modules.agent.public import PLATFORM_PROMPT_VERSION, LLMClients
 from app.modules.chat.public import builtin_turn_agent
-from app.settings import Settings
+from app.settings import Settings, secret_value
 from evals.dialogs import DIALOGS_DIR, InvalidDialogError, load_dialogs, select_dialogs
 from evals.judge import JUDGE_PROMPT_VERSION, Judge
 from evals.knowledge_inject import InjectingKnowledge
@@ -28,17 +26,13 @@ from evals.tenant_data import connect_tenant_data
 def llm_clients(settings: Settings) -> LLMClients:
     """Ключи провайдеров из env — как в `create_app`."""
     return LLMClients(
-        openai_api_key=_secret(settings.openai_api_key),
+        openai_api_key=secret_value(settings.openai_api_key),
         openai_base_url=settings.openai_base_url,
-        openai_compatible_api_key=_secret(settings.openai_compatible_api_key),
+        openai_compatible_api_key=secret_value(settings.openai_compatible_api_key),
         openai_compatible_base_url=settings.openai_compatible_base_url,
-        anthropic_api_key=_secret(settings.anthropic_api_key),
+        anthropic_api_key=secret_value(settings.anthropic_api_key),
         anthropic_base_url=settings.anthropic_base_url,
     )
-
-
-def _secret(value: SecretStr | None) -> str | None:
-    return value.get_secret_value() if value else None
 
 
 async def main_async(args: argparse.Namespace) -> int:

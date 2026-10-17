@@ -19,11 +19,24 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
             raise
 
 
+async def get_stream_session(request: Request) -> AsyncIterator[AsyncSession]:
+    """Сессия SSE-стрима: в конце запроса — всегда rollback (REVIEW.md: S-7). Стрим фиксирует
+    свои записи сам; при обрыве клиентом Starlette завершает ответ без исключения, и commit
+    здесь зафиксировал бы то, что стрим не успел дописать."""
+    factory: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    async with factory() as session:
+        try:
+            yield session
+        finally:
+            await session.rollback()
+
+
 # scope="function": commit до отправки ответа, иначе ошибка commit не дойдёт до клиента.
 DbSession = Annotated[AsyncSession, Depends(get_session, scope="function")]
 
 # scope="request": сессия живёт до конца отправки ответа — для SSE-стрима, который пишет в БД
-# после возврата из эндпоинта. Фиксировать изменения стрим должен сам (commit), до `done`.
+# после возврата из эндпоинта. Фиксировать изменения стрим должен сам (commit), до `done`:
+# незакоммиченное в конце откатывается.
 # Между транзакциями сессия соединения не держит: стрим закрывает транзакцию перед долгим
 # ожиданием (ответ модели), иначе одновременных стримов не больше размера пула (ADR-0034).
-StreamDbSession = Annotated[AsyncSession, Depends(get_session, scope="request")]
+StreamDbSession = Annotated[AsyncSession, Depends(get_stream_session, scope="request")]

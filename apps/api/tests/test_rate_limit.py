@@ -1,6 +1,6 @@
 """Лимиты частоты и размера ввода публичного API (P7-04a, ADR-0030)."""
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -16,6 +16,7 @@ from app.modules.agent.public import AgentEvent, AnswerDelta, LLMError
 from app.modules.chat.api.router import MAX_TURN_BODY_BYTES
 from app.modules.chat.infrastructure.models import MessageRecord
 from app.modules.shared.public import (
+    REDIS_RETRY_AFTER_S,
     ApiError,
     InMemoryRateLimiter,
     RateLimit,
@@ -151,6 +152,41 @@ async def test_unavailable_redis_counts_local_fallback_rules_in_memory() -> None
     assert [d.allowed for d in login_decisions] == [True, True, False]
     assert login_decisions[2].retry_after_s == 40
     assert [d.allowed for d in chat_decisions] == [True, True, True]
+
+
+class CountingRedis:
+    """Redis, у которого каждый запрос падает, — со счётчиком обращений."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def pipeline(self, transaction: bool = True) -> Any:
+        self.calls += 1
+        raise ConnectionError("redis завис")
+
+    async def get(self, key: str) -> None:
+        self.calls += 1
+        raise ConnectionError("redis завис")
+
+
+async def test_redis_not_polled_for_a_while_after_failure() -> None:
+    """После сбоя Redis следующие правила и запросы не ждут его таймаут (S-19), через
+    REDIS_RETRY_AFTER_S — снова пробуем."""
+    redis, clock = CountingRedis(), Clock(1_000_000.0)
+    limiter = RedisRateLimiter(cast(Redis, redis), clock)
+    login = RateLimit("login", limit=1, window_s=60, local_fallback=True)
+
+    with structlog.testing.capture_logs() as logs:
+        await enforce_rate_limits(limiter, [(RULE, "ip-1"), (RULE, "tenant-1")])
+        assert (await limiter.check(RULE, "ip-1")).allowed
+        await limiter.hit(login, "anna")  # запасной счётчик в памяти — и без опроса Redis
+        assert not (await limiter.check(login, "anna")).allowed
+        assert redis.calls == 1
+        clock.now += REDIS_RETRY_AFTER_S
+        await limiter.hit(RULE, "ip-1")
+
+    assert redis.calls == 2
+    assert [e["event"] for e in logs] == ["rate_limit_unavailable"] * 2
 
 
 async def test_redis_check_reads_counter_without_incrementing(settings: Any) -> None:

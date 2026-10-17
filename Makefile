@@ -97,7 +97,7 @@ retention:
 pilot: migrate seed sync
 
 dev-api:
-	cd $(API) && uv run uvicorn app.main:app --reload
+	cd $(API) && uv run uvicorn --factory app.main:create_app --reload
 
 dev-web:
 	cd $(WEB) && pnpm dev

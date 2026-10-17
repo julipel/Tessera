@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.modules.shared.public import ApiError, DbSession, StreamDbSession, create_engine
 from app.modules.tenants.public import SqlTenantDirectory, TenantRecord
+from asgi_raw import completed, raw_get
 
 
 async def test_db_session_dependency(app: FastAPI, client: AsyncClient, db_url: str) -> None:
@@ -114,10 +115,35 @@ async def test_stream_session_does_not_commit_when_stream_fails(
 
         return StreamingResponse(body())
 
-    with pytest.raises(RuntimeError):
-        await client.get("/_s6_stream")
+    sent = await raw_get(app, "/_s6_stream")  # ошибку пишет в лог обработчик 500 (S-12)
+
+    assert not completed(sent)
 
     assert not await _tenant_exists(db_url, slug)
+    await app.state.engine.dispose()
+
+
+async def test_stream_session_keeps_only_what_stream_committed(
+    app: FastAPI, client: AsyncClient, db_url: str, slug: str
+) -> None:
+    """Стрим закончился без исключения (так Starlette завершает ответ при обрыве клиентом):
+    закоммиченное стримом остаётся, недописанное после commit — откатывается (S-7)."""
+
+    @app.get("/_s7_stream")
+    async def stream(session: StreamDbSession) -> StreamingResponse:
+        async def body() -> AsyncIterator[bytes]:
+            await SqlTenantDirectory(session).create(slug, slug)
+            await session.commit()
+            yield b"saved\n"
+            await SqlTenantDirectory(session).create(f"{slug}-partial", "partial")
+
+        return StreamingResponse(body())
+
+    response = await client.get("/_s7_stream")
+
+    assert response.status_code == 200
+    assert await _tenant_exists(db_url, slug)
+    assert not await _tenant_exists(db_url, f"{slug}-partial")
     await app.state.engine.dispose()
 
 

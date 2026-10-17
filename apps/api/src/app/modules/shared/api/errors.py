@@ -96,7 +96,14 @@ async def _api_error(_: Request, exc: Exception) -> JSONResponse:
 
 async def _http_exception(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, StarletteHTTPException)
-    code = _CODE_BY_STATUS.get(exc.status_code, "internal")
+    # Статусы вне таблицы (413, 415, 406…): ошибка клиента — invalid_input; 5xx — internal
+    # без текста исключения (REVIEW.md: S-11).
+    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        logger.warning("http_server_error", status=exc.status_code, detail=str(exc.detail))
+        return error_response(
+            exc.status_code, "internal", "внутренняя ошибка сервера", headers=exc.headers
+        )
+    code = _CODE_BY_STATUS.get(exc.status_code, "invalid_input")
     return error_response(exc.status_code, code, str(exc.detail), headers=exc.headers)
 
 
@@ -114,7 +121,8 @@ class UnhandledErrorMiddleware:
     """Необработанное исключение → 500 `internal` в едином формате.
 
     Ставится внутри TraceIdMiddleware: лог ошибки получает trace_id, ответ — X-Trace-Id.
-    Если ответ уже начат (стрим), исключение пробрасывается дальше — тело не заменить.
+    Если ответ уже начат (стрим), тело не заменить: исключение не пробрасывается, сервер
+    закрывает недописанный ответ сам — без второй трассировки в логе (REVIEW.md: S-12).
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -136,9 +144,9 @@ class UnhandledErrorMiddleware:
         try:
             await self.app(scope, receive, send_tracking)
         except Exception:
-            logger.exception("unhandled_error", path=scope["path"])
+            logger.exception("unhandled_error", path=scope["path"], response_started=started)
             if started:
-                raise
+                return
             response = error_response(
                 status.HTTP_500_INTERNAL_SERVER_ERROR, "internal", "внутренняя ошибка сервера"
             )

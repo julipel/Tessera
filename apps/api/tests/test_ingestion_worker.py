@@ -9,6 +9,7 @@ from pydantic import SecretStr
 from sqlalchemy import exc
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
+from app.knowledge_wiring import build_embedder
 from app.modules.knowledge.public import (
     SYNC_SOURCE_JOB,
     ArqSyncQueue,
@@ -32,7 +33,7 @@ from app.modules.knowledge.public import (
 from app.modules.shared.public import NotFoundError, TenantId
 from app.modules.tenants.public import SqlTenantDirectory
 from app.settings import Settings
-from app.worker import WorkerSettings, build_embedder, sync_source
+from app.worker import WorkerSettings, sync_source
 from knowledge_fakes import FakeEmbedder, InMemoryChunkIndex
 
 

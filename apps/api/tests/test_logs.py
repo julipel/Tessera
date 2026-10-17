@@ -20,8 +20,18 @@ def _fail_with_contact() -> None:
     raise ValueError(f"не записано ({len(phone)})")
 
 
+def _production_settings() -> Settings:
+    # Production требует своего пароля БД и не-локальных origin (S-17).
+    return Settings(
+        _env_file=None,
+        app_env="production",
+        database_url="postgresql+asyncpg://app:s3cret@postgres:5432/app",
+        cors_origins=["https://chat.example.com"],
+    )
+
+
 def test_exception_log_has_traceback_without_locals(capsys: pytest.CaptureFixture[str]) -> None:
-    configure_logging(Settings(_env_file=None, app_env="production"))
+    configure_logging(_production_settings())
     try:
         try:
             _fail_with_contact()
@@ -44,7 +54,7 @@ def test_exception_log_has_traceback_without_locals(capsys: pytest.CaptureFixtur
 
 @pytest.fixture
 def production_logs() -> Any:
-    configure_logging(Settings(_env_file=None, app_env="production"))
+    configure_logging(_production_settings())
     try:
         yield
     finally:

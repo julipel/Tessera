@@ -31,6 +31,9 @@ make deploy-sync       # индексация источников (катало
 make deploy-admin-user email=you@example.com args="--superadmin"
 ```
 
+При `APP_ENV=production` API и воркер не стартуют с паролем БД `app` (или пустым) и
+с не-https адресом в `CORS_ORIGINS` — это значения разработки, забытые в env.
+
 Ключи виджета: `make deploy-seed` печатает ключ тенанта при первом создании. Чтобы ключи
 были заданы заранее, укажите `SEED_WIDGET_KEY=demo-beauty=wk_…,demo-garden=wk_…` в
 `deploy/.env` до seed. Dev-ключи `wk_dev_*` в бою не используйте.

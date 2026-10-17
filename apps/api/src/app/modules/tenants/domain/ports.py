@@ -7,6 +7,7 @@ from uuid import UUID
 from app.modules.shared.kernel import TenantId
 from app.modules.tenants.domain.entities import (
     Activation,
+    AgentConfigOrigin,
     AgentConfigVersion,
     Tenant,
     WidgetAccess,
@@ -26,6 +27,10 @@ class TenantDirectory(Protocol):
 
 
 class AgentConfigStore(Protocol):
+    async def lock(self, tenant_id: TenantId) -> None:
+        """Операции с версиями тенанта — по очереди до конца транзакции."""
+        ...
+
     async def get_active(self, tenant_id: TenantId) -> AgentConfigVersion | None: ...
 
     async def get_version(
@@ -35,7 +40,10 @@ class AgentConfigStore(Protocol):
     async def list_versions(self, tenant_id: TenantId) -> Sequence[AgentConfigVersion]: ...
 
     async def create_draft(
-        self, tenant_id: TenantId, config: dict[str, Any]
+        self,
+        tenant_id: TenantId,
+        config: dict[str, Any],
+        origin: AgentConfigOrigin = AgentConfigOrigin.ADMIN,
     ) -> AgentConfigVersion: ...
 
     async def activate(self, tenant_id: TenantId, config_id: UUID) -> Activation: ...

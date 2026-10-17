@@ -34,8 +34,9 @@ export NO_PROXY="${NO_PROXY:+$NO_PROXY,}$HOST" no_proxy="${no_proxy:+$no_proxy,}
 cd "$API_DIR"
 uv run python -m app.cli ensure-db
 uv run alembic upgrade head >/dev/null
+# Стенд нагрузки: конфиг — всегда из YAML (--force-config, ADR-0043).
 uv run python -m app.cli seed "$ROOT/config/tenants/demo-beauty.yaml" \
-  --widget-key "$KEY" --reset-widget-key >/dev/null
+  --widget-key "$KEY" --reset-widget-key --force-config >/dev/null
 
 mkdir -p "$LOG_DIR"
 pids=()

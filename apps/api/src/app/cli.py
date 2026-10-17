@@ -192,6 +192,7 @@ async def seed(
     widget_keys: dict[str, str],
     reset_widget_key: bool,
     settings: Settings,
+    force_config: bool = False,
 ) -> None:
     engine = create_engine(
         settings.database_url, statement_timeout_s=settings.db_statement_timeout_s
@@ -206,12 +207,17 @@ async def seed(
                     widget_keys=WidgetKeyRepository(session),
                     widget_key=widget_keys.get(spec.tenant.slug),
                     reset_widget_key=reset_widget_key,
+                    force_config=force_config,
                 )
-                state = "новая версия" if result.config_changed else "без изменений"
-                print(
-                    f"{result.tenant.slug}: AgentConfig v{result.active_config.version} "
-                    f"active ({state})"
-                )
+                version = result.active_config.version
+                if result.config_kept:
+                    print(
+                        f"{result.tenant.slug}: активна версия v{version}, выбранная в админке, "
+                        "— изменённый YAML не применён (заменить: --force-config)"
+                    )
+                else:
+                    state = "новая версия" if result.config_changed else "без изменений"
+                    print(f"{result.tenant.slug}: AgentConfig v{version} active ({state})")
                 if result.new_widget_key:
                     print(f"{result.tenant.slug}: ключ виджета {result.new_widget_key}")
                 if result.widget_key_ignored:
@@ -362,6 +368,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="удалить ключи тенанта и выпустить новый (--widget-key / SEED_WIDGET_KEY / случайный)",
     )
+    seed_cmd.add_argument(
+        "--force-config",
+        action="store_true",
+        help="применить YAML, даже если активна версия, выбранная в админке",
+    )
     sync_cmd = sub.add_parser("sync", help="синхронизировать источники тенантов (без воркера)")
     sync_cmd.add_argument("slugs", nargs="*", help="по умолчанию — тенанты из config/tenants")
     sync_cmd.add_argument(
@@ -451,7 +462,9 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as e:
         print(e, file=sys.stderr)
         return 1
-    asyncio.run(seed(specs, widget_keys, args.reset_widget_key, settings))
+    asyncio.run(
+        seed(specs, widget_keys, args.reset_widget_key, settings, force_config=args.force_config)
+    )
     return 0
 
 

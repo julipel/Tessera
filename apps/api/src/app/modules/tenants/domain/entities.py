@@ -22,6 +22,14 @@ class AgentConfigStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class AgentConfigOrigin(StrEnum):
+    """Откуда версия: YAML из `config/tenants` (seed) или редактор админки. Seed не
+    активирует YAML поверх правок админки (REVIEW.md: R-1, дополнение ADR-0043)."""
+
+    SEED = "seed"
+    ADMIN = "admin"
+
+
 @dataclass(frozen=True, slots=True)
 class Tenant:
     id: TenantId
@@ -40,6 +48,7 @@ class AgentConfigVersion:
     status: AgentConfigStatus
     config: dict[str, Any]
     created_at: datetime
+    origin: AgentConfigOrigin
 
 
 @dataclass(frozen=True, slots=True)

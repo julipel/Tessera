@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.shared.public import TenantId, TenantRepository
 from app.modules.tenants.domain.entities import (
     Activation,
+    AgentConfigOrigin,
     AgentConfigStatus,
     AgentConfigVersion,
     Tenant,
@@ -36,6 +37,7 @@ def _config(record: AgentConfigRecord) -> AgentConfigVersion:
         status=record.status,
         config=record.config,
         created_at=record.created_at,
+        origin=record.origin,
     )
 
 
@@ -83,14 +85,14 @@ class SqlTenantDirectory:
 
 
 class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
-    """`create_draft` и `activate` блокируют строку тенанта до конца транзакции: операции
+    """`lock`, `create_draft` и `activate` блокируют строку тенанта до конца транзакции: операции
     с версиями одного тенанта идут по очереди (REVIEW.md: T-2, T-3). В READ COMMITTED запрос
     после блокировки видит закоммиченное другой операцией — номер версии и прежняя активная
     версия берутся актуальные, уникальные индексы не срабатывают."""
 
     model = AgentConfigRecord
 
-    async def _lock_tenant(self, tenant_id: TenantId) -> None:
+    async def lock(self, tenant_id: TenantId) -> None:
         stmt = select(TenantRecord.id).where(TenantRecord.id == tenant_id).with_for_update()
         await self.session.execute(stmt)
 
@@ -120,21 +122,30 @@ class AgentConfigRepository(TenantRepository[AgentConfigRecord]):
         stmt = self._scoped(tenant_id).order_by(AgentConfigRecord.version)
         return [_config(r) for r in (await self.session.execute(stmt)).scalars()]
 
-    async def create_draft(self, tenant_id: TenantId, config: dict[str, Any]) -> AgentConfigVersion:
-        await self._lock_tenant(tenant_id)
+    async def create_draft(
+        self,
+        tenant_id: TenantId,
+        config: dict[str, Any],
+        origin: AgentConfigOrigin = AgentConfigOrigin.ADMIN,
+    ) -> AgentConfigVersion:
+        await self.lock(tenant_id)
         latest = select(func.coalesce(func.max(AgentConfigRecord.version), 0)).where(
             AgentConfigRecord.tenant_id == tenant_id
         )
         version = (await self.session.execute(latest)).scalar_one() + 1
         record = AgentConfigRecord(
-            tenant_id=tenant_id, version=version, status=AgentConfigStatus.DRAFT, config=config
+            tenant_id=tenant_id,
+            version=version,
+            status=AgentConfigStatus.DRAFT,
+            config=config,
+            origin=origin,
         )
         await self.add(tenant_id, record)
         await self.session.refresh(record)  # created_at — значение БД
         return _config(record)
 
     async def activate(self, tenant_id: TenantId, config_id: UUID) -> Activation:
-        await self._lock_tenant(tenant_id)
+        await self.lock(tenant_id)
         # populate_existing: статус версии мог смениться, пока ждали блокировку.
         stmt = (
             self._scoped(tenant_id)

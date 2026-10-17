@@ -25,7 +25,9 @@ export default function globalSetup(): void {
   run("python", "-m", "app.cli", "ensure-db");
   run("alembic", "upgrade", "head");
   const keys = `demo-beauty=${WIDGET_KEY},demo-garden=${GARDEN_WIDGET_KEY}`;
-  run("python", "-m", "app.cli", "seed", "--widget-key", keys, "--reset-widget-key");
+  // Стенд e2e: YAML — единственный источник конфига, правки админки из прошлых прогонов
+  // (admin.spec.ts) не должны его держать (--force-config, ADR-0043).
+  run("python", "-m", "app.cli", "seed", "--widget-key", keys, "--reset-widget-key", "--force-config");
   run(
     "python",
     "-m",
@@ -35,6 +37,7 @@ export default function globalSetup(): void {
     "--widget-key",
     `${ADMIN_TENANT_SLUG}=${ADMIN_WIDGET_KEY}`,
     "--reset-widget-key",
+    "--force-config",
   );
   run("python", "-m", "app.cli", "admin-user", ADMIN_EMAIL, "--tenant", `${ADMIN_TENANT_SLUG}=editor`, "--reset-password");
 }

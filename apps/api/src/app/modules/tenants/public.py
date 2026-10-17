@@ -6,6 +6,7 @@ from app.modules.tenants.api.public_router import router as public_router
 from app.modules.tenants.application.seed import SeedResult, seed_tenant
 from app.modules.tenants.application.spec import TenantSpec, load_tenant_spec
 from app.modules.tenants.domain.entities import (
+    AgentConfigOrigin,
     AgentConfigStatus,
     AgentConfigVersion,
     Tenant,
@@ -29,6 +30,7 @@ from app.modules.tenants.infrastructure.repositories import (
 
 __all__ = [
     "AgentConfigNotFoundError",
+    "AgentConfigOrigin",
     "AgentConfigRecord",
     "AgentConfigRepository",
     "AgentConfigStatus",

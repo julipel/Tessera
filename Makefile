@@ -75,8 +75,9 @@ migrate:
 migration:
 	cd $(API) && uv run alembic revision --autogenerate -m "$(m)"
 
+# make seed [args="--force-config"] — конфиг из YAML поверх выбранного в админке (R-1).
 seed:
-	cd $(API) && uv run python -m app.cli seed
+	cd $(API) && uv run python -m app.cli seed $(args)
 
 # Пользователь админки (ADR-0036): make admin-user email=a@b.c [args="--tenant demo-beauty=editor"].
 # Пароль нового пользователя — ADMIN_PASSWORD или ввод; см. --help у `python -m app.cli admin-user`.
@@ -141,8 +142,9 @@ deploy-up:
 	$(DEPLOY) up -d --build --wait
 
 # Тенанты из config/tenants, вшитого в образ API (после git pull — deploy-up, затем deploy-seed).
+# Конфиг, изменённый в админке, seed не затирает; заменить — args="--force-config".
 deploy-seed:
-	$(DEPLOY) run --rm api python -m app.cli seed
+	$(DEPLOY) run --rm api python -m app.cli seed $(args)
 
 # make deploy-sync [t="demo-beauty"] [s="kb"] — как make sync, внутри контейнера.
 deploy-sync:

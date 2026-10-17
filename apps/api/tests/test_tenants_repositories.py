@@ -15,9 +15,12 @@ from app.modules.tenants.public import (
     AgentConfigRecord,
     AgentConfigRepository,
     AgentConfigStatus,
+    SeedResult,
     SqlTenantDirectory,
     TenantRecord,
     WidgetKeyRepository,
+    load_tenant_spec,
+    seed_tenant,
 )
 
 CONFIG = {"assistant": {"name": "A"}}
@@ -243,3 +246,53 @@ async def test_parallel_activations_leave_single_active(
         (2, AgentConfigStatus.ARCHIVED),
         (3, AgentConfigStatus.ACTIVE),
     ]
+
+
+SEED_YAML = """
+tenant: {{slug: {slug}, name: "Race"}}
+widget: {{allowed_origins: ["https://shop.example"]}}
+agent_config:
+  assistant: {{name: "A", greeting: "{greeting}", fallback_message: "Ошибка"}}
+  model: {{primary: {{provider: openai, name: "m"}}}}
+  limits: {{}}
+  prompt: {{tenant: "Ты — консультант."}}
+  tools: {{builtin: [search_catalog]}}
+"""
+
+
+async def _seed_in(session: AsyncSession, slug: str, greeting: str) -> SeedResult:
+    return await seed_tenant(
+        load_tenant_spec(SEED_YAML.format(slug=slug, greeting=greeting)),
+        tenants=SqlTenantDirectory(session),
+        configs=AgentConfigRepository(session),
+        widget_keys=WidgetKeyRepository(session),
+    )
+
+
+async def test_seed_waits_for_admin_activation_and_keeps_it(
+    engine: AsyncEngine, committed_tenant: TenantId
+) -> None:
+    """Seed проверяет, чья активная версия, под блокировкой тенанта: активация в админке
+    посреди seed не затирается (REVIEW.md: R-1)."""
+    async with AsyncSession(engine) as session:
+        slug = (await SqlTenantDirectory(session).get(committed_tenant)).slug  # type: ignore[union-attr]
+        first = await _seed_in(session, slug, "v1")
+        await session.commit()
+
+    async with AsyncSession(engine) as admin, AsyncSession(engine) as seeder:
+        configs = AgentConfigRepository(admin)
+        draft = await configs.create_draft(committed_tenant, first.active_config.config)
+        await configs.activate(committed_tenant, draft.id)
+
+        async def seed_changed_yaml() -> SeedResult:
+            result = await _seed_in(seeder, slug, "v2")
+            await seeder.commit()
+            return result
+
+        task = asyncio.create_task(seed_changed_yaml())
+        assert await _blocked(task)
+        await admin.commit()
+        result = await task
+
+    assert result.config_kept is True
+    assert result.active_config.id == draft.id

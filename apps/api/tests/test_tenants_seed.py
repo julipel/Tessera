@@ -3,9 +3,12 @@
 from pathlib import Path
 
 import pytest
+import yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.tenants.application.config_editor import save_config_draft
 from app.modules.tenants.public import (
+    AgentConfigOrigin,
     AgentConfigRepository,
     AgentConfigStatus,
     InvalidTenantSpecError,
@@ -33,7 +36,11 @@ agent_config:
 
 
 async def _seed(
-    session: AsyncSession, spec: TenantSpec, widget_key: str | None = None
+    session: AsyncSession,
+    spec: TenantSpec,
+    widget_key: str | None = None,
+    *,
+    force_config: bool = False,
 ) -> SeedResult:
     return await seed_tenant(
         spec,
@@ -41,6 +48,7 @@ async def _seed(
         configs=AgentConfigRepository(session),
         widget_keys=WidgetKeyRepository(session),
         widget_key=widget_key,
+        force_config=force_config,
     )
 
 
@@ -191,6 +199,101 @@ async def test_changed_config_becomes_new_active_version(db_session: AsyncSessio
     assert second.active_config.config["assistant"]["greeting"] == "Здравствуйте!"
     versions = await AgentConfigRepository(db_session).list_versions(first.tenant.id)
     assert [v.status for v in versions] == [AgentConfigStatus.ARCHIVED, AgentConfigStatus.ACTIVE]
+
+
+# --- конфиг из админки seed не затирает (REVIEW.md: R-1) ---
+
+
+async def _edit_in_admin(session: AsyncSession, seeded: SeedResult) -> int:
+    """Правка в админке: новая версия из редактора (сроки хранения) и её активация."""
+    configs = AgentConfigRepository(session)
+    edited = {**seeded.active_config.config, "retention": {"conversations_days": 365}}
+    draft = await configs.create_draft(seeded.tenant.id, edited, AgentConfigOrigin.ADMIN)
+    return (await configs.activate(seeded.tenant.id, draft.id)).config.version
+
+
+async def test_seed_versions_are_marked_seed(db_session: AsyncSession) -> None:
+    result = await _seed(db_session, _spec())
+    assert result.active_config.origin == AgentConfigOrigin.SEED
+
+
+async def test_seed_keeps_config_activated_in_admin(db_session: AsyncSession) -> None:
+    first = await _seed(db_session, _spec())
+    admin_version = await _edit_in_admin(db_session, first)
+
+    # Тот же YAML — без сообщения, изменённый — config_kept; версия админки остаётся.
+    for spec, kept in ((_spec(), False), (_spec(greeting="Здравствуйте!"), True)):
+        again = await _seed(db_session, spec)
+        assert again.config_kept is kept
+        assert again.config_changed is False
+        assert again.active_config.version == admin_version
+        assert again.active_config.config["retention"] == {"conversations_days": 365}
+    versions = await AgentConfigRepository(db_session).list_versions(first.tenant.id)
+    assert len(versions) == 2
+
+
+async def test_seed_keeps_rollback_to_older_seed_version(db_session: AsyncSession) -> None:
+    """Откат в админке на прежнюю версию из seed — тоже выбор админки."""
+    first = await _seed(db_session, _spec())
+    await _seed(db_session, _spec(greeting="v2"))
+    configs = AgentConfigRepository(db_session)
+    await configs.activate(first.tenant.id, first.active_config.id)
+
+    again = await _seed(db_session, _spec(greeting="v3"))
+
+    assert again.config_kept is True
+    assert again.active_config.id == first.active_config.id
+
+
+async def test_activating_latest_seed_version_returns_control_to_yaml(
+    db_session: AsyncSession,
+) -> None:
+    """Откат в админке на последнюю версию из seed — «вернуть YAML» без CLI."""
+    first = await _seed(db_session, _spec())
+    await _edit_in_admin(db_session, first)
+    await AgentConfigRepository(db_session).activate(first.tenant.id, first.active_config.id)
+
+    again = await _seed(db_session, _spec(greeting="Здравствуйте!"))
+
+    assert again.config_changed is True
+    assert again.active_config.version == 3
+
+
+async def test_force_config_applies_yaml_over_admin(db_session: AsyncSession) -> None:
+    first = await _seed(db_session, _spec())
+    await _edit_in_admin(db_session, first)
+
+    forced = await _seed(db_session, _spec(greeting="Здравствуйте!"), force_config=True)
+
+    assert forced.config_changed is True and forced.config_kept is False
+    assert forced.active_config.version == 3
+    assert forced.active_config.origin == AgentConfigOrigin.SEED
+    assert "retention" not in forced.active_config.config
+    # После --force-config seed снова ведёт конфиг: следующая правка YAML применяется.
+    later = await _seed(db_session, _spec(greeting="v4"))
+    assert later.config_changed is True and later.active_config.version == 4
+
+
+async def test_admin_editor_marks_versions_admin(db_session: AsyncSession) -> None:
+    first = await _seed(db_session, _spec())
+    source = yaml.safe_dump(first.active_config.config, allow_unicode=True)
+
+    draft = await save_config_draft(first.tenant.id, source, AgentConfigRepository(db_session))
+
+    assert draft.origin == AgentConfigOrigin.ADMIN
+
+
+async def test_admin_draft_does_not_block_seed(db_session: AsyncSession) -> None:
+    """Неактивированный черновик в админке — не выбор: активна последняя версия из seed."""
+    first = await _seed(db_session, _spec())
+    await AgentConfigRepository(db_session).create_draft(
+        first.tenant.id, first.active_config.config, AgentConfigOrigin.ADMIN
+    )
+
+    again = await _seed(db_session, _spec(greeting="Здравствуйте!"))
+
+    assert again.config_changed is True
+    assert again.active_config.version == 3
 
 
 async def test_seed_renames_tenant(db_session: AsyncSession) -> None:

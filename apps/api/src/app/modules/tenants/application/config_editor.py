@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from app.contracts import AgentConfig
 from app.modules.shared.kernel import TenantId
-from app.modules.tenants.domain.entities import AgentConfigVersion
+from app.modules.tenants.domain.entities import AgentConfigOrigin, AgentConfigVersion
 from app.modules.tenants.domain.errors import (
     AgentConfigNotFoundError,
     ConfigProblem,
@@ -98,7 +98,9 @@ async def get_config_version(
 async def save_config_draft(
     tenant_id: TenantId, source: str, configs: AgentConfigStore
 ) -> AgentConfigVersion:
-    draft = await configs.create_draft(tenant_id, parse_agent_config_yaml(source))
+    draft = await configs.create_draft(
+        tenant_id, parse_agent_config_yaml(source), AgentConfigOrigin.ADMIN
+    )
     logger.info(
         "agent_config_draft_saved",
         tenant_id=str(tenant_id),

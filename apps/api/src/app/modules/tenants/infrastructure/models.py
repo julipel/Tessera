@@ -9,14 +9,16 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.modules.shared.public import Base, TenantScopedBase
-from app.modules.tenants.domain.entities import AgentConfigStatus, TenantStatus
+from app.modules.tenants.domain.entities import AgentConfigOrigin, AgentConfigStatus, TenantStatus
 
 
-def _str_enum[E: (AgentConfigStatus, TenantStatus)](enum: type[E]) -> Enum:
+def _str_enum[E: (AgentConfigStatus, AgentConfigOrigin, TenantStatus)](
+    enum: type[E], name: str = "status"
+) -> Enum:
     # VARCHAR + CHECK вместо нативного ENUM Postgres: новые значения без ALTER TYPE.
     return Enum(
         enum,
-        name="status",
+        name=name,
         native_enum=False,
         create_constraint=True,
         length=16,
@@ -58,6 +60,7 @@ class AgentConfigRecord(TenantScopedBase):
     status: Mapped[AgentConfigStatus] = mapped_column(_str_enum(AgentConfigStatus))
     config: Mapped[dict[str, Any]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    origin: Mapped[AgentConfigOrigin] = mapped_column(_str_enum(AgentConfigOrigin, "origin"))
 
 
 class WidgetKeyRecord(TenantScopedBase):

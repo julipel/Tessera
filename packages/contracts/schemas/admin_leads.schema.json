@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "admin_leads.schema.json",
+  "title": "AdminLeadsSchema",
+  "description": "Заявки в админке (docs/contracts.md §7, ADR-0045). Файл без единого корневого типа — экспортируемые типы в $defs: LeadList, LeadSummary, LeadFieldValue.",
+  "$defs": {
+    "LeadFieldValue": {
+      "type": "object",
+      "description": "Поле заявки. label — подпись поля на момент отправки; у заявок до ADR-0045 и неизвестных полей — name.",
+      "properties": {
+        "name": { "type": "string" },
+        "label": { "type": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["name", "label", "value"],
+      "additionalProperties": false
+    },
+    "LeadSummary": {
+      "type": "object",
+      "description": "Заявка. number — номер в тенанте, его бот называет клиенту; form_title — заголовок формы на момент отправки (null у заявок до ADR-0045); conversation_id — null, если диалог удалён по сроку хранения (ADR-0043).",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "number": { "type": "integer", "minimum": 1 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "form_key": { "type": "string" },
+        "form_title": { "type": ["string", "null"] },
+        "conversation_id": { "type": ["string", "null"], "format": "uuid" },
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/LeadFieldValue" } }
+      },
+      "required": ["id", "number", "created_at", "form_key", "form_title", "conversation_id", "fields"],
+      "additionalProperties": false
+    },
+    "LeadList": {
+      "type": "object",
+      "description": "Ответ GET /v1/admin/tenants/{tenant_id}/leads: от новых к старым. next_before — курсор следующей страницы (параметр before), null — страница последняя.",
+      "properties": {
+        "leads": { "type": "array", "items": { "$ref": "#/$defs/LeadSummary" } },
+        "next_before": { "type": ["string", "null"] }
+      },
+      "required": ["leads", "next_before"],
+      "additionalProperties": false
+    }
+  }
+}

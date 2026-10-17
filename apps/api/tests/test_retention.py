@@ -1,5 +1,6 @@
 """Сроки хранения данных посетителей (ADR-0043): политика, порции, удаление по тенанту."""
 
+import itertools
 from collections.abc import MutableMapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -31,6 +32,8 @@ from app.worker import RETENTION_TIMEOUT_S, WorkerSettings, purge_expired_data
 
 NOW = datetime(2026, 10, 16, 3, 17, tzinfo=UTC)
 TENANT = TenantId(uuid4())
+# Номер заявки уникален в тенанте (ADR-0045); тестам нужен только уникальный.
+_LEAD_NUMBERS = itertools.count(1)
 
 
 def days_ago(days: int) -> datetime:
@@ -203,6 +206,7 @@ async def conversation(
         LeadRecord(
             tenant_id=tenant_id,
             conversation_id=record.id,
+            number=next(_LEAD_NUMBERS),
             form_key="contact",
             fields={"phone": "+79000000000"},
             created_at=at,

@@ -38,7 +38,6 @@ from app.modules.chat.infrastructure.repositories import (
     ToolCallRepository,
 )
 from app.modules.knowledge.public import KnowledgeSearch, SqlCatalog
-from app.modules.leads.public import SqlLeadStore
 from app.modules.observability.public import AgentEventRepository, Tracer
 from app.modules.shared.public import (
     ApiError,
@@ -50,6 +49,7 @@ from app.modules.shared.public import (
     enforce_rate_limits,
 )
 from app.modules.tenants.public import WidgetTenant
+from app.modules.tools.public import LeadStore
 
 router = APIRouter(prefix="/v1/conversations", tags=["conversations"])
 logger = structlog.get_logger(__name__)
@@ -62,7 +62,7 @@ def get_turn_agent(request: Request) -> TurnAgent:
     llms: LLMClients = request.app.state.llm_clients
     knowledge: KnowledgeSearch | None = request.app.state.knowledge_search
     catalog: SqlCatalog = request.app.state.catalog
-    leads: SqlLeadStore = request.app.state.leads
+    leads: LeadStore = request.app.state.leads
     tracer: Tracer = request.app.state.tracer
     return builtin_turn_agent(llms.for_provider, knowledge, catalog, leads, tracer)
 

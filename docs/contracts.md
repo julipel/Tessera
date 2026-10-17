@@ -367,7 +367,7 @@ branding:
 HTTP-ответ с `invalid_input` может нести `details: [{loc, message}]` — ошибки по местам ввода
 (`loc` — путь из ключей и индексов, пустой — весь ввод); пока — только AgentConfig в админке.
 
-## 7. API админки (P7-02, P8-01b, P8-02a, P8-03a, P8-03b, P8-04a; ADR-0028, ADR-0036–0038)
+## 7. API админки (P7-02, P8-01b, P8-02a, P8-03a, P8-03b, P8-04a, P9-01af; ADR-0028, ADR-0036–0038, ADR-0045)
 
 ### Вход и сессия
 
@@ -480,6 +480,27 @@ agent_config_version, messages, preview, ratings {good, bad}}`: `messages` — �
 (`rated_by` — email на момент оценки), пустой комментарий хранится как null (ADR-0038).
 Диалог или сообщение другого тенанта (или сообщение из другого диалога) — 404 `not_found`.
 Ход по шагам — журнал ниже (`conversation_id`), ход ↔ ответ — `turn_finished.message_id`.
+
+### Заявки — роль `viewer`
+
+```
+GET /v1/admin/tenants/{tenant_id}/leads?before=…&limit=50&form_key=…&number=…
+  → 200 LeadList {leads: LeadSummary[], next_before}   # admin_leads.schema.json; limit ≤ 100
+  → 422 invalid_input — неверный курсор before, limit вне 1…100, number вне 1…2^31−1
+GET /v1/admin/tenants/{tenant_id}/leads.csv?from=…&to=…&form_key=…
+  → 200 text/csv (attachment leads.csv)
+  → 422 invalid_input — время без пояса, from ≥ to, больше 10 000 заявок
+```
+
+`LeadSummary {id, number, created_at, form_key, form_title, conversation_id, fields[]}`:
+`number` — номер заявки в тенанте, его бот называет клиенту (ADR-0045); `fields` —
+`{name, label, value}` в порядке формы, `label` — подпись на момент отправки (у заявок до
+ADR-0045 — `name`); `form_title` — null у старых заявок; `conversation_id` — null, если диалог
+удалён по сроку хранения (ADR-0043). Список от новых к старым, `next_before` — как у диалогов.
+CSV — для Excel: UTF-8 с BOM, `;`, CRLF; колонки «Номер», «Создана (UTC)», «Форма», «Диалог»,
+затем поля в порядке первого появления; дата — `YYYY-MM-DD HH:MM:SS` (UTC); значения с
+`= + - @`, табуляцией, CR или LF в начале — с апострофом (CSV-инъекция). `from` — включительно, `to` — не включая. Каждая выгрузка —
+лог `admin.leads_exported` без значений полей.
 
 ### Журнал хода — роль `viewer`
 

@@ -33,10 +33,21 @@ class Catalog(Protocol):
         ...
 
 
+class CreatedLead(Protocol):
+    """Созданная (или уже существовавшая) заявка: `number` — номер в тенанте (ADR-0045)."""
+
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def number(self) -> int: ...
+
+
 class LeadStore(Protocol):
-    """Заявки тенанта (leads `SqlLeadStore`). Возвращает id заявки. `idempotency_key` —
-    `confirm_id` подтверждения: повтор с тем же ключом в диалоге заявку не создаёт,
-    а возвращает id уже созданной."""
+    """Заявки тенанта (leads `SqlLeadStore`). `idempotency_key` — `confirm_id`
+    подтверждения: повтор с тем же ключом в диалоге заявку не создаёт, а возвращает уже
+    созданную. `form_title` и `field_labels` — заголовок формы и подписи полей на момент
+    отправки: заявка читается и после правки конфига (ADR-0045)."""
 
     async def create(
         self,
@@ -46,4 +57,6 @@ class LeadStore(Protocol):
         fields: Mapping[str, str],
         *,
         idempotency_key: str,
-    ) -> UUID: ...
+        form_title: str,
+        field_labels: Mapping[str, str],
+    ) -> CreatedLead: ...

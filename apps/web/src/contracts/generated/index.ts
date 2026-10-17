@@ -640,6 +640,42 @@ export interface AgentEventItem {
   ts: string;
 }
 /**
+ * Поле заявки. label — подпись поля на момент отправки; у заявок до ADR-0045 и неизвестных полей — name.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "LeadFieldValue".
+ */
+export interface LeadFieldValue {
+  name: string;
+  label: string;
+  value: string;
+}
+/**
+ * Заявка. number — номер в тенанте, его бот называет клиенту; form_title — заголовок формы на момент отправки (null у заявок до ADR-0045); conversation_id — null, если диалог удалён по сроку хранения (ADR-0043).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "LeadSummary".
+ */
+export interface LeadSummary {
+  id: string;
+  number: number;
+  created_at: string;
+  form_key: string;
+  form_title: string | null;
+  conversation_id: string | null;
+  fields: LeadFieldValue[];
+}
+/**
+ * Ответ GET /v1/admin/tenants/{tenant_id}/leads: от новых к старым. next_before — курсор следующей страницы (параметр before), null — страница последняя.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "LeadList".
+ */
+export interface LeadList {
+  leads: LeadSummary[];
+  next_before: string | null;
+}
+/**
  * Счётчики синхронизации. errors — ошибки отдельных элементов (не больше 20), синхронизация при них продолжается.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema

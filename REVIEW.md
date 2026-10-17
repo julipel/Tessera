@@ -199,18 +199,18 @@
 - [x] *(исправлено в P9-01l)* **L-2. PII может попасть в логи через параметры SQL.** `shared/infrastructure/db.py:45-52` — engine без `hide_parameters=True`; `tools/application/registry.py:203-212` пишет `logger.exception`. При ошибке БД (например, `\u0000` в поле → Postgres отклоняет JSONB) текст исключения с `[parameters: …]` — телефоном, e-mail, именем — уходит в лог (механизм штатный, сам сценарий не воспроизводился). *Исправление:* `hide_parameters=True`, отсекать управляющие символы в `form_values_problem`, тест «в логах нет значений fields».
 - [x] *(исправлено в P9-01t, ADR-0043)* **L-3. Нет срока хранения PII.** `infrastructure/models.py:13-25`, миграция 0008 — контакты лежат в JSONB бессрочно, удалить их можно только вручную (152-ФЗ / GDPR). *Исправление:* ADR и задача в roadmap — `retention_days` в конфиге тенанта, arq-задача на удаление или обезличивание.
 - [x] *(исправлено в P9-01t, ADR-0043)* **L-4. `ON DELETE CASCADE` от `conversations`.** `infrastructure/models.py:20-22`, миграция :40-45 — когда появится retention диалогов, заявки удалятся вместе с ними. *Исправление:* решить в ADR — `SET NULL` или отдельный срок хранения.
-- [ ] **L-5. Заявки нельзя прочитать.** Слои `application/` и `api/` пустые, `list_for_conversation` вызывается только в тестах; ни списка в админке, ни выгрузки, ни уведомлений. «Доставка заявок бизнесу» из ADR-0021 в roadmap не заведена. *Исправление:* задача `GET /v1/admin/tenants/{id}/leads` (+CSV/уведомление).
+- [x] *(исправлено в P9-01af, ADR-0045: API и CSV; экран — P9-01ag)* **L-5. Заявки нельзя прочитать.** Слои `application/` и `api/` пустые, `list_for_conversation` вызывается только в тестах; ни списка в админке, ни выгрузки, ни уведомлений. «Доставка заявок бизнесу» из ADR-0021 в roadmap не заведена. *Исправление:* задача `GET /v1/admin/tenants/{id}/leads` (+CSV/уведомление).
 - [x] *(исправлено в P9-01l)* **L-6. Сервер не проверяет phone/email и длину полей.** `tools/application/forms.py:60-62,100-114` — у полей только `minLength: 1`, формат проверяется лишь на клиенте; тест `test_forms_tools.py:56-58` пропускает `"@anna"` в поле `kind: phone`. *Исправление:* мягкая проверка формата и `maxLength` в схеме и в `form_values_problem`.
-- [ ] **L-7. Нет теста на `SqlLeadStore`.** `infrastructure/repositories.py:49-69` — в интеграционном тесте он подменён на `SessionLeads`; не проверено, что заявка переживает откат или прерывание хода.
+- [x] *(исправлено в P9-01af)* **L-7. Нет теста на `SqlLeadStore`.** `infrastructure/repositories.py:49-69` — в интеграционном тесте он подменён на `SessionLeads`; не проверено, что заявка переживает откат или прерывание хода.
 
 ### Мелочи
-- [ ] L-8. `infrastructure/models.py:20-22` — FK `conversation_id` не привязан к тенанту (составной FK `(conversation_id, tenant_id)`); в проекте так нигде не делают, необязательно.
-- [ ] L-9. Миграция 0008:48-50 — `ix_leads_tenant_id` лишний при `(tenant_id, created_at)`; `ix_leads_conversation_id` лучше заменить на `(tenant_id, conversation_id)`.
-- [ ] L-10. `infrastructure/repositories.py:44-46` — сортировка в Python; нужен `ORDER BY created_at, id` (id — для одинаковых `now()`).
+- [x] *(не исправляем, P9-01af: составных FK к тенанту в проекте нет, изоляцию дают репозитории)* L-8. `infrastructure/models.py:20-22` — FK `conversation_id` не привязан к тенанту (составной FK `(conversation_id, tenant_id)`); в проекте так нигде не делают, необязательно.
+- [x] *(P9-01af, миграция 0020)* L-9. Миграция 0008:48-50 — `ix_leads_tenant_id` лишний при `(tenant_id, created_at)`; `ix_leads_conversation_id` лучше заменить на `(tenant_id, conversation_id)`.
+- [x] *(P9-01af)* L-10. `infrastructure/repositories.py:44-46` — сортировка в Python; нужен `ORDER BY created_at, id` (id — для одинаковых `now()`).
 - [x] *(P9-01g)* L-11. `infrastructure/repositories.py:41` — `refresh` делает лишний SELECT только ради `created_at`.
-- [ ] L-12. `domain/lead.py:19` — frozen dataclass держит живой `dict` из ORM (`MappingProxyType`).
-- [ ] L-13. `chat/api/router.py:63` — аннотация `SqlLeadStore` вместо порта `LeadStore`; `public.py` экспортирует конкретные классы.
-- [ ] L-14. `tools/application/forms.py:69` — «номер заявки» — это 8 hex-символов UUID, по нему не найти заявку; если номер обещают клиенту, нужен счётчик на тенанта.
+- [x] *(P9-01af)* L-12. `domain/lead.py:19` — frozen dataclass держит живой `dict` из ORM (`MappingProxyType`).
+- [x] *(P9-01af: аннотация — порт; конкретные классы в public.py нужны сборщикам приложения)* L-13. `chat/api/router.py:63` — аннотация `SqlLeadStore` вместо порта `LeadStore`; `public.py` экспортирует конкретные классы.
+- [x] *(P9-01af, ADR-0045: счётчик на тенанта)* L-14. `tools/application/forms.py:69` — «номер заявки» — это 8 hex-символов UUID, по нему не найти заявку; если номер обещают клиенту, нужен счётчик на тенанта.
 
 ---
 

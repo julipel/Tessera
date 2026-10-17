@@ -1,7 +1,7 @@
 """Подключение агента к chat (P2-08): TurnRequest → TurnContext, история для модели, LLMClients."""
 
 from collections.abc import Mapping, MutableMapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -231,6 +231,12 @@ LEAD_CONFIG: dict[str, Any] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class Created:
+    id: UUID
+    number: int
+
+
 class RecordingLeads:
     def __init__(self) -> None:
         self.fields: list[dict[str, str]] = []
@@ -243,9 +249,11 @@ class RecordingLeads:
         fields: Mapping[str, str],
         *,
         idempotency_key: str,
-    ) -> UUID:
+        form_title: str,
+        field_labels: Mapping[str, str],
+    ) -> Created:
         self.fields.append(dict(fields))
-        return uuid4()
+        return Created(id=uuid4(), number=len(self.fields))
 
 
 def lead_request(user_input: dict[str, Any], state: dict[str, Any]) -> TurnRequest:

@@ -28,6 +28,7 @@ from app.contracts.generated.admin_conversations_schema import (
     ToolCallError,
 )
 from app.contracts.generated.admin_events_schema import AgentEventItem, AgentEventList
+from app.contracts.generated.admin_leads_schema import LeadFieldValue, LeadList, LeadSummary
 from app.contracts.generated.admin_sources_schema import (
     CreateSourceRequest,
     SourceDetail,
@@ -174,6 +175,9 @@ __all__ = [
     "HttpErrorBody",
     "HttpToolDefinition",
     "KnowledgeSearchConfig",
+    "LeadFieldValue",
+    "LeadList",
+    "LeadSummary",
     "MemoryConfig",
     "MessageBlock",
     "MessageHistory",

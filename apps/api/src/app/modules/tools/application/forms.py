@@ -98,15 +98,18 @@ def create_lead_tool(forms: Mapping[str, FormConfig], leads: LeadStore) -> ToolD
                     retryable=False,
                 )
             )
-        lead_id = await leads.create(
+        form = forms[arguments["form_key"]]
+        lead = await leads.create(
             ctx.tenant_id,
             ctx.conversation_id,
             arguments["form_key"],
             arguments["fields"],
             idempotency_key=ctx.confirm_id,
+            form_title=form.title,
+            field_labels={f.name: f.label for f in form.fields},
         )
         return ToolResult(
-            content=f"Заявка создана, номер {str(lead_id)[:8]}. Сообщи номер и что будет "
+            content=f"Заявка создана, номер {lead.number}. Сообщи номер и что будет "
             "дальше — по базе знаний, если там это описано; сроки не выдумывай."
         )
 

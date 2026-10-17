@@ -1,6 +1,7 @@
 """show_form и create_lead (P5-04a, ADR-0021): формы из конфига, заявка — после подтверждения."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -59,10 +60,17 @@ CTX = ToolContext(tenant_id=TenantId(uuid4()), conversation_id=uuid4(), turn_id=
 ANNA = {"name": "Анна", "contact": "@anna"}
 
 
+@dataclass(frozen=True, slots=True)
+class Created:
+    id: UUID
+    number: int
+
+
 class Leads:
     def __init__(self) -> None:
         self.created: list[tuple[TenantId, UUID, str, dict[str, str]]] = []
         self.keys: list[str] = []
+        self.labels: list[tuple[str, dict[str, str]]] = []
 
     async def create(
         self,
@@ -72,10 +80,13 @@ class Leads:
         fields: Mapping[str, str],
         *,
         idempotency_key: str,
-    ) -> UUID:
+        form_title: str,
+        field_labels: Mapping[str, str],
+    ) -> Created:
         self.created.append((tenant_id, conversation_id, form_key, dict(fields)))
         self.keys.append(idempotency_key)
-        return UUID("12345678-0000-0000-0000-000000000000")
+        self.labels.append((form_title, dict(field_labels)))
+        return Created(id=uuid4(), number=42)
 
 
 async def show(arguments: dict[str, Any]) -> ToolResult:
@@ -161,10 +172,14 @@ async def test_confirmed_create_lead_stores_lead_of_context_tenant() -> None:
     )
 
     assert isinstance(result.content, str)
-    assert result.content.startswith("Заявка создана, номер 12345678.")
+    assert result.content.startswith("Заявка создана, номер 42.")
     assert leads.created == [(CTX.tenant_id, CTX.conversation_id, "consultation", ANNA)]
     # Ключ идемпотентности — confirm_id подтверждения (id подтверждённого вызова).
     assert leads.keys == ["c1"]
+    # Заголовок и подписи — из формы конфига на момент отправки (ADR-0045), в порядке формы.
+    form = FORMS["consultation"]
+    assert leads.labels == [(form.title, {f.name: f.label for f in form.fields})]
+    assert list(leads.labels[0][1]) == [f.name for f in form.fields]
 
 
 async def test_create_lead_without_confirmation_does_not_store_lead() -> None:

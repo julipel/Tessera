@@ -55,3 +55,5 @@ HTTP-инструмент `HttpToolDefinition` для `check_stock`.
   `AdminLoginResponse` (токен сессии), `AdminMe`, `AdminMembership` (P8-01b, ADR-0036)
 - `admin_events.schema.json` — ответ `GET /v1/admin/tenants/{tenant_id}/events`: журнал событий
   хода (`AgentEventList`, `AgentEventItem`; P7-02, ADR-0028)
+- `admin_leads.schema.json` — заявки в админке: `LeadList`, `LeadSummary`, `LeadFieldValue`
+  (P9-01af, ADR-0045)

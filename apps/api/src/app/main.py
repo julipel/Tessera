@@ -33,6 +33,7 @@ from app.modules.knowledge.public import (
 )
 from app.modules.knowledge.public import admin_router as knowledge_admin_router
 from app.modules.leads.public import SqlLeadStore
+from app.modules.leads.public import admin_router as leads_admin_router
 from app.modules.observability.public import Tracer, admin_router, build_tracer
 from app.modules.shared.public import (
     BodySizeLimitMiddleware,
@@ -183,6 +184,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tenants_admin_router)
     app.include_router(knowledge_admin_router)
     app.include_router(chat_admin_router)
+    app.include_router(leads_admin_router)
     return app
 
 

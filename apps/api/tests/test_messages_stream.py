@@ -57,7 +57,7 @@ from app.modules.chat.infrastructure.repositories import (
     TenantsAgentConfigs,
     ToolCallRepository,
 )
-from app.modules.leads.public import LeadRepository
+from app.modules.leads.public import Lead, LeadRepository
 from app.modules.memory.public import DialogState
 from app.modules.shared.public import TenantId
 from app.modules.tenants.public import (
@@ -1275,11 +1275,18 @@ class SessionLeads:
         fields: Mapping[str, str],
         *,
         idempotency_key: str,
-    ) -> UUID:
-        lead = await self._repo.create(
-            tenant_id, conversation_id, form_key, fields, idempotency_key=idempotency_key
+        form_title: str,
+        field_labels: Mapping[str, str],
+    ) -> Lead:
+        return await self._repo.create(
+            tenant_id,
+            conversation_id,
+            form_key,
+            fields,
+            idempotency_key=idempotency_key,
+            form_title=form_title,
+            field_labels=field_labels,
         )
-        return lead.id
 
 
 async def _events(response: Response) -> list[dict[str, Any]]:

@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from app.modules.agent.domain.llm import (
     AssistantMessage,
     LLMClient,
+    LLMError,
     LLMMessage,
     LLMRequest,
     ResponseCompleted,
@@ -57,7 +58,8 @@ class HistorySummarizer:
         async for chunk in self._llm.stream(request):
             if isinstance(chunk, ResponseCompleted):
                 return chunk.response.text.strip() or None
-        raise RuntimeError("LLMClient: стрим завершился без ResponseCompleted")
+        # Нарушение контракта клиента — как обрыв стрима: retryable (REVIEW.md: AG-13).
+        raise LLMError("LLMClient: стрим завершился без ResponseCompleted", retryable=True)
 
 
 def _input(previous: str | None, messages: Sequence[LLMMessage]) -> str:

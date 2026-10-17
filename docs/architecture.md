@@ -527,6 +527,8 @@ AdminSession(id, user_id, token_hash, expires_at, created_at)  # без tenant_i
 |---|---|
 | Таймаут / 5xx / 429 LLM | ретрай с backoff → резервная модель → `error` с `retryable: true` |
 | Обрыв стрима модели (транспортная ошибка, нет финального события) | `LLMError` (retryable), а не оборванный ответ: до первого куска — ретрай → резервная модель; после — `error` `llm_unavailable` (`retryable: true`), показанное сохраняется в ответе `failed` |
+| Постоянная ошибка в стриме Responses API (`invalid_*`, `context_length_exceeded`) | `LLMError` без повтора и без резервной модели — как HTTP 400 у Chat Completions; окно резервной модели может быть больше, но переполнение контекста лечится сводкой истории, а не другой моделью |
+| Стрим адаптера без `ResponseCompleted` (нарушение контракта клиента) | лог `agent.llm_contract_violation`, клиенту — `llm_unavailable` (`retryable: true`); FallbackLLM это не повторяет |
 | Обрыв стрима у клиента | ход отменяется, частичный ответ сохраняется `interrupted` |
 | Агент не остановился за 5 с после отмены | лог `turn_agent_not_stopped`, ответ всё равно `interrupted`; диалог занят, пока задача агента не завершится или не истечёт срок занятости (ADR-0041) |
 | Сбой записи ответа (таймаут пула и т.п.) | rollback, ответ записывается `failed` с `internal`; стрим заканчивается `error` + `done`; запись — под щитом от обрыва соединения |

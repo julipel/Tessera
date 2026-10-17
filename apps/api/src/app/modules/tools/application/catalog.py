@@ -24,6 +24,7 @@ from app.modules.knowledge.kernel import (
     CatalogQuery,
     CatalogSort,
 )
+from app.modules.tools.application.numbers import plain_number
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition, ToolHandler
 from app.modules.tools.domain.ports import Catalog
 from app.modules.tools.domain.result import ToolError, ToolResult
@@ -39,7 +40,7 @@ _SEARCH_DESCRIPTION = (
     "Найди товары и услуги в каталоге компании. Используй для подбора, проверки наличия, "
     "цен и характеристик — не выдумывай товары, которых нет в выдаче. Сужай выдачу "
     "фильтрами (цена, наличие, категория, атрибуты), а query — для слов из названия или "
-    "описания («крем для сухой кожи»). Если ничего не нашлось — ослабь фильтры. Отвечай "
+    "описания (что ищет клиент, своими словами). Если ничего не нашлось — ослабь фильтры. Отвечай "
     "только по найденным позициям; id из выдачи передавай в другие инструменты."
 )
 _GET_DESCRIPTION = (
@@ -222,7 +223,7 @@ def _entity_content(entity: CatalogEntity, *, full: bool = False) -> dict[str, A
     if full:
         content["type"] = entity.type
     if entity.price is not None:
-        content["price"] = _number(entity.price)
+        content["price"] = plain_number(entity.price)
         if entity.currency:
             content["currency"] = entity.currency
     if entity.in_stock is not None:
@@ -236,10 +237,6 @@ def _entity_content(entity: CatalogEntity, *, full: bool = False) -> dict[str, A
     if entity.attributes:
         content["attributes"] = dict(entity.attributes)
     return content
-
-
-def _number(value: Decimal) -> int | float:
-    return int(value) if value == value.to_integral_value() else float(value)
 
 
 def _not_found(raw: str) -> ToolResult:

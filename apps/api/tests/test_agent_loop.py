@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import Callable, MutableMapping, Sequence
+from collections.abc import AsyncIterator, Callable, MutableMapping, Sequence
 from typing import Any
 from uuid import uuid4
 
@@ -19,9 +19,12 @@ from app.modules.agent.public import (
     FakeLLM,
     FakeReply,
     FinishReason,
+    LLMChunk,
+    LLMError,
     LLMRequest,
     StopReason,
     SuggestionsOffered,
+    TextDelta,
     ToolCall,
     ToolExecutor,
     ToolFinished,
@@ -342,6 +345,84 @@ async def test_unparseable_arguments_are_rejected_without_executor() -> None:
     assert error.tool_call_id == "call_1"
     assert error.is_error is True
     assert completed(events).finish is FinishReason.ANSWERED
+
+
+async def test_long_unparseable_arguments_are_clipped_for_model_and_record() -> None:
+    # Мусор вместо JSON не уходит модели и в журнал целиком (REVIEW.md: AG-11).
+    raw = "{" + "x" * 5000
+    broken = call("call_1", raw=raw)
+    llm = FakeLLM([FakeReply(tool_calls=(broken,)), FakeReply(text="Уточните запрос.")])
+
+    events = await run(llm, FakeTools())
+
+    [finished] = [e for e in events if isinstance(e, ToolFinished)]
+    assert isinstance(finished.arguments, str)
+    assert finished.arguments == raw[:500] + "…(обрезано, 5001 символов)"
+    [error] = tool_results(llm.requests[1])
+    assert len(error.content) < 700
+    assert "обрезано, 5001 символов" in error.content
+    # И в ответе шага, который уходит модели на следующем шаге.
+    [assistant] = [m for m in llm.requests[1].messages if isinstance(m, AssistantMessage)]
+    assert assistant.tool_calls[0].raw_arguments == finished.arguments
+
+
+class ConfirmingTools(FakeTools):
+    """Каждый вызов — запрос подтверждения (как create_lead до подтверждения)."""
+
+    async def execute_many(self, calls: Sequence[ToolCall], ctx: TurnContext) -> list[ToolResult]:
+        self.batches.append(tuple(calls))
+        return [
+            ToolResult(
+                content="Показано подтверждение.",
+                components=({"type": "confirm", "confirm_id": f"cf_{c.id}"},),
+                state_patch={
+                    "pending_confirmation": {
+                        "confirm_id": f"cf_{c.id}",
+                        "tool": "create_lead",
+                        "arguments": {},
+                        "created_at": "2026-10-17T10:00:00+00:00",
+                    }
+                },
+            )
+            for c in calls
+        ]
+
+
+async def test_second_confirmation_in_turn_is_rejected() -> None:
+    # Подтверждение на втором шаге хода не заменяет первое (REVIEW.md: AG-12).
+    llm = FakeLLM(
+        [
+            FakeReply(tool_calls=(call("call_1"),)),
+            FakeReply(tool_calls=(call("call_2"),)),
+            FakeReply(text="Подтвердите заявку."),
+        ]
+    )
+
+    events = await run(llm, ConfirmingTools())
+
+    confirms = [e for e in events if isinstance(e, ComponentEmitted)]
+    assert [c.component["confirm_id"] for c in confirms] == ["cf_call_1"]
+    [updated] = [e for e in events if isinstance(e, DialogStateUpdated)]
+    assert updated.state.pending_confirmation is not None
+    assert updated.state.pending_confirmation.confirm_id == "cf_call_1"
+    second = next(e for e in events if isinstance(e, ToolFinished) and e.tool_call_id == "call_2")
+    assert (second.ok, second.error_code) == (False, "forbidden")
+    assert completed(events).finish is FinishReason.ANSWERED
+
+
+class NoCompletionLLM:
+    """Стрим отдаёт текст и заканчивается без ResponseCompleted — нарушение контракта."""
+
+    async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+        yield TextDelta("Нач")
+
+
+async def test_stream_without_completion_is_retryable_llm_error() -> None:
+    # Как обрыв стрима: клиенту «Повторить», а не internal без повтора (REVIEW.md: AG-13).
+    with pytest.raises(LLMError) as raised:
+        await run(NoCompletionLLM(), FakeTools())  # type: ignore[arg-type]
+
+    assert raised.value.retryable is True
 
 
 async def test_tool_retries_exhausted_ends_with_fallback() -> None:

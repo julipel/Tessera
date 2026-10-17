@@ -39,6 +39,10 @@ from app.modules.tools.domain.result import ToolError, ToolResult
 logger = structlog.get_logger(__name__)
 
 UPDATE_DIALOG_STATE = "update_dialog_state"
+# Факты уходят в промпт каждого хода — короткие и не больше, чем хранит состояние
+# (memory: MAX_FACTS; REVIEW.md: TO-8).
+MAX_FACTS_PER_CALL = 20
+MAX_FACT_CHARS = 300
 
 _DESCRIPTION = (
     "Запиши, что пользователь сообщил о своём запросе: значения слотов сценария и важные "
@@ -133,12 +137,14 @@ def update_dialog_state_tool(scenarios: Iterable[ScenarioConfig]) -> ToolDefinit
         "slots": {"type": "object", "properties": slots, "additionalProperties": False},
         "facts": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1},
+            "items": {"type": "string", "minLength": 1, "maxLength": MAX_FACT_CHARS},
+            "maxItems": MAX_FACTS_PER_CALL,
             "description": _FACTS_DESCRIPTION,
         },
         "forget_facts": {
             "type": "array",
-            "items": {"type": "string", "minLength": 1},
+            "items": {"type": "string", "minLength": 1, "maxLength": MAX_FACT_CHARS},
+            "maxItems": MAX_FACTS_PER_CALL,
             "description": _FORGET_FACTS_DESCRIPTION,
         },
     }

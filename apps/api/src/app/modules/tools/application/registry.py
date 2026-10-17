@@ -89,10 +89,23 @@ class ToolRegistry:
     async def execute_many(
         self, invocations: Sequence[ToolInvocation], ctx: ToolContext
     ) -> list[ToolResult]:
-        """Параллельно; результаты в порядке `invocations`. Отмена отменяет все вызовы."""
+        """Параллельно; результаты в порядке `invocations`. Отмена отменяет все вызовы.
+
+        Подтверждение за шаг — одно (REVIEW.md: AG-12): ожидание в состоянии одно, и кнопка
+        первого стала бы «устаревшей». Действует первый запрос, следующие — `forbidden` без
+        компонента (не ошибка аргументов, ретраи хода на них не тратятся); их обработчики до
+        подтверждения и так не исполнялись. Между шагами хода то же правило — в цикле агента."""
         async with asyncio.TaskGroup() as group:
             tasks = [group.create_task(self._execute(inv, ctx)) for inv in invocations]
-        return [task.result() for task in tasks]
+        results = [task.result() for task in tasks]
+        asked = False
+        for i, (invocation, result) in enumerate(zip(invocations, results, strict=True)):
+            if not asks_confirmation(result):
+                continue
+            if asked:
+                results[i] = confirmation_already_asked(invocation.name)
+            asked = True
+        return results
 
     async def execute_confirmed(self, invocation: ToolInvocation, ctx: ToolContext) -> ToolResult:
         """Исполнить вызов, который пользователь подтвердил: без повторного запроса
@@ -218,6 +231,20 @@ class ToolRegistry:
                 }
             },
         )
+
+
+def asks_confirmation(result: ToolResult) -> bool:
+    """Результат — запрос подтверждения (ожидание в `state_patch`)."""
+    return result.ok and (result.state_patch or {}).get("pending_confirmation") is not None
+
+
+def confirmation_already_asked(tool: str) -> ToolResult:
+    """Отказ второму подтверждению за шаг или ход (REVIEW.md: AG-12, дополнение ADR-0021)."""
+    return _failure(
+        "forbidden",
+        f"{tool}: пользователю уже показано подтверждение другого действия; предложи это "
+        "действие после его ответа",
+    )
 
 
 def _with_security_note(content: str | dict[str, Any]) -> str | dict[str, Any]:

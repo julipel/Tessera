@@ -20,7 +20,11 @@ from app.modules.tools.application.forms import (
 )
 from app.modules.tools.application.knowledge import SEARCH_KNOWLEDGE, search_knowledge_tool
 from app.modules.tools.application.labels import confirm_labels
-from app.modules.tools.application.registry import ToolRegistry
+from app.modules.tools.application.registry import (
+    ToolRegistry,
+    asks_confirmation,
+    confirmation_already_asked,
+)
 from app.modules.tools.application.show_entities import SHOW_ENTITIES, show_entities_tool
 from app.modules.tools.application.suggest_replies import SUGGEST_REPLIES, suggest_replies_tool
 from app.modules.tools.domain.definition import (
@@ -61,8 +65,10 @@ __all__ = [
     "ToolInvocation",
     "ToolRegistry",
     "ToolResult",
+    "asks_confirmation",
     "builtin_tools",
     "confirm_labels",
+    "confirmation_already_asked",
     "create_lead_tool",
     "form_values_problem",
     "get_entity_tool",

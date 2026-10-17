@@ -34,8 +34,15 @@ _PATTERNS = tuple(
         r"\b(нов\w*\s+инструкц\w*|new\s+instructions?)\s*:",
         # раскрытие системного промпта
         r"\b(системн\w*\s+(промпт\w*|инструкц\w*)|system\s+prompt)\b",
-        r"\b(раскрой|покажи|выведи|повтори|reveal|print|show|repeat)\s+(свои\s+|свой\s+|все\s+|"
-        r"your\s+|the\s+)?(инструкц\w*|промпт\w*|instructions|prompt)\b",
+        # «раскрой/reveal» и «промпт/prompt» — с любым словом; инструкции у «покажи/show…» —
+        # только с притяжательным: «show instructions» бывает и в описании товара (TO-9)
+        r"\b(раскрой|reveal)\s+(me\s+|мне\s+)?(свои\s+|свой\s+|все\s+|your\s+|the\s+)?"
+        r"(инструкц\w*|промпт\w*|instructions|prompt)\b",
+        r"\b(покажи|выведи|повтори|print|show|repeat)\s+(me\s+|мне\s+)?(\w+\s+)?"
+        r"(промпт\w*|prompt)\b",
+        r"\b(покажи|выведи|повтори|print|show|repeat)\s+(me\s+|мне\s+)?(все\s+|all\s+)?"
+        r"(свои|свой|свою|своё|свое|твои|твой|твою|your)\s+(все\s+|all\s+)?"
+        r"(инструкц\w*|instructions)\b",
         # поддельная разметка ролей и служебные токены
         r"^\s*(system|assistant|developer)\s*:",
         r"<\|im_(start|end)\|>|</?(system|tool_result|instructions?)>",
@@ -69,7 +76,9 @@ def _strings(content: Any) -> Iterator[str]:
     if isinstance(content, str):
         yield content
     elif isinstance(content, dict):
-        for value in content.values():
+        # Ключи — тоже данные: у `attributes` каталога их задаёт тенант (REVIEW.md: TO-9).
+        for key, value in content.items():
+            yield from _strings(key)
             yield from _strings(value)
     elif isinstance(content, list | tuple):
         for item in content:

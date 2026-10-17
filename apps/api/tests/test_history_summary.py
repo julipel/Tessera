@@ -22,7 +22,9 @@ from app.modules.agent.public import (
     FakeLLM,
     FakeReply,
     HistorySummarizer,
+    LLMChunk,
     LLMError,
+    LLMRequest,
     Provider,
     RegistryToolExecutor,
     UserMessage,
@@ -183,6 +185,20 @@ async def test_summarizer_returns_none_for_empty_text() -> None:
 
     assert await HistorySummarizer(llm).summarize("m", None, (UserMessage("Привет"),)) is None
     assert "<summary>" not in llm.requests[0].messages[0].text  # type: ignore[union-attr]
+
+
+class _NoCompletionLLM:
+    async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+        return
+        yield
+
+
+async def test_summarizer_stream_without_completion_is_retryable_llm_error() -> None:
+    # Нарушение контракта клиента — retryable LLMError, а не RuntimeError (REVIEW.md: AG-13).
+    with pytest.raises(LLMError) as raised:
+        await HistorySummarizer(_NoCompletionLLM()).summarize("m", None, (UserMessage("Привет"),))
+
+    assert raised.value.retryable is True
 
 
 def _message(role: MessageRole, content: str) -> ChatMessage:

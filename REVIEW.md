@@ -117,11 +117,11 @@
 
 ### Мелочи
 - [x] *(исправлено в P9-01s: лог agent.output_truncated)* AG-9. `loop.py:102-104` — `StopReason.MAX_TOKENS` игнорируется: обрезанный ответ становится `ANSWERED` без лога.
-- [ ] AG-10. `openai_responses_llm.py:222-227` — `response.failed`/`error` всегда retryable; постоянные коды (`invalid_prompt`, переполнение контекста) дают лишние попытки и fallback.
-- [ ] AG-11. `loop.py:226-227` — `raw_arguments` неразобранного вызова целиком уходит модели и в БД (обрезать до ~500 символов).
-- [ ] AG-12. `loop.py:115-118` — два вызова с подтверждением в одном шаге: действует последний, кнопка первого всегда «устарело» (отклонять второй). (Связано с TO-12.)
-- [ ] AG-13. `loop.py:89`, `summarizer.py:60` — стрим без `ResponseCompleted` даёт `RuntimeError` (`internal_error` без повтора) вместо `LLMError(retryable=True)`.
-- [ ] AG-14. `openai_llm.py:217-221` — имя инструмента склеивается через `+=`, вызов без `id` не анонсируется: на совместимых API получится «searchsearch» или `tool_call_id=""` (не подтверждено).
+- [x] *(исправлено в P9-01ai: `invalid_*` и `context_length_exceeded` не повторяются)* AG-10. `openai_responses_llm.py:222-227` — `response.failed`/`error` всегда retryable; постоянные коды (`invalid_prompt`, переполнение контекста) дают лишние попытки и fallback.
+- [x] *(исправлено в P9-01ai: до 500 символов — в tool_result, журнале и ответе шага для модели)* AG-11. `loop.py:226-227` — `raw_arguments` неразобранного вызова целиком уходит модели и в БД (обрезать до ~500 символов).
+- [x] *(исправлено в P9-01ai: одно подтверждение за ход, следующие — `forbidden`; дополнение ADR-0021)* AG-12. `loop.py:115-118` — два вызова с подтверждением в одном шаге: действует последний, кнопка первого всегда «устарело» (отклонять второй). (Связано с TO-12.)
+- [x] *(исправлено в P9-01ai)* AG-13. `loop.py:89`, `summarizer.py:60` — стрим без `ResponseCompleted` даёт `RuntimeError` (`internal_error` без повтора) вместо `LLMError(retryable=True)`.
+- [x] *(исправлено в P9-01ai: имя — из первого фрагмента, без id — `call_<index>`)* AG-14. `openai_llm.py:217-221` — имя инструмента склеивается через `+=`, вызов без `id` не анонсируется: на совместимых API получится «searchsearch» или `tool_call_id=""` (не подтверждено).
 
 ---
 
@@ -142,13 +142,13 @@
 - [x] *(параметры скрыты в P9-01l: `hide_parameters=True`)* **TO-5. В лог пишется текст `SQLAlchemyError` с SQL и параметрами.** `application/catalog.py:262`, `application/show_entities.py:278` — `error=str(error)`; без `hide_parameters` (см. L-2) в лог попадает `query` с формулировкой пользователя. *Исправление:* логировать тип ошибки или включить `hide_parameters=True`.
 
 ### Мелочи
-- [ ] TO-6. `application/catalog.py:42` — пример «крем для сухой кожи» в описании инструмента ядра уходит в промпт всех тенантов, включая garden.
-- [ ] TO-7. `application/knowledge.py:48-62` и `docs/contracts.md` §4: в контракте у `search_knowledge` есть `filters?`, в схеме — нет.
-- [ ] TO-8. `application/builtin.py:134-143` — у `facts`/`forget_facts` нет `maxLength`, у `facts` нет `maxItems`: раздутый факт уходит в промпт каждого хода.
-- [ ] TO-9. `domain/injection.py:71-73` — сканируются значения, но не ключи (ключи `attributes` каталога — данные тенанта); шаблон на строке 37 (`print … instructions`) даст ложные срабатывания — проверить на корпусе пилота.
-- [ ] TO-10. `_number` продублирован в `catalog.py:241` и `show_entities.py:245`.
+- [x] *(исправлено в P9-01ai)* TO-6. `application/catalog.py:42` — пример «крем для сухой кожи» в описании инструмента ядра уходит в промпт всех тенантов, включая garden.
+- [x] *(исправлено в P9-01ai: `filters?` убран из contracts.md)* TO-7. `application/knowledge.py:48-62` и `docs/contracts.md` §4: в контракте у `search_knowledge` есть `filters?`, в схеме — нет.
+- [x] *(исправлено в P9-01ai: `maxItems` 20, `maxLength` 300)* TO-8. `application/builtin.py:134-143` — у `facts`/`forget_facts` нет `maxLength`, у `facts` нет `maxItems`: раздутый факт уходит в промпт каждого хода.
+- [x] *(исправлено в P9-01ai: ключи сканируются; «покажи/show…» — только со «свои/your»; на корпусе пилота 0 срабатываний)* TO-9. `domain/injection.py:71-73` — сканируются значения, но не ключи (ключи `attributes` каталога — данные тенанта); шаблон на строке 37 (`print … instructions`) даст ложные срабатывания — проверить на корпусе пилота.
+- [x] *(исправлено в P9-01ai: `tools/application/numbers.py`)* TO-10. `_number` продублирован в `catalog.py:241` и `show_entities.py:245`.
 - [x] *(исправлено в P9-01y)* TO-11. `application/registry.py:98-105` — в логе `tool.injection_suspected` нет `turn_id`.
-- [ ] TO-12. Тесты: сбой `LeadStore.create` и двойной `create_lead` в одном шаге (замена `pending_confirmation`) не покрыты.
+- [x] *(исправлено в P9-01ai)* TO-12. Тесты: сбой `LeadStore.create` и двойной `create_lead` в одном шаге (замена `pending_confirmation`) не покрыты.
 
 ---
 

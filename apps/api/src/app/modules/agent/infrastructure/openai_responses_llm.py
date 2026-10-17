@@ -10,9 +10,11 @@
 `response.output_item.added` с function_call → ранний ToolCallStarted; готовые элементы
 (аргументы вызова, reasoning целиком) — из `response.output_item.done`; usage — из
 `response.completed`/`response.incomplete` (лимит токенов → MAX_TOKENS); `response.failed` и
-событие `error` → LLMError. Стрим без `response.completed`/`response.incomplete` (соединение
-закрыто раньше) — retryable LLMError; вызов без `output_item.done` получает `arguments=None`
-(цикл вернёт модели ошибку разбора, а не выполнит инструмент с пустыми аргументами).
+событие `error` → LLMError: повторяемая, кроме постоянных кодов (`invalid_*`,
+`context_length_exceeded`) — их повтор и резервная модель не исправят. Стрим без
+`response.completed`/`response.incomplete` (соединение закрыто раньше) — retryable LLMError;
+вызов без `output_item.done` получает `arguments=None` (цикл вернёт модели ошибку разбора,
+а не выполнит инструмент с пустыми аргументами).
 
 Передаваемые параметры (ADR-0009): `instructions`, `input`, `tools`, `max_output_tokens`,
 `temperature`, если задана. Temperature отбрасывается адаптивно, как в OpenAILLM: на 400 с
@@ -229,11 +231,15 @@ class _StreamAccumulator:
                 error = response.error
                 message = f"{error.code}: {error.message}" if error else "unknown"
                 raise LLMError(
-                    f"OpenAI: ответ не получен: {message}", retryable=True, usage=self._usage
+                    f"OpenAI: ответ не получен: {message}",
+                    retryable=_retryable(error.code if error else None),
+                    usage=self._usage,
                 )
             case ResponseErrorEvent(code=code, message=message):
                 raise LLMError(
-                    f"OpenAI: ошибка стрима: {code}: {message}", retryable=True, usage=self._usage
+                    f"OpenAI: ошибка стрима: {code}: {message}",
+                    retryable=_retryable(code),
+                    usage=self._usage,
                 )
         return []
 
@@ -280,3 +286,11 @@ class _StreamAccumulator:
                 item for _, item in sorted(self._provider_items, key=lambda pair: pair[0])
             ),
         )
+
+
+def _retryable(code: str | None) -> bool:
+    """Код ошибки `response.failed`/`error`: постоянный (неверен сам запрос) не повторяется
+    (REVIEW.md: AG-10); неизвестный и пустой — повторяется, как сбой сервера."""
+    if code is None:
+        return True
+    return not (code.startswith("invalid_") or code == "context_length_exceeded")

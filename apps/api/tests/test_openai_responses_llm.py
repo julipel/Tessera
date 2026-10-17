@@ -373,6 +373,37 @@ async def test_failure_mid_stream_is_retryable_and_skips_completion(event: dict[
     assert raised.value.usage is None
 
 
+@pytest.mark.parametrize(
+    ("code", "retryable"),
+    [
+        ("invalid_prompt", False),
+        ("invalid_image_format", False),
+        ("context_length_exceeded", False),
+        ("rate_limit_exceeded", True),
+        ("vector_store_timeout", True),
+        ("something_new", True),
+    ],
+)
+@pytest.mark.parametrize("kind", ["failed", "error"])
+async def test_permanent_failure_codes_are_not_retried(
+    code: str, retryable: bool, kind: str
+) -> None:
+    # Постоянный код: повтор и резервная модель не помогут (REVIEW.md: AG-10).
+    event: dict[str, Any] = (
+        {
+            "type": "response.failed",
+            "response": response("failed", error={"code": code, "message": "x"}),
+        }
+        if kind == "failed"
+        else {"type": "error", "code": code, "message": "x", "param": None}
+    )
+
+    with pytest.raises(LLMError) as raised:
+        await collect(llm_for(Server(sse(event))))
+
+    assert raised.value.retryable is retryable
+
+
 async def test_failed_response_usage_attached_to_error() -> None:
     failed = response(
         "failed",

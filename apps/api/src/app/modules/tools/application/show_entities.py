@@ -29,6 +29,7 @@ from app.contracts import (
 )
 from app.modules.knowledge.kernel import CatalogEntity, CatalogError
 from app.modules.tools.application.labels import CatalogTexts, catalog_texts
+from app.modules.tools.application.numbers import plain_number
 from app.modules.tools.domain.definition import ToolContext, ToolDefinition, ToolHandler
 from app.modules.tools.domain.ports import Catalog
 from app.modules.tools.domain.result import ToolError, ToolResult
@@ -167,7 +168,7 @@ def product_card(
     texts = texts or catalog_texts("ru")
     price = None
     if entity.price is not None and entity.currency:
-        price = Price(amount=_number(entity.price), currency=entity.currency)
+        price = Price(amount=plain_number(entity.price), currency=entity.currency)
     return ProductCard(
         type="product_card",
         entity_id=str(entity.id),
@@ -242,13 +243,9 @@ def _value_text(value: Any, texts: CatalogTexts) -> str | None:
     return str(value)
 
 
-def _number(value: Decimal) -> int | float:
-    return int(value) if value == value.to_integral_value() else float(value)
-
-
 def _number_text(value: Decimal, *, money: bool = False) -> str:
     # Разряды через неразрывный пробел: 12990 → «12\u00a0990»; копейки — два знака.
-    number = _number(value)
+    number = plain_number(value)
     spec = ",.2f" if money and isinstance(number, float) else ","
     return format(number, spec).replace(",", "\u00a0")
 

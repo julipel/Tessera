@@ -7,7 +7,9 @@ from uuid import uuid4
 import pytest
 
 from app.contracts import AgentConfig, ScenarioConfig
+from app.modules.memory.public import MAX_FACTS
 from app.modules.shared.kernel import TenantId
+from app.modules.tools.application.builtin import MAX_FACT_CHARS, MAX_FACTS_PER_CALL
 from app.modules.tools.public import (
     SUGGEST_REPLIES,
     UPDATE_DIALOG_STATE,
@@ -54,6 +56,10 @@ SCENARIOS = [
         }
     ),
 ]
+
+
+def test_fact_limit_matches_dialog_state() -> None:
+    assert MAX_FACTS_PER_CALL == MAX_FACTS
 
 
 async def execute(
@@ -197,6 +203,10 @@ async def test_facts_with_contacts_are_not_written() -> None:
         {"slots": {"is_surprise": "да"}},  # неверный тип
         {"facts": [""]},
         {"forget_facts": [""]},
+        # раздутый факт или их число сверх хранимого (REVIEW.md: TO-8)
+        {"facts": ["х" * (MAX_FACT_CHARS + 1)]},
+        {"facts": [f"факт {i}" for i in range(MAX_FACTS_PER_CALL + 1)]},
+        {"forget_facts": ["х" * (MAX_FACT_CHARS + 1)]},
         {"scenario": "support"},  # сценария нет в конфиге
         {"active_scenario": "gift"},  # сценарий выбирается аргументом scenario
     ],

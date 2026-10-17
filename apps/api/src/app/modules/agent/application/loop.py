@@ -20,7 +20,9 @@ from app.modules.agent.domain.events import (
     TurnCompleted,
 )
 from app.modules.agent.domain.llm import (
+    AssistantMessage,
     LLMClient,
+    LLMError,
     LLMMessage,
     LLMRequest,
     LLMResponse,
@@ -35,8 +37,15 @@ from app.modules.agent.domain.llm import (
 )
 from app.modules.agent.domain.turn import ToolExecutor, TurnContext, TurnTimeoutError
 from app.modules.memory.kernel import DialogState
-from app.modules.tools.public import ToolError, ToolResult
+from app.modules.tools.public import (
+    ToolError,
+    ToolResult,
+    asks_confirmation,
+    confirmation_already_asked,
+)
 
+# Сколько символов неразобранных аргументов вызова уходит модели и в журнал (AG-11).
+RAW_ARGUMENTS_CHARS = 500
 logger = structlog.get_logger(__name__)
 
 
@@ -67,6 +76,7 @@ class AgentLoop:
             messages = _with_note(messages, outcome.note)
         retries = 0
         empty_retried = False
+        confirmation_asked = False
         steps = 0
         finish = FinishReason.STEP_LIMIT
 
@@ -94,7 +104,17 @@ class AgentLoop:
                     case ResponseCompleted(response=completed):
                         response = completed
             if response is None:
-                raise RuntimeError("LLMClient: стрим завершился без ResponseCompleted")
+                # Нарушение контракта клиента (ошибка адаптера, не провайдера): в лог
+                # отдельно, клиенту — «Повторить» вместо internal (REVIEW.md: AG-13).
+                # FallbackLLM это не повторяет: для него стрим закончился штатно.
+                logger.error(
+                    "agent.llm_contract_violation",
+                    tenant_id=str(ctx.tenant_id),
+                    conversation_id=str(ctx.conversation_id),
+                    turn_id=str(ctx.turn_id),
+                    step=steps,
+                )
+                raise LLMError("LLMClient: стрим завершился без ResponseCompleted", retryable=True)
             usage = _add(usage, response.usage)
             if response.stop_reason is StopReason.MAX_TOKENS:
                 # Текст шага уже у клиента — ответ не отзываем, только отмечаем обрезку.
@@ -161,6 +181,13 @@ class AgentLoop:
                 ctx,
             )
             results = [*executed, *(_over_limit(c, limit) for c in response.tool_calls[limit:])]
+            # Одно подтверждение за ход (REVIEW.md: AG-12): ожидание в состоянии одно, и
+            # кнопка подтверждения прошлого шага стала бы «устаревшей».
+            for i, (call, result) in enumerate(zip(response.tool_calls, results, strict=True)):
+                if asks_confirmation(result):
+                    if confirmation_asked:
+                        results[i] = confirmation_already_asked(call.name)
+                    confirmation_asked = True
             batch_ms = round((time.perf_counter() - started) * 1000)
             for call, result in zip(response.tool_calls, results, strict=True):
                 for event in _reported(call, result, batch_ms):
@@ -173,7 +200,7 @@ class AgentLoop:
                 yield DialogStateUpdated(state)
             messages = (
                 *messages,
-                response.as_message(),
+                _clipped_message(response),
                 *(_as_message(c, r) for c, r in zip(response.tool_calls, results, strict=True)),
             )
 
@@ -303,7 +330,7 @@ def _reported(call: ToolCall, result: ToolResult, duration_ms: int) -> Iterator[
         name=call.name,
         ok=result.ok,
         error_code=result.error.code if result.error else None,
-        arguments=call.raw_arguments if call.arguments is None else call.arguments,
+        arguments=_clipped(call.raw_arguments) if call.arguments is None else call.arguments,
         content=result.content,
         error_message=result.error.message if result.error else None,
         duration_ms=duration_ms if call.arguments is not None else 0,
@@ -314,12 +341,31 @@ def _reported(call: ToolCall, result: ToolResult, duration_ms: int) -> Iterator[
         yield SuggestionsOffered(result.suggestions)
 
 
+def _clipped_message(response: LLMResponse) -> AssistantMessage:
+    """Ответ шага для следующих шагов: неразобранные аргументы — обрезанными (AG-11)."""
+    message = response.as_message()
+    if all(c.arguments is not None for c in message.tool_calls):
+        return message
+    calls = tuple(
+        c if c.arguments is not None else replace(c, raw_arguments=_clipped(c.raw_arguments))
+        for c in message.tool_calls
+    )
+    return replace(message, tool_calls=calls)
+
+
+def _clipped(raw: str) -> str:
+    """Неразобранные аргументы для модели и БД — не длиннее RAW_ARGUMENTS_CHARS (AG-11)."""
+    if len(raw) <= RAW_ARGUMENTS_CHARS:
+        return raw
+    return f"{raw[:RAW_ARGUMENTS_CHARS]}…(обрезано, {len(raw)} символов)"
+
+
 def _unparseable(call: ToolCall) -> ToolResult:
     return ToolResult(
         error=ToolError(
             code="validation_error",
             message=f"{call.name}: аргументы должны быть JSON-объектом, получено: "
-            f"{call.raw_arguments!r}",
+            f"{_clipped(call.raw_arguments)!r}",
             retryable=False,
         )
     )

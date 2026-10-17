@@ -266,6 +266,38 @@ async def test_parallel_tool_calls_assembled_from_fragments() -> None:
     )
 
 
+async def test_compatible_api_repeating_name_and_omitting_id() -> None:
+    # Имя в каждом фрагменте и вызов без id (REVIEW.md: AG-14): имя не склеивается,
+    # id подставляется, анонс — до ResponseCompleted.
+    server = Server(
+        sse(
+            chunk(tool_fragment(0, name="search", arguments='{"q"')),
+            chunk(tool_fragment(0, name="search", arguments=": 1}")),
+            chunk({}, finish="tool_calls"),
+        )
+    )
+
+    chunks = await collect(llm_for(server))
+
+    assert chunks[:-1] == [ToolCallStarted(id="call_0", name="search")]
+    assert completed(chunks).response.tool_calls == (
+        ToolCall(id="call_0", name="search", arguments={"q": 1}, raw_arguments='{"q": 1}'),
+    )
+
+
+async def test_call_without_id_in_broken_stream_is_not_announced() -> None:
+    # Обрыв без finish_reason — retryable до анонса: FallbackLLM сможет повторить (AG-14).
+    server = Server(sse(chunk(tool_fragment(0, name="search", arguments="{}")), done=False))
+    received: list[LLMChunk] = []
+
+    with pytest.raises(LLMError) as raised:
+        async for item in llm_for(server).stream(request()):
+            received.append(item)
+
+    assert raised.value.retryable is True
+    assert received == []
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

@@ -2,7 +2,9 @@
 
 Подходит и для OpenAI-совместимых API через `base_url`. Чанки стрима собираются вручную:
 фрагменты tool_calls приходят по `index` — первый несёт id и имя, следующие дописывают
-аргументы. Ошибки SDK переводятся в `LLMError` с признаком `retryable`. Стрим без
+аргументы. Совместимые API бывают неаккуратны: имя повторяют в каждом фрагменте (берётся
+первое) или не присылают id (подставляется `call_<index>`, анонс — перед ResponseCompleted;
+REVIEW.md: AG-14). Ошибки SDK переводятся в `LLMError` с признаком `retryable`. Стрим без
 `finish_reason` (соединение закрыто раньше) — retryable `LLMError`, а не оборванный ответ.
 
 Параметры сэмплинга (ADR-0009): передаёт `temperature`, если она задана. Поддержка зависит от
@@ -99,6 +101,11 @@ class OpenAILLM:
                         yield item
         except APIError as error:
             raise to_llm_error(error, accumulator.usage) from error
+        # Сначала проверка конца стрима: оборванный стрим — retryable LLMError до анонсов,
+        # иначе FallbackLLM не повторит его (уже что-то отдано) и останется висячий tool_started.
+        accumulator.check_finished()
+        for item in accumulator.unannounced():
+            yield item
         yield ResponseCompleted(accumulator.response())
 
     async def _open(self, request: LLMRequest) -> AsyncStream[ChatCompletionChunk]:
@@ -256,8 +263,8 @@ class _StreamAccumulator:
                 if fragment.id:
                     call.id = fragment.id
                 if fragment.function is not None:
-                    if fragment.function.name:
-                        call.name += fragment.function.name
+                    if fragment.function.name and not call.name:
+                        call.name = fragment.function.name
                     if fragment.function.arguments:
                         call.arguments += fragment.function.arguments
                 if not call.announced and call.id and call.name:
@@ -268,11 +275,26 @@ class _StreamAccumulator:
                 self._finish_reason = choice.finish_reason
         return out
 
-    def response(self) -> LLMResponse:
+    def unannounced(self) -> list[LLMChunk]:
+        """Конец стрима: вызовам без id — `call_<index>`, и анонс тех, что не анонсированы."""
+        out: list[LLMChunk] = []
+        for index, call in sorted(self._calls.items()):
+            if not call.id:
+                call.id = f"call_{index}"
+            if not call.announced and call.name:
+                call.announced = True
+                out.append(ToolCallStarted(id=call.id, name=call.name))
+        return out
+
+    def check_finished(self) -> None:
         if self._finish_reason is None:
             raise LLMError(
                 "OpenAI: стрим закрыт без finish_reason", retryable=True, usage=self._usage
             )
+
+    def response(self) -> LLMResponse:
+        self.check_finished()
+        assert self._finish_reason is not None
         calls = tuple(
             ToolCall(
                 id=call.id,

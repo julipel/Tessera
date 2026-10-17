@@ -182,6 +182,50 @@ async def test_confirmed_create_lead_stores_lead_of_context_tenant() -> None:
     assert list(leads.labels[0][1]) == [f.name for f in form.fields]
 
 
+class BrokenLeads(Leads):
+    async def create(self, *args: Any, **kwargs: Any) -> Created:
+        raise TimeoutError("QueuePool limit reached")
+
+
+async def test_lead_store_failure_after_confirmation_is_reported_without_retry() -> None:
+    # Сбой записи заявки (REVIEW.md: TO-12): модели — ошибка без внутренностей и без
+    # повтора (исход неизвестен), заявки нет.
+    leads = BrokenLeads()
+
+    result = await ToolRegistry([create_lead_tool(FORMS, leads)]).execute_confirmed(
+        lead("consultation", ANNA), CTX
+    )
+
+    assert result.error is not None
+    assert (result.error.code, result.error.retryable) == ("upstream_error", False)
+    assert "QueuePool" not in result.error.message
+    assert leads.created == []
+
+
+async def test_second_confirmation_in_one_step_is_rejected() -> None:
+    # Два create_lead за шаг (REVIEW.md: AG-12, TO-12): ожидание — от первого, второй —
+    # ошибка без компонента; заявок нет.
+    leads = Leads()
+    second = ToolInvocation(
+        id="c2",
+        name=CREATE_LEAD,
+        arguments={"form_key": "callback", "fields": {"contact": "+79001112233"}},
+    )
+
+    first, rejected = await ToolRegistry([create_lead_tool(FORMS, leads)]).execute_many(
+        [lead("consultation", ANNA), second], CTX
+    )
+
+    assert first.state_patch is not None
+    assert first.state_patch["pending_confirmation"]["arguments"]["form_key"] == "consultation"
+    assert len(first.components) == 1
+    # forbidden, а не validation_error: ретраи хода на отказ не тратятся.
+    assert rejected.error is not None and rejected.error.code == "forbidden"
+    assert "уже показано подтверждение" in rejected.error.message
+    assert (rejected.components, rejected.state_patch) == ((), None)
+    assert leads.created == []
+
+
 async def test_create_lead_without_confirmation_does_not_store_lead() -> None:
     leads = Leads()
     tool = create_lead_tool(FORMS, leads)

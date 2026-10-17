@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_WIDGET_KEY, API_URL } from "./env";
 
 // Админка: вход, версии конфига, источники и диалоги тенанта e2e-admin (e2e/fixtures/admin-tenant.yaml).
@@ -86,7 +87,7 @@ test("CSP админки: обычная работа без нарушений 
   });
   await login(page);
   await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();
-  for (const name of ["Конфиг агента", "Источники", "Диалоги"]) {
+  for (const name of ["Конфиг агента", "Источники", "Диалоги", "Заявки"]) {
     await page.goto("/admin");
     await page.getByRole("link", { name }).first().click();
     await expect(page.getByRole("main")).not.toContainText("Загрузка…");
@@ -254,4 +255,85 @@ test("диалоги: список, ход по шагам, оценка отв�
   await page.getByRole("link", { name: "← Диалоги" }).click();
   await page.getByLabel("Только с плохой оценкой").check();
   await expect(page.getByRole("row", { name: new RegExp(question) })).toHaveCount(0);
+});
+
+test("заявки: список, поиск по номеру, фильтр по форме, переход в диалог, CSV", async ({ page }) => {
+  // Заявку создаёт настоящий ход: форма в виджете тенанта e2e-admin → подтверждение
+  // (мок модели: «консультация» → show_form, отправленная форма → create_lead).
+  const visitor = `Анна ${Date.now()}`;
+  await page.goto(`/?key=${ADMIN_WIDGET_KEY}`);
+  await page.getByLabel("Сообщение").fill("Хочу консультацию");
+  await page.getByLabel("Сообщение").press("Enter");
+  const form = page.getByRole("form", { name: "Консультация E2E" });
+  await form.getByLabel("Имя").fill(visitor);
+  await form.getByLabel("Телефон или Telegram").fill("=HYPERLINK(1)");
+  await form.getByRole("button", { name: "Отправить" }).click();
+  const confirm = page.getByRole("group", { name: "Подтверждение" });
+  await confirm.getByRole("button", { name: "Подтвердить" }).click();
+  await expect(page.locator('li[data-role="assistant"]').last()).toContainText("Заявка создана");
+
+  await login(page);
+  await page.getByRole("link", { name: "Заявки" }).click();
+  await expect(page.getByRole("heading", { name: /^Заявки/ })).toBeVisible();
+  const row = page.getByRole("row", { name: new RegExp(visitor) });
+  await expect(row).toContainText("Консультация E2E");
+  await expect(row).toContainText("Телефон или Telegram: =HYPERLINK(1)");
+  const number = /^№ (\d+)$/.exec((await row.getByRole("cell").first().textContent()) ?? "")?.[1];
+  expect(number).toBeTruthy();
+
+  // Поиск по номеру — одна заявка; несуществующий номер — «не найдено»; сброс — снова все.
+  const search = page.getByRole("search", { name: "Поиск по номеру" });
+  await search.getByLabel("Номер заявки").fill(number!);
+  await search.getByRole("button", { name: "Найти" }).click();
+  await expect(page.getByRole("table", { name: "Заявки" }).getByRole("row")).toHaveCount(2);
+  await expect(row).toBeVisible();
+  await search.getByLabel("Номер заявки").fill("2147483647");
+  await search.getByRole("button", { name: "Найти" }).click();
+  await expect(page.getByText("Заявок не найдено.")).toBeVisible();
+  await search.getByRole("button", { name: "Сбросить" }).click();
+  await expect(row).toBeVisible();
+
+  // Фильтр по форме — форма из загруженных заявок, запрос идёт с её ключом.
+  const filtered = page.waitForRequest((r) => new URL(r.url()).searchParams.get("form_key") === "consultation");
+  await page.getByLabel("Форма").selectOption({ label: "Консультация E2E" });
+  await filtered;
+  await expect(row).toBeVisible();
+
+  // CSV: имя файла, BOM для Excel, строка заявки с защитой от формулы.
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Скачать CSV" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("leads.csv");
+  const csv = await readFile((await download.path())!, "utf8");
+  expect(csv.startsWith("\uFEFF")).toBe(true);
+  const line = csv.split("\r\n").find((l) => l.includes(visitor));
+  expect(line?.startsWith(`${number};`)).toBe(true);
+  expect(line).toContain("'=HYPERLINK(1)");
+
+  // Ошибка выгрузки (422 — больше 10 000 заявок) — на странице, файл не скачивается.
+  await page.route(/\/leads\.csv/, (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "invalid_input", message: "Сузьте период" } }),
+    }),
+  );
+  let downloaded = false;
+  page.on("download", () => (downloaded = true));
+  await page.getByRole("button", { name: "Скачать CSV" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("Сузьте период");
+  expect(downloaded).toBe(false);
+  await page.unroute(/\/leads\.csv/);
+
+  // «С» позже «по» — ошибка до запроса.
+  await page.getByLabel("С", { exact: true }).fill("2026-10-02");
+  await page.getByLabel("По", { exact: true }).fill("2026-10-01");
+  await page.getByRole("button", { name: "Скачать CSV" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText("Дата «с» позже даты «по»");
+
+  // Переход в диалог заявки.
+  await row.getByRole("link", { name: "Открыть" }).click();
+  await expect(page.getByRole("heading", { name: /^Диалог/ })).toBeVisible();
+  await expect(page.getByText("Хочу консультацию").first()).toBeVisible();
 });

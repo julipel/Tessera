@@ -15,4 +15,11 @@ agent_config:
   prompt:
     tenant: Ты — консультант.
   tools:
-    builtin: [suggest_replies]  # ход с инструментом для разбора диалога в e2e
+    # suggest_replies — ход с инструментом для разбора диалога; форма и заявка — экран заявок
+    builtin: [suggest_replies, show_form, create_lead]
+  forms:
+    consultation:
+      title: Консультация E2E
+      fields:
+        - { name: name, label: Имя, kind: text, required: true }
+        - { name: contact, label: Телефон или Telegram, kind: text, required: true }

@@ -13,6 +13,7 @@ import type {
   AgentConfigVersionList,
   CreateAgentConfigRequest,
   CreateSourceRequest,
+  LeadList,
   MessageRating,
   RateMessageRequest,
   SourceDetail,
@@ -164,6 +165,35 @@ export class AdminApi {
     return { events, nextAfter: after };
   }
 
+  /** Заявки от новых к старым; `before` — `next_before` предыдущей страницы, `number` —
+   * заявка с этим номером. */
+  async listLeads(
+    tenantId: string,
+    options: { before?: string | null; formKey?: string | null; number?: number | null; limit?: number } = {},
+  ): Promise<LeadList> {
+    const query = new URLSearchParams();
+    if (options.before) query.set("before", options.before);
+    if (options.formKey) query.set("form_key", options.formKey);
+    if (options.number) query.set("number", String(options.number));
+    if (options.limit) query.set("limit", String(options.limit));
+    const suffix = query.size > 0 ? `?${query}` : "";
+    return (await this.request(`${leadsPath(tenantId)}${suffix}`)).json() as Promise<LeadList>;
+  }
+
+  /** CSV заявок для Excel (ADR-0045 п.4): `from` — включительно, `to` — не включая (ISO с
+   * поясом). Больше 10 000 заявок — ApiError 422. */
+  async exportLeads(
+    tenantId: string,
+    options: { from?: string | null; to?: string | null; formKey?: string | null } = {},
+  ): Promise<Blob> {
+    const query = new URLSearchParams();
+    if (options.from) query.set("from", options.from);
+    if (options.to) query.set("to", options.to);
+    if (options.formKey) query.set("form_key", options.formKey);
+    const suffix = query.size > 0 ? `?${query}` : "";
+    return (await this.request(`${leadsPath(tenantId)}.csv${suffix}`)).blob();
+  }
+
   /** Оценка ответа ассистента; повторная заменяет прежнюю. */
   async rateMessage(
     tenantId: string,
@@ -210,6 +240,10 @@ function filesPath(tenantId: string, sourceId: string, name?: string): string {
 function conversationsPath(tenantId: string, conversationId?: string): string {
   const base = `/v1/admin/tenants/${encodeURIComponent(tenantId)}/conversations`;
   return conversationId ? `${base}/${encodeURIComponent(conversationId)}` : base;
+}
+
+function leadsPath(tenantId: string): string {
+  return `/v1/admin/tenants/${encodeURIComponent(tenantId)}/leads`;
 }
 
 function ratingPath(tenantId: string, conversationId: string, messageId: string): string {

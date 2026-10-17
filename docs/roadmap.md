@@ -893,6 +893,13 @@
     встраивается где угодно), D-1…D-8 (Redis/Qdrant без авторизации и pickle в arq, Postgres
     суперпользователем, логи и память без лимитов, бэкап, файлы источников, порты dev-compose,
     IPv6), R-1 (`deploy-seed` затирает конфиг из админки и сроки хранения).
+  - [x] **P9-01am Изоляция хранилищ выкладки** (`REVIEW.md`: D-1, D-2, D-3, D-15, D-17).
+    Сети compose `edge` (caddy, web, api) и `backend` (api, worker, migrate, хранилища);
+    Redis с паролем, Qdrant с API-ключом и без телеметрии; api и worker ходят в Postgres ролью
+    приложения без DDL (`deploy/postgres/app-role.sh`, `make deploy-db-roles`), migrate —
+    владельцем, его пароль в окружение api/worker не попадает; production без пароля Redis
+    и ключа Qdrant не стартует; тесты конфига compose; дополнение ADR-0040. В `deploy/.env` —
+    `APP_DB_PASSWORD`, `REDIS_PASSWORD`, `QDRANT_API_KEY`.
   - [ ] **P9-01b Выкладка на сервер.** VPS и домен, `docs/deploy.md` «Первый запуск», сборка
     образов на сервере; DoD P9-01 (телефон из другой сети, стрим, карточки, админка).
     Попутно, если трогаем остановку: таймаут на закрытие ресурса в `close_all` (REVIEW.md: S-14).

@@ -146,14 +146,19 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_production(self) -> Self:
-        """В production — без пароля БД по умолчанию и только https-origin (S-17): забытая
-        переменная окружения не должна молча оставить настройки разработки. https://localhost
-        допустим — локальная проверка прод-стека (deploy.md)."""
+        """В production — без пароля БД по умолчанию, с паролем Redis и ключом Qdrant
+        (REVIEW.md: D-1, D-2) и только https-origin (S-17): забытая переменная окружения
+        не должна молча оставить настройки разработки. https://localhost допустим — локальная
+        проверка прод-стека (deploy.md)."""
         if self.app_env != "production":
             return self
         password = urlsplit(self.database_url).password
         if not password or password in _DEV_DB_PASSWORDS:
             raise ValueError("DATABASE_URL: в production нужен свой пароль БД")
+        if not urlsplit(self.redis_url).password:
+            raise ValueError("REDIS_URL: в production нужен пароль Redis")
+        if not secret_value(self.qdrant_api_key):
+            raise ValueError("QDRANT_API_KEY: в production нужен ключ Qdrant")
         for origin in self.cors_origins:
             if not origin.startswith("https://"):
                 raise ValueError(f"CORS_ORIGINS: {origin!r} — в production только https")

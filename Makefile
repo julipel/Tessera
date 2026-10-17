@@ -7,7 +7,7 @@ HAS_WEB := $(wildcard $(WEB)/package.json)
 
 .PHONY: up down ps install check check-fast test lint-py typecheck-py arch lint-web typecheck-web test-web \
         contracts contracts-check migrate migration eval eval-diff loadtest demo-public seed sync retention pilot admin-user dev-api dev-web worker \
-        deploy-build deploy-up deploy-seed deploy-sync deploy-retention deploy-admin-user deploy-ps deploy-logs deploy-backup
+        deploy-build deploy-up deploy-seed deploy-sync deploy-retention deploy-admin-user deploy-ps deploy-logs deploy-db-roles deploy-backup
 
 # --wait: команда завершается, когда все сервисы прошли healthcheck
 up:
@@ -161,6 +161,13 @@ deploy-ps:
 # make deploy-logs [svc=api]
 deploy-logs:
 	$(DEPLOY) logs -f --tail 200 $(svc)
+
+# Роль приложения в Postgres (D-3): для тома, созданного до неё, и после смены APP_DB_PASSWORD.
+# Новый том получает её сам (docker-entrypoint-initdb.d). up пересоздаёт postgres, если
+# изменились deploy/.env или compose: exec видит окружение контейнера с момента создания.
+deploy-db-roles:
+	$(DEPLOY) up -d --wait postgres
+	$(DEPLOY) exec -T postgres sh /docker-entrypoint-initdb.d/10-app-role.sh
 
 # Дамп Postgres в backups/<время>.sql.gz на хосте (вне git).
 deploy-backup:

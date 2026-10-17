@@ -24,12 +24,20 @@
 ```bash
 git clone <репозиторий> tessera && cd tessera
 cp deploy/.env.example deploy/.env
-$EDITOR deploy/.env    # DOMAIN, POSTGRES_PASSWORD (openssl rand -hex 24), ключи LLM
+$EDITOR deploy/.env    # DOMAIN, четыре секрета хранилищ (openssl rand -hex 24), ключи LLM
 make deploy-up         # сборка образов, миграции, запуск; ждёт healthcheck
 make deploy-seed       # тенанты из config/tenants; новые ключи виджета печатаются
 make deploy-sync       # индексация источников (каталог, база знаний)
 make deploy-admin-user email=you@example.com args="--superadmin"
 ```
+
+Секреты хранилищ: `POSTGRES_PASSWORD` — владелец схемы (только migrate), `APP_DB_PASSWORD` —
+роль приложения `APP_DB_USER` (api и worker, без DDL), `REDIS_PASSWORD`, `QDRANT_API_KEY`.
+Роль приложения создаётся при первом запуске тома Postgres (`deploy/postgres/app-role.sh`).
+Том, созданный до неё, или смена `APP_DB_PASSWORD` — `make deploy-db-roles` (сама
+пересоздаёт postgres по новому `deploy/.env`), затем `make deploy-up`. Пароль владельца
+в окружение api и worker не попадает. `app.cli ensure-db` (создание БД) — только для
+разработки: у роли приложения нет `CREATEDB`.
 
 При `APP_ENV=production` API и воркер не стартуют с паролем БД `app` (или пустым) и
 с не-https адресом в `CORS_ORIGINS` — это значения разработки, забытые в env.
@@ -88,8 +96,13 @@ make deploy-seed       # если менялись config/tenants или data/pi
 
 - `deploy/.env` — только на сервере, права `600`. В git — только `deploy/.env.example`.
 - Наружу открыты только 80 и 443. Postgres, Redis, Qdrant и порт API не опубликованы.
+- Две сети compose (дополнение ADR-0040): `edge` — caddy, web, api; `backend` — api, worker,
+  migrate, Postgres, Redis, Qdrant. Web и Caddy, открытые в интернет, хранилищ не видят.
+  Redis — с паролем (arq разбирает задачи через pickle: запись в очередь равна выполнению
+  кода в воркере), Qdrant — с API-ключом, api и worker ходят в Postgres ролью без DDL
+  и прав суперпользователя. Телеметрия Qdrant выключена.
 - Лимиты частоты (ADR-0030) считаются по IP посетителя из `X-Forwarded-For` Caddy. API доверяет
-  этому заголовку только из своей подсети compose (`COMPOSE_SUBNET` в `deploy/.env`, по
+  этому заголовку только из подсети сети `edge` (`COMPOSE_SUBNET` в `deploy/.env`, по
   умолчанию 172.30.240.0/24 — из стандартных пулов Docker; менять, если пересекается с
   сетями сервера или других проектов). Смена подсети у уже созданного стека — через
   `docker compose … down` и `make deploy-up` (сеть пересоздаётся). CDN перед Caddy — только с
@@ -111,7 +124,8 @@ make deploy-seed       # если менялись config/tenants или data/pi
 
 ```bash
 cd deploy
-export DOMAIN=localhost HSTS_MAX_AGE=0 POSTGRES_PASSWORD=local DEPLOY_ENV_FILE=../.env
+export DOMAIN=localhost HSTS_MAX_AGE=0 POSTGRES_PASSWORD=local APP_DB_PASSWORD=local-app \
+  REDIS_PASSWORD=local QDRANT_API_KEY=local DEPLOY_ENV_FILE=../.env
 docker compose -f compose.prod.yml up -d --build --wait
 docker compose -f compose.prod.yml run --rm api python -m app.cli seed
 docker compose -f compose.prod.yml run --rm api python -m app.cli sync

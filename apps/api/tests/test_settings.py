@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import SecretStr, ValidationError
@@ -19,6 +20,8 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("LOG_LEVEL", "WARNING")
     monkeypatch.setenv("DATABASE_URL", PROD_DATABASE_URL)
+    monkeypatch.setenv("REDIS_URL", PROD_REDIS_URL)
+    monkeypatch.setenv("QDRANT_API_KEY", "s3cret")
     monkeypatch.setenv("CORS_ORIGINS", '["https://chat.example.com"]')
 
     settings = Settings(_env_file=None)
@@ -29,6 +32,13 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 PROD_DATABASE_URL = "postgresql+asyncpg://app:s3cret@postgres:5432/app"
+PROD_REDIS_URL = "redis://:s3cret@redis:6379/0"
+# Хранилища с паролями — остальные проверки production проходят.
+PROD_STORES: dict[str, Any] = {
+    "database_url": PROD_DATABASE_URL,
+    "redis_url": PROD_REDIS_URL,
+    "qdrant_api_key": "s3cret",
+}
 
 
 @pytest.mark.parametrize(
@@ -43,8 +53,8 @@ def test_production_rejects_dev_database_password(database_url: str) -> None:
     with pytest.raises(ValidationError, match="DATABASE_URL"):
         Settings(
             _env_file=None,
+            **{**PROD_STORES, "database_url": database_url},
             app_env="production",
-            database_url=database_url,
             cors_origins=["https://chat.example.com"],
         )
 
@@ -54,8 +64,8 @@ def test_production_rejects_http_cors_origin(origin: str) -> None:
     with pytest.raises(ValidationError, match="CORS_ORIGINS"):
         Settings(
             _env_file=None,
+            **PROD_STORES,
             app_env="production",
-            database_url=PROD_DATABASE_URL,
             cors_origins=["https://chat.example.com", origin],
         )
 
@@ -77,11 +87,34 @@ def test_production_allows_https_localhost() -> None:
     """Проверка прод-стека локально (deploy.md): DOMAIN=localhost."""
     settings = Settings(
         _env_file=None,
+        **PROD_STORES,
         app_env="production",
-        database_url=PROD_DATABASE_URL,
         cors_origins=["https://localhost"],
     )
     assert settings.cors_origins == ["https://localhost"]
+
+
+@pytest.mark.parametrize(
+    ("override", "field"),
+    [
+        ({"redis_url": "redis://redis:6379/0"}, "REDIS_URL"),
+        ({"redis_url": "redis://:@redis:6379/0"}, "REDIS_URL"),
+        ({"qdrant_api_key": None}, "QDRANT_API_KEY"),
+        ({"qdrant_api_key": ""}, "QDRANT_API_KEY"),
+    ],
+)
+def test_production_requires_redis_password_and_qdrant_key(
+    override: dict[str, Any], field: str
+) -> None:
+    """Redis без пароля — запись в очередь arq (pickle) из соседнего контейнера, Qdrant без
+    ключа — векторы всех тенантов (REVIEW.md: D-1, D-2)."""
+    with pytest.raises(ValidationError, match=field):
+        Settings(
+            _env_file=None,
+            **{**PROD_STORES, **override},
+            app_env="production",
+            cors_origins=["https://chat.example.com"],
+        )
 
 
 def test_dev_defaults_allowed_outside_production() -> None:

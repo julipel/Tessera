@@ -5,9 +5,17 @@ name: tessera-prod
 
 x-app-env: &app-env
   APP_ENV: production
-  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-app}
-  REDIS_URL: redis://redis:6379/0
+  # api и worker — ролью приложения без DDL (только DML); migrate — владельцем схемы
+  # (deploy/postgres/app-role.sh, REVIEW.md: D-3).
+  DATABASE_URL: postgresql+asyncpg://${APP_DB_USER:-tessera_app}:${APP_DB_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-app}
+  # Пароль Redis и ключ Qdrant: в сети backend их знают только api и worker (REVIEW.md: D-1, D-2).
+  REDIS_URL: redis://:${REDIS_PASSWORD:?}@redis:6379/0
   QDRANT_URL: http://qdrant:6333
+  QDRANT_API_KEY: ${QDRANT_API_KEY:?}
+  # env_file отдаёт сервису весь deploy/.env: пароль владельца (суперпользователя Postgres)
+  # нужен только compose для DATABASE_URL migrate — в окружении контейнеров его нет, иначе
+  # RCE в api или worker обходил бы роль приложения (D-3).
+  POSTGRES_PASSWORD: ""
   KNOWLEDGE_FILES_DIR: /srv/data/knowledge
   # Свой веб-чат и витрины — на том же origin (ADR-0022, дополнение P9-00b).
   CORS_ORIGINS: '["https://${DOMAIN:?}"]'
@@ -27,6 +35,7 @@ x-app: &app
   env_file: ${DEPLOY_ENV_FILE:-.env}
   environment: *app-env
   restart: unless-stopped
+  networks: [backend]
 
 services:
   postgres:
@@ -35,8 +44,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_DB: ${POSTGRES_DB:-app}
+      # Роль приложения создаёт app-role.sh при первом запуске тома; для уже созданного —
+      # make deploy-db-roles (docs/deploy.md).
+      APP_DB_USER: ${APP_DB_USER:-tessera_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./postgres/app-role.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+    networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -46,12 +61,25 @@ services:
 
   redis:
     image: redis:7-alpine
-    # AOF: очередь синхронизаций (arq) переживает перезапуск.
-    command: ["redis-server", "--appendonly", "yes"]
+    # AOF: очередь синхронизаций (arq) переживает перезапуск. Пароль обязателен: arq
+    # разбирает задачи через pickle — запись в очередь равна выполнению кода в воркере (D-1).
+    # Пароль — конфигом через stdin, не в argv redis-server.
+    command:
+      - sh
+      - -c
+      - |
+        exec redis-server - --appendonly yes <<EOF
+        requirepass $$REDIS_PASSWORD
+        EOF
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      # redis-cli в healthcheck берёт пароль отсюда, не из argv.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?}
     volumes:
       - redis-data:/data
+    networks: [backend]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -59,10 +87,14 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.19.1
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?}
+      QDRANT__TELEMETRY_DISABLED: "true"
     volumes:
       - qdrant-data:/qdrant/storage
+    networks: [backend]
     healthcheck:
-      # В образе нет curl/wget — проверяем HTTP через bash /dev/tcp.
+      # В образе нет curl/wget — проверяем HTTP через bash /dev/tcp; /readyz — без ключа.
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 && printf \"GET /readyz HTTP/1.0\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
       interval: 5s
       timeout: 3s
@@ -74,6 +106,9 @@ services:
     <<: *app
     command: ["alembic", "upgrade", "head"]
     restart: "no"
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-app}
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,6 +120,8 @@ services:
     # (LANGFUSE_TIMEOUT_S — на каждую пачку, общего предела у SDK нет; 60 с — потолок, дальше
     # SIGKILL). По умолчанию Docker ждёт 10 с — трейсы последних ходов терялись (O-12).
     stop_grace_period: 60s
+    # edge — от Caddy и web (X-Forwarded-For доверяется только ей), backend — к хранилищам.
+    networks: [edge, backend]
     volumes:
       - knowledge-files:/srv/data/knowledge
     depends_on:
@@ -123,6 +160,7 @@ services:
     environment:
       # CSP страницы /widget (proxy.ts) — запрос к API внутри сети compose.
       API_INTERNAL_URL: http://api:8000
+    networks: [edge]
     depends_on:
       api:
         condition: service_healthy
@@ -146,6 +184,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    networks: [edge]
     depends_on:
       api:
         condition: service_healthy
@@ -153,13 +192,17 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-# Своя подсеть: API доверяет X-Forwarded-For только адресам из неё (FORWARDED_ALLOW_IPS).
-# Пересекается с сетями сервера или других compose-проектов — задать COMPOSE_SUBNET.
+# Две сети (дополнение ADR-0040, REVIEW.md: D-1): web и Caddy, открытые в интернет, не видят
+# Postgres, Redis и Qdrant. backend не internal — api и worker ходят к LLM и сайтам источников.
+# edge — своя подсеть: API доверяет X-Forwarded-For только адресам из неё
+# (FORWARDED_ALLOW_IPS). Пересекается с сетями сервера или других compose-проектов —
+# задать COMPOSE_SUBNET.
 networks:
-  default:
+  edge:
     ipam:
       config:
         - subnet: ${COMPOSE_SUBNET:-172.30.240.0/24}
+  backend:
 
 volumes:
   postgres-data:

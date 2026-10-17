@@ -21,11 +21,13 @@ def _fail_with_contact() -> None:
 
 
 def _production_settings() -> Settings:
-    # Production требует своего пароля БД и не-локальных origin (S-17).
+    # Production требует своих паролей хранилищ и не-локальных origin (S-17, D-1, D-2).
     return Settings(
         _env_file=None,
         app_env="production",
         database_url="postgresql+asyncpg://app:s3cret@postgres:5432/app",
+        redis_url="redis://:s3cret@redis:6379/0",
+        qdrant_api_key="s3cret",
         cors_origins=["https://chat.example.com"],
     )
 

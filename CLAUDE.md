@@ -44,7 +44,7 @@
 
 ## Стек
 Python 3.12, uv, FastAPI, SQLAlchemy 2 (async), Alembic, PostgreSQL 16, Redis, Qdrant, arq.
-Next.js (App Router) + TypeScript, pnpm, Tailwind, shadcn/ui. Тесты: pytest, Playwright.
+Next.js (App Router) + TypeScript, pnpm, Tailwind. Тесты: pytest, Playwright.
 Версии зафиксированы в lock-файлах.
 
 ## Стиль

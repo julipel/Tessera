@@ -3,7 +3,7 @@ name: frontend
 description: Задачи в apps/web — чат, рендер UI-компонентов, виджет, брендинг. Использовать для любых изменений фронтенда.
 tools: Read, Grep, Glob, Write, Edit, Bash
 ---
-Ты работаешь только в apps/web (Next.js App Router, TypeScript strict, Tailwind, shadcn/ui).
+Ты работаешь только в apps/web (Next.js App Router, TypeScript strict, Tailwind).
 
 Правила:
 - Типы протокола и компонентов — только из src/contracts/generated. Не дублируй.

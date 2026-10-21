@@ -30,8 +30,12 @@ $EDITOR deploy/.env    # DOMAIN, ACME_EMAIL, четыре секрета хра�
 make deploy-up         # сборка образов, миграции, запуск; ждёт healthcheck
 make deploy-seed       # тенанты из config/tenants; новые ключи виджета печатаются
 make deploy-sync       # индексация источников (каталог, база знаний)
-make deploy-admin-user email=you@example.com args="--superadmin"
+make deploy-admin-user email=you@example.com args="--superadmin --tenant demo-beauty=editor --tenant demo-garden=editor"
 ```
+
+Роли в тенантах нужны и суперадмину: списка всех тенантов для него пока нет, без `--tenant`
+админка пустая («Нет ролей в тенантах»). Существующему пользователю роли выдаёт та же команда,
+пароль она не спрашивает (смена пароля — `--reset-password`).
 
 Секреты хранилищ: `POSTGRES_PASSWORD` — владелец схемы (только migrate), `APP_DB_PASSWORD` —
 роль приложения `APP_DB_USER` (api и worker, без DDL), `REDIS_PASSWORD`, `QDRANT_API_KEY`.

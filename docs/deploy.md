@@ -16,7 +16,9 @@
 
 - VPS с Linux: 2 vCPU, 4 ГБ RAM, 20 ГБ диска. Docker Engine с плагином compose v2, git, make.
 - Домен: A-запись (и AAAA, если есть IPv6) указывает на IP сервера. Входящие 80 и 443 (TCP
-  и UDP) открыты — Let's Encrypt проверяет домен по 80.
+  и UDP) открыты — Let's Encrypt проверяет домен по 80. Запись `www` — туда же: Caddy
+  выпускает сертификат и на `www.<домен>` и редиректит с него на основной домен (без неё —
+  ошибки ACME для www в логах Caddy, основной домен работает).
 - С сервера доступны API провайдеров LLM и эмбеддингов (`OPENAI_*` и т. д.).
 
 ## Первый запуск
@@ -58,6 +60,7 @@ make deploy-admin-user email=you@example.com args="--superadmin"
 git pull
 make deploy-up         # пересборка; migrate применяет новые миграции до старта api/worker
 make deploy-seed       # если менялись config/tenants или data/pilot
+docker image prune -f && docker builder prune -f   # старые образы и кеш сборки: диск небольшой
 ```
 
 Seed не затирает конфиг, изменённый или откаченный в админке. Если YAML изменился, он пишет

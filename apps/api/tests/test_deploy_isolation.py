@@ -94,3 +94,9 @@ def test_caddy_requires_acme_email() -> None:
     caddy = _services()["caddy"]
     assert caddy["environment"]["ACME_EMAIL"] == "${ACME_EMAIL:?}"
     assert "email {$ACME_EMAIL}" in (ROOT / "deploy/Caddyfile").read_text()
+
+
+def test_caddy_redirects_www_to_domain() -> None:
+    """www ведёт на основной домен постоянным редиректом с путём: один origin у витрин."""
+    caddyfile = (ROOT / "deploy/Caddyfile").read_text()
+    assert "www.{$DOMAIN} {\n\tredir https://{$DOMAIN}{uri} permanent\n}" in caddyfile

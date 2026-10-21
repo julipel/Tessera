@@ -100,3 +100,10 @@ def test_caddy_redirects_www_to_domain() -> None:
     """www ведёт на основной домен постоянным редиректом с путём: один origin у витрин."""
     caddyfile = (ROOT / "deploy/Caddyfile").read_text()
     assert "www.{$DOMAIN} {\n\tredir https://{$DOMAIN}{uri} permanent\n}" in caddyfile
+
+
+def test_env_example_has_no_empty_openai_base_url() -> None:
+    """SDK OpenAI берёт OPENAI_BASE_URL из окружения в обход настроек: пустая строка из
+    deploy/.env (env_file) — запросы без адреса, эмбеддинги и ходы падают с APIConnectionError."""
+    lines = (ROOT / "deploy/.env.example").read_text().splitlines()
+    assert "OPENAI_BASE_URL=" not in lines
